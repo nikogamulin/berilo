@@ -1,4 +1,4 @@
-# Berilo sync API contract — v1
+# Berilo sync API contract — v1.1 (post-review)
 
 > Implementation-ready contract for `berilo-cloud` (private repo). This
 > document is the boundary artifact: the private repo implements *from* this
@@ -11,6 +11,11 @@
 > across every table) and the synthetic 2500-row pagination-completeness
 > test run against the live Supabase project in `berilo-cloud` — that half
 > of S3.1's Verify line is Supervisor/infra-gated, not exercised here.
+>
+> **v1.1 note.** `berilo-cloud` has not implemented against this contract
+> yet, so this is a pre-implementation revision fixing gaps found in
+> plan-critic review (F1–F13 below), not a breaking change to a deployed
+> API. The wire version stays `/api/v1/*` (§6).
 
 ## 1. Overview
 
@@ -46,8 +51,8 @@ Web app    ──┘        (Vercel)         (thin)      └─   auth = Clerk J
 |---|---|---|
 | `profiles` | — (no local entity; account-level) | Clerk user id is the PK |
 | `books_metadata` | `BookEntity` | `content_hash` = `BookEntity.id` |
-| `highlights` | `HighlightEntity` | one row serves both highlights and notes — `note` is nullable, matching Android's merged model |
-| `vocabulary` | `DictionaryEntryEntity` | see **[OPEN-1]** below |
+| `highlights` | `HighlightEntity` | one row serves both highlights and notes — `note` is nullable, matching Android's merged model; see **[OPEN-4]** re: soft-delete/outbox |
+| `vocabulary` | `DictionaryEntryEntity` | see **[OPEN-1]** (raw sentence) and **[OPEN-4]** (updatedAt) below |
 | `progress` | `BookEntity.progressionJson` / `lastOpenedAt` | device remains source of truth for reading position (spec §6); sync is best-effort cross-device continuity only |
 | `shelves` / `shelf_items` | — (new, web/social-layer only) | not currently modeled in `android/`; S3.4 territory |
 | `ratings` | — (new, web/social-layer only) | |
@@ -90,17 +95,51 @@ than guessing, since it changes the RLS policy shape below.
   as a `conflict` and the response carries the server's current row so the
   client overwrites its local copy. Clients supply `updated_at` from the
   device's own UTC clock; the server does not reconcile clock skew beyond
-  this comparison (documented risk, not solved by this contract — devices
-  are expected to be NTP-synced).
+  this comparison — see **[OPEN-5]** (§7), this is a known data-loss risk,
+  not fully solved by v1.
 - **Offline queue:** the app queues local mutations and replays them
   through `/sync/push` in `updated_at` order on reconnect; §2 batches are
   designed to make one queue flush a small number of requests.
-- **Tombstones:** `deleted_at timestamptz` on every synced table. A pull
-  response includes tombstoned rows (so a receiving device deletes its
-  local copy) until an out-of-band retention job purges them — no retention
-  window is fixed by this contract; `berilo-cloud` may add one without
-  breaking clients since tombstone presence, not absence, is what clients
-  rely on.
+- **Tombstones and delete-wins:** `deleted_at timestamptz` on every synced
+  table except `progress` (see below). A pull response includes tombstoned
+  rows (so a receiving device deletes its local copy) until an out-of-band
+  retention job purges them — no retention window is fixed by this
+  contract; `berilo-cloud` may add one without breaking clients since
+  tombstone presence, not absence, is what clients rely on. **Once
+  `deleted_at` is set, a plain `upsert` can never clear it** — pure LWW-by-
+  timestamp would let a queued edit that was created *before* a delete (but
+  replayed *after* it, e.g. a device that was offline through both events)
+  silently resurrect a tombstoned row. Deletion beats a same-or-later
+  concurrent upsert by design; resurrecting a row requires the push item to
+  set `undelete: true` explicitly (§3's `/sync/push` schema), which the
+  server still subjects to the normal `updated_at` LWW check against the
+  tombstone. This is enforced at the database layer, not just in API code:
+  every tombstone-bearing table carries an `enforce_delete_wins` trigger
+  (§2) that raises unless the request set `berilo.allow_undelete = true`
+  for that transaction (the push handler sets it only when the item's
+  `undelete` flag is `true`).
+- **`progress` is upsert-only.** It has no `deleted_at` column and no
+  delete operation — a reading-position row is simply overwritten as the
+  reader advances; there is no "un-reading" a book. `op: delete` on
+  `entity: progress` is rejected with `validation_error`.
+- **Client-generated ids.** Every uuid-keyed entity (`highlights`,
+  `shelves`, `shelf_items`, `shared_passages`) requires the client to
+  generate and supply `id` in its `/sync/push` item — the server never
+  relies on the DDL's `gen_random_uuid()` default on the push path (that
+  default exists only for direct/admin SQL, e.g. the profile-provisioning
+  webhook in §3.1). Client-generated ids make push idempotent under retry:
+  replaying the same queued item after a timed-out request upserts the
+  same row instead of creating a duplicate.
+- **Push ordering.** A single `/sync/push` request's `entities` map is
+  applied server-side in a fixed dependency order, regardless of key order
+  in the request body: `books_metadata` → `shelves` → (`highlights`,
+  `progress`, `ratings`, `shelf_items`, in any order — each depends only on
+  `books_metadata` and/or `shelves`) → `shared_passages` (soft-depends on
+  `highlights`). An item whose parent hasn't synced yet (FK violation, e.g.
+  a `highlights` row pushed before its `books_metadata` row exists on the
+  server) comes back `status: error`; the client retries it on the next
+  push once the parent has landed — the offline queue's FIFO order
+  normally prevents this, but a partial/retried batch can still hit it.
 
 ## 2. SQL schema (Postgres / Supabase)
 
@@ -114,6 +153,23 @@ create or replace function set_updated_at()
 returns trigger as $$
 begin
   new.updated_at = now();
+  return new;
+end;
+$$ language plpgsql;
+
+-- Shared trigger: delete-wins (§1.3). Blocks any UPDATE that would clear a
+-- tombstone unless the API explicitly opted in for this transaction via
+-- `set local berilo.allow_undelete = 'true'` (only done for a push item
+-- with `undelete: true`, itself still subject to normal LWW).
+create or replace function enforce_delete_wins()
+returns trigger as $$
+begin
+  if old.deleted_at is not null
+     and new.deleted_at is null
+     and coalesce(current_setting('berilo.allow_undelete', true), 'false') <> 'true'
+  then
+    raise exception 'cannot clear deleted_at without explicit undelete (berilo.allow_undelete)';
+  end if;
   return new;
 end;
 $$ language plpgsql;
@@ -169,6 +225,10 @@ create trigger books_metadata_set_updated_at
   before update on books_metadata
   for each row execute function set_updated_at();
 
+create trigger books_metadata_enforce_delete_wins
+  before update on books_metadata
+  for each row execute function enforce_delete_wins();
+
 create index books_metadata_user_updated_idx
   on books_metadata (user_id, updated_at, content_hash);
 
@@ -202,6 +262,10 @@ create table highlights (
 create trigger highlights_set_updated_at
   before update on highlights
   for each row execute function set_updated_at();
+
+create trigger highlights_enforce_delete_wins
+  before update on highlights
+  for each row execute function enforce_delete_wins();
 
 create index highlights_user_updated_idx
   on highlights (user_id, updated_at, id);
@@ -241,6 +305,10 @@ create trigger vocabulary_set_updated_at
   before update on vocabulary
   for each row execute function set_updated_at();
 
+create trigger vocabulary_enforce_delete_wins
+  before update on vocabulary
+  for each row execute function enforce_delete_wins();
+
 create index vocabulary_user_updated_idx
   on vocabulary (user_id, updated_at, word, sentence_hash, lang, model);
 
@@ -253,7 +321,8 @@ create policy vocabulary_owner_crud on vocabulary
 
 -- ---------------------------------------------------------------------
 -- progress — per user+book locator + percent. Device is source of truth;
--- this is cross-device continuity only (spec §6).
+-- this is cross-device continuity only (spec §6). Upsert-only (§1.3): no
+-- deleted_at, no enforce_delete_wins trigger — there is no delete op.
 -- ---------------------------------------------------------------------
 create table progress (
   user_id      text not null references profiles(id) on delete cascade,
@@ -306,6 +375,10 @@ create trigger shelves_set_updated_at
   before update on shelves
   for each row execute function set_updated_at();
 
+create trigger shelves_enforce_delete_wins
+  before update on shelves
+  for each row execute function enforce_delete_wins();
+
 create index shelves_user_updated_idx
   on shelves (user_id, updated_at, id);
 
@@ -342,16 +415,32 @@ create trigger shelf_items_set_updated_at
   before update on shelf_items
   for each row execute function set_updated_at();
 
+create trigger shelf_items_enforce_delete_wins
+  before update on shelf_items
+  for each row execute function enforce_delete_wins();
+
 create index shelf_items_user_updated_idx
   on shelf_items (user_id, updated_at, id);
 create index shelf_items_shelf_idx on shelf_items (shelf_id);
 
 alter table shelf_items enable row level security;
 
+-- with check also verifies shelf_id actually belongs to the caller, not
+-- just that the row's own user_id claims to: without this, a client could
+-- insert a row with its own user_id but someone else's shelf_id, injecting
+-- unwanted items into a stranger's public shelf (the public-select policy
+-- below joins on shelf_id, not on shelf_items.user_id).
 create policy shelf_items_owner_crud on shelf_items
   for all
   using (user_id = (auth.jwt() ->> 'sub'))
-  with check (user_id = (auth.jwt() ->> 'sub'));
+  with check (
+    user_id = (auth.jwt() ->> 'sub')
+    and exists (
+      select 1 from shelves s
+      where s.id = shelf_items.shelf_id
+        and s.user_id = (auth.jwt() ->> 'sub')
+    )
+  );
 
 create policy shelf_items_select_public on shelf_items
   for select using (
@@ -388,6 +477,10 @@ create trigger ratings_set_updated_at
   before update on ratings
   for each row execute function set_updated_at();
 
+create trigger ratings_enforce_delete_wins
+  before update on ratings
+  for each row execute function enforce_delete_wins();
+
 create index ratings_user_updated_idx
   on ratings (user_id, updated_at, book_hash);
 create index ratings_public_book_idx
@@ -422,7 +515,7 @@ create table shared_passages (
   book_authors   text not null,
   highlight_id   uuid references highlights(id) on delete set null,
   excerpt        text not null check (char_length(excerpt) <= 500),
-  is_public      boolean not null default true,
+  is_public      boolean not null default false,   -- private-by-default (spec §6.1)
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
   deleted_at     timestamptz
@@ -431,6 +524,10 @@ create table shared_passages (
 create trigger shared_passages_set_updated_at
   before update on shared_passages
   for each row execute function set_updated_at();
+
+create trigger shared_passages_enforce_delete_wins
+  before update on shared_passages
+  for each row execute function enforce_delete_wins();
 
 create index shared_passages_user_updated_idx
   on shared_passages (user_id, updated_at, id);
@@ -458,16 +555,45 @@ create policy shared_passages_select_public on shared_passages
 **RLS summary (owner-only unless noted):** every table restricts
 `insert`/`update`/`delete` to `user_id = auth.jwt()->>'sub'`. The *only*
 public `select` grants are: `profiles` (where `is_public`), `shelves` +
-`shelf_items` (shelf `is_public` AND owner profile `is_public`), `ratings`
-(row `is_public` AND owner profile `is_public`), `shared_passages` (row
-`is_public` AND owner profile `is_public`). `books_metadata`, `highlights`,
+`shelf_items` (shelf `is_public` AND owner profile `is_public`; `shelf_items`
+insert/update additionally requires the target `shelf_id` to already belong
+to the caller, closing a cross-user injection where a client could otherwise
+attach its own rows to someone else's public shelf), `ratings` (row
+`is_public` AND owner profile `is_public`), `shared_passages` (row
+`is_public` AND owner profile `is_public`; `is_public` defaults to `false`
+— row creation alone does **not** make a passage public, matching spec
+§6.1's private-by-default rule; the client sets `is_public: true`
+explicitly when the user shares). `books_metadata`, `highlights`,
 `vocabulary`, `progress` have **no** public policy — never readable outside
 the owner, even if the profile is public, matching spec §6.1's "book files
 never touch the service" and "book metadata only" on shelves (which is why
 those columns are denormalized onto `shelf_items`/`ratings` instead of
-requiring a public join into `books_metadata`).
+requiring a public join into `books_metadata`). Every tombstone-bearing
+table also carries an `enforce_delete_wins` trigger (delete-wins, §1.3) —
+independent of RLS, it blocks any `UPDATE` from clearing `deleted_at`
+outside the explicit undelete path.
 
 ## 3. REST endpoints (OpenAPI 3.1)
+
+### 3.1 Profile provisioning
+
+`profiles` rows are never created by the client directly (the
+`profiles_upsert_own` RLS policy in §2 is a defensive fallback, not the
+primary path). Provisioning is server-side:
+
+1. **Clerk `user.created` webhook** (received by a `berilo-cloud` API route,
+   verified via Clerk's webhook signing secret) inserts the `profiles` row
+   using the Supabase **service-role key** (a trusted server context that
+   bypasses RLS by design — the only place in this contract that does):
+   `id` = the Clerk user id, `handle` = a slugified default from Clerk's
+   `username` if present, else `user_id` with a random suffix, retried on
+   the `handle` unique-constraint violation, `display_name` = Clerk's
+   `first_name`/`last_name` or `username` fallback, `is_public` = `false`.
+2. **`PATCH /profile`** (below) lets the signed-in user change `handle`
+   (validated as a lowercase URL-safe slug; a taken handle 409s),
+   `display_name`, and `is_public`. This goes through the normal
+   Clerk-JWT-authenticated path and relies on the existing
+   `profiles_update_own` RLS policy — no service-role key involved.
 
 ```yaml
 openapi: 3.1.0
@@ -555,13 +681,33 @@ paths:
                     type: array
                     items:
                       type: object
-                      required: [op, updated_at]
+                      required: [op, id, updated_at]
                       properties:
                         op: { type: string, enum: [upsert, delete] }
+                        id:
+                          type: string
+                          description: >
+                            Client-generated. For uuid-keyed entities
+                            (highlights, shelves, shelf_items,
+                            shared_passages) a client-generated UUID. For
+                            composite-PK entities (books_metadata,
+                            vocabulary, progress, ratings) the natural key
+                            fields (e.g. content_hash) instead — see §4's
+                            per-entity cursor table for the exact tuple.
                         updated_at:
                           type: string
                           format: date-time
                           description: Client UTC clock; drives LWW.
+                        undelete:
+                          type: boolean
+                          default: false
+                          description: >
+                            Only meaningful with op: upsert against a
+                            tombstoned row (deleted_at set). See §1.3
+                            delete-wins: without this, such an upsert is
+                            rejected rather than silently resurrecting the
+                            row. Invalid (validation_error) on entity:
+                            progress, which has no delete op.
                       additionalProperties: true
       responses:
         "200":
@@ -625,13 +771,43 @@ paths:
                       display_name: { type: string }
                   shelves:
                     type: array
-                    items: { type: object }
+                    description: >
+                      Public shelf projection. book_hash is never included
+                      — the public surface is display metadata only.
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        kind: { type: string }
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              book_title: { type: string }
+                              book_authors: { type: string }
+                              added_at: { type: string, format: date-time }
                   ratings:
                     type: array
-                    items: { type: object }
+                    description: book_hash excluded, see shelves above.
+                    items:
+                      type: object
+                      properties:
+                        book_title: { type: string }
+                        book_authors: { type: string }
+                        stars: { type: integer }
+                        review: { type: string, nullable: true }
+                        created_at: { type: string, format: date-time }
                   shared_passages:
                     type: array
-                    items: { type: object }
+                    description: book_hash excluded, see shelves above.
+                    items:
+                      type: object
+                      properties:
+                        book_title: { type: string }
+                        book_authors: { type: string }
+                        excerpt: { type: string }
+                        created_at: { type: string, format: date-time }
                   next_cursor: { type: string, nullable: true }
         "404": { description: Profile not found or not public. }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -657,8 +833,50 @@ paths:
                 properties:
                   passages:
                     type: array
-                    items: { type: object }
+                    description: >
+                      book_hash is never included — public surface is
+                      display metadata only.
+                    items:
+                      type: object
+                      properties:
+                        handle: { type: string, description: Sharer's public handle. }
+                        book_title: { type: string }
+                        book_authors: { type: string }
+                        excerpt: { type: string }
+                        created_at: { type: string, format: date-time }
                   next_cursor: { type: string, nullable: true }
+        "429": { $ref: "#/components/responses/RateLimited" }
+
+  /profile:
+    patch:
+      summary: Update the signed-in user's own profile (§3.1). Never creates one.
+      security:
+        - clerkBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                handle:
+                  type: string
+                  description: Lowercase URL-safe slug, unique.
+                display_name: { type: string }
+                is_public: { type: boolean }
+      responses:
+        "200":
+          description: Updated profile.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  handle: { type: string }
+                  display_name: { type: string }
+                  is_public: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: handle already taken. }
         "429": { $ref: "#/components/responses/RateLimited" }
 
 components:
@@ -700,6 +918,20 @@ is a stable machine-readable string (`unauthorized`, `invalid_cursor`,
 **Rate limits:** `/sync/pull` and `/sync/push` — 60 requests/min per
 authenticated user. `/public/*` — 120 requests/min per IP. Both return
 `429` with a `Retry-After` header (seconds) on the error envelope above.
+Vercel serverless functions are stateless and multi-instance, so an
+in-memory counter does not work — limiter state lives in a shared external
+store (e.g. Upstash Redis via `@upstash/ratelimit`, or a Supabase table
+with a sliding-window counter if avoiding a second vendor is preferred);
+`berilo-cloud` picks the concrete backend, this contract only fixes the
+limits and the response shape.
+
+**Infra tier note:** production reliability likely needs paid tiers, not
+free ones — Vercel Pro (longer function duration for large sync batches,
+cron for the tombstone-retention job) and a paid Supabase plan (the free
+tier pauses the project after ~7 days of inactivity, which is fatal for an
+always-on sync backend). Sizing this is a `berilo-cloud` infra decision,
+not part of this contract, but the free-tier defaults should not be
+assumed to hold in production.
 
 ## 4. Pagination discipline
 
@@ -711,18 +943,46 @@ discretion:
   parameters cap at 1000 and every endpoint that can return more than one
   row exposes a cursor, including `/public/readers/{handle}`'s embedded
   sections — a reader with a large shelf must not silently truncate.
-- **Cursor semantics: keyset, not offset.** Cursors encode
-  `(updated_at, id)` (or `(created_at, id)` for `/public/passages`, which
-  orders newest-first) — a two-column tuple because `updated_at` alone is
-  not unique and offset pagination drifts under concurrent writes. A cursor
-  is an opaque base64 string; clients must not construct or parse it. A
-  page fetches `limit + 1` rows to compute `has_more` without a second
-  count query.
+- **Cursor semantics: keyset, not offset.** A cursor is
+  `(updated_at, <full primary-key tuple>)` — never `updated_at` alone,
+  because Postgres evaluates `now()` once per transaction: a bulk insert
+  (e.g. an initial backfill) can give many rows an *identical* `updated_at`,
+  and ordering by timestamp alone would non-deterministically skip or
+  repeat rows across pages. Ordering by `(updated_at, pk...)` — a strict
+  total order, since the PK tuple is unique — breaks every tie
+  deterministically. The exact tuple per entity (excluding `user_id`, which
+  is constant within one authenticated pull and does not need to be part of
+  the sort key):
+
+  | Entity | Cursor tuple |
+  |---|---|
+  | `books_metadata` | `(updated_at, content_hash)` |
+  | `highlights` | `(updated_at, id)` |
+  | `vocabulary` | `(updated_at, word, sentence_hash, lang, model)` |
+  | `progress` | `(updated_at, book_hash)` |
+  | `shelves` | `(updated_at, id)` |
+  | `shelf_items` | `(updated_at, id)` |
+  | `ratings` | `(updated_at, book_hash)` |
+  | `shared_passages` | `(updated_at, id)` |
+  | `/public/passages` | `(created_at, id)`, newest-first |
+
+  A cursor is an opaque base64 string; clients must not construct or parse
+  it. A page fetches `limit + 1` rows to compute `has_more` without a
+  second count query.
 - Each entity in `/sync/pull` carries its **own** cursor — cursors are not
   comparable across tables (different write volumes, independent
-  `updated_at` ranges). A client keeps a small `{entity: cursor}` map
-  locally and only advances an entity's cursor when its `has_more` is
-  `false`.
+  `updated_at` ranges, different tuple shapes per the table above).
+- **Drain protocol.** Within one sync round, a client repeatedly calls
+  `/sync/pull` for an entity, feeding each response's `next_cursor` back in
+  as that entity's cursor for the next call, purely in-memory — it does
+  **not** write to durable local storage (Room/DataStore) after every page.
+  Only once a page comes back with `has_more: false` does the client
+  persist that final cursor as the entity's new durable sync baseline. This
+  keeps the meaning of the persisted cursor simple and singular ("fully
+  caught up as of here") rather than "possibly mid-drain," and means a
+  crash mid-drain just restarts that entity's drain from the last durable
+  baseline (safe — keyset pagination is idempotent to resume from any
+  earlier point, just not maximally efficient).
 
 ## 5. Timestamps and DST
 
@@ -761,3 +1021,34 @@ client build in the field has migrated.
   per-book-on-a-shelf. Confirm this matches the "per item" reading of spec
   §6.1, or this becomes `shelf_items.is_public` instead (changes the RLS
   policy on `shelf_items`).
+- **[OPEN-4]** Android's synced entities aren't sync-shaped yet:
+  `HighlightEntity` has no soft-delete flag and no outbox/pending-mutation
+  table (S2.6 shipped it as local-only), and `DictionaryEntryEntity` has no
+  `updatedAt` (only `createdAt`, treated as an immutable cache row). Both
+  are required by this contract — `updated_at` drives LWW on every pushed
+  item (§1.3), and a delete needs something to tombstone. S3.2 must add
+  soft-delete/outbox support to `HighlightEntity` and an `updatedAt` column
+  to `DictionaryEntryEntity` before it can implement the sync client
+  against this contract.
+- **[OPEN-5]** Client-clock LWW (§1.3) has a real data-loss mode: a device
+  with a wrong clock can make its writes always lose (clock behind) or
+  always win and clobber others' newer edits (clock ahead), silently, with
+  no server-side signal. Three options, not decided here:
+  (a) **server-authoritative `updated_at`** — the server stamps `now()` at
+  receipt instead of trusting the client value; ordering becomes
+  receipt-order, not edit-order, which is simpler and immune to client
+  clock skew but can misorder two edits to the same record made on
+  different devices while one was offline (the offline edit "happened"
+  earlier but syncs — and so gets stamped — later); (b) **reject future
+  timestamps** — server 400s any incoming `updated_at` more than a small
+  skew tolerance ahead of server time, forcing the client to fix its clock;
+  catches gross skew, not small drift; (c) **accept with an NTP
+  assumption** — v1 as currently specified; simplest, and mobile OS clocks
+  are NTP-synced by default, but silent small drift is an unhandled
+  residual risk. Recommendation if this needs tightening: **(a)
+  server-authoritative**, since it fully removes client clock trust from
+  the isolation-critical path at the cost of the offline-edit-ordering
+  edge case above, which is rarer and lower-stakes than a systematically
+  wrong device clock. Flagging rather than changing the contract
+  unilaterally since it alters push semantics client code will be written
+  against.
