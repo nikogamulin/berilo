@@ -99,6 +99,16 @@ TITLE_CASE_MIN_RATIO = 0.6
 SHORT_WORD_MAX_LEN = 3
 SHORT_WORD_MAX_RATIO = 0.5
 
+# A short line that is wholly parenthetical, or a line (up to a moderate length)
+# ending in a capitalized parenthetical source credit with no closing sentence
+# period, is an image/figure caption, not body prose.
+CAPTION_MAX_WORDS = 12
+CAPTION_CREDIT_MAX_WORDS = 40
+
+# Canonical title given to a folded back-matter chapter so downstream code
+# (prose sampling, translation skip) can recognize it by title.
+BACK_MATTER_CHAPTER_TITLE = "Notes"
+
 # Chapter-heading text patterns (matched case-insensitively on the stripped
 # line). Numbered titles (``12. Dirty Business``) are matched separately.
 _HEADING_KEYWORDS = (
@@ -167,6 +177,9 @@ _BACK_MATTER_PREFIXES = (
     "furtherreading",
     "newslettersign",
 )
+# Substrings that mark a back-matter section title even when embedded in a
+# longer, punctuated TOC entry ("Notes: What Is Disinformation?", "Endnotes").
+_BACK_MATTER_SUBSTRINGS = ("notes", "index", "bibliography", "references", "acknowledg")
 
 # Segments that must never survive: bare arabic page numbers and bare roman
 # numerals (any case — OCR renders "xix" as "Xix").
@@ -183,6 +196,14 @@ _WORD_RUN_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
 # in a real chapter title but litter OCR debris.
 _ALPHA_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 _JUNK_SYMBOL_RE = re.compile(r"[=<>©®+&~|/\\{}\[\]]")
+# A parenthetical group at the end of a line (figure-caption source credit).
+_CAPTION_TAIL_RE = re.compile(r"\([^)]{2,}\)\s*$")
+# A trailing parenthetical made only of 1-4 capitalized words — a photo/source
+# credit ("(National Diet Library)", "(Elizabeth Spaulding)").
+_CAPTION_CREDIT_RE = re.compile(r"\([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,3}\)\s*$")
+# Sentence-terminal characters, checked after stripping trailing quotes/brackets.
+_TERMINAL_PUNCT = ".!?…"
+_TRAILING_CLOSERS = "”’\"')]»"
 # Letter-run shapes that mark OCR gibberish rather than a real title word.
 _VOWEL_RUN_RE = re.compile(r"[aeiou]{3,}")
 _CONSONANT_RUN_RE = re.compile(r"[bcdfghjklmnpqrstvwxz]{4,}")
@@ -237,7 +258,8 @@ def normalize_pdf(path: Path) -> Book:
 
     toc_starts = _toc_content_starts(toc)
     if toc_starts:
-        segments = _assign_toc_chapters(blocks, toc_starts, body_size)
+        back_start_page = _toc_back_matter_start(toc, toc_starts)
+        segments = _assign_toc_chapters(blocks, toc_starts, back_start_page, body_size)
     else:
         front_end = _front_matter_end_page(pages)
         back_start = _back_matter_start_page(pages)
@@ -467,12 +489,19 @@ def _heading_level(size: float, body_size: float) -> int:
     return 1 if size >= body_size * HEADING_LEVEL1_RATIO else 2
 
 
-def _is_back_matter_title(title: str) -> bool:
-    """Return True if a heading title marks the start of back matter."""
-    key = _normalize_head_key(title)
+def _is_back_matter_title(title: str | None) -> bool:
+    """Return True if a title names a back-matter section.
+
+    Substring matching folds punctuated / multi-word entries such as
+    ``"Notes: What Is Disinformation?"`` and ``"Endnotes"`` alongside the bare
+    ``"Notes"`` / ``"Index"`` forms.
+    """
+    key = _normalize_head_key(title or "")
     if not key:
         return False
-    return key in _BACK_MATTER_TITLES or key.startswith(_BACK_MATTER_PREFIXES)
+    return any(sub in key for sub in _BACK_MATTER_SUBSTRINGS) or key.startswith(
+        _BACK_MATTER_PREFIXES
+    )
 
 
 def _median_line_gap(page: list[_Line]) -> float:
@@ -568,8 +597,10 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
             return
         text = _clean_segment_text(" ".join(buffer))
         buffer = []
-        if not _is_droppable(text):
-            blocks.append(_Block(SegmentType.PARAGRAPH, text, buffer_page, body_size))
+        if _is_droppable(text):
+            return
+        kind = SegmentType.CAPTION if _is_caption(text) else SegmentType.PARAGRAPH
+        blocks.append(_Block(kind, text, buffer_page, body_size))
 
     for page in pages:
         page_gap = _median_line_gap(page)
@@ -585,7 +616,15 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
                     blocks.append(_Block(SegmentType.HEADING, title, line.page_index, line.size))
                 continue
 
-            if _starts_new_paragraph(line, indent_threshold, gap, page_gap, bool(buffer)):
+            starts_new = _starts_new_paragraph(line, indent_threshold, gap, page_gap, bool(buffer))
+            # Continuation override: an indent/gap that would break the paragraph
+            # is ignored when the running text is clearly unfinished (no terminal
+            # punctuation) and this line resumes it (starts lowercase). This
+            # re-joins block quotes and prose that wraps across page/column
+            # boundaries into coherent segments instead of per-line fragments.
+            if starts_new and buffer and _looks_incomplete(buffer[-1]) and _starts_lowercase(line):
+                starts_new = False
+            if starts_new:
                 flush()
 
             if not buffer:
@@ -597,6 +636,41 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
 
     flush()
     return blocks
+
+
+def _is_caption(text: str) -> bool:
+    """Return True if a block is a figure/source caption, not body prose.
+
+    Two shapes qualify: a short wholly-parenthetical line
+    (``"(National Diet Library)"``), or a moderate-length line ending in a
+    capitalized parenthetical source credit with no closing period
+    (``"...voices on disinformation. (Elizabeth Spaulding)"``). Body paragraphs
+    end with sentence punctuation, so the credit shape does not catch prose.
+    """
+    stripped = text.strip()
+    word_count = len(stripped.split())
+    if word_count <= CAPTION_MAX_WORDS:
+        if stripped.startswith("(") and stripped.endswith(")"):
+            return True
+        if _CAPTION_TAIL_RE.search(stripped):
+            return True
+    if word_count <= CAPTION_CREDIT_MAX_WORDS and _CAPTION_CREDIT_RE.search(stripped):
+        return True
+    return False
+
+
+def _looks_incomplete(text: str) -> bool:
+    """Return True if ``text`` does not end a sentence (mid-sentence wrap)."""
+    stripped = text.rstrip().rstrip(_TRAILING_CLOSERS).rstrip()
+    return bool(stripped) and stripped[-1] not in _TERMINAL_PUNCT
+
+
+def _starts_lowercase(line: _Line) -> bool:
+    """Return True if the line's first alphabetic character is lowercase."""
+    for char in line.text:
+        if char.isalpha():
+            return char.islower()
+    return False
 
 
 def _is_front_matter_title(title: str) -> bool:
@@ -635,6 +709,30 @@ def _toc_content_starts(toc: list) -> list[tuple[int, str]]:
         starts.append((start, title))
     starts.sort(key=lambda item: item[0])
     return starts
+
+
+def _toc_back_matter_start(toc: list, content_starts: list[tuple[int, str]]) -> int | None:
+    """Return the zero-based page where TOC back matter begins, or None.
+
+    Considers only back-matter entries that fall after the last content chapter
+    start, so a stray earlier match cannot swallow the body.
+
+    Args:
+        toc: ``doc.get_toc(simple=True)`` rows.
+        content_starts: Content chapter starts (sorted by page).
+
+    Returns:
+        The earliest qualifying back-matter start page, or ``None`` if none.
+    """
+    content_max = content_starts[-1][0] if content_starts else -1
+    back_pages = [
+        int(entry[2]) - 1
+        for entry in toc
+        if int(entry[2]) >= 1
+        and _is_back_matter_title(str(entry[1]))
+        and int(entry[2]) - 1 > content_max
+    ]
+    return min(back_pages) if back_pages else None
 
 
 def _front_matter_end_page(pages: list[list[_Line]]) -> int:
@@ -746,29 +844,39 @@ def _prefer_title(current: str | None, candidate: str) -> str:
 
 
 def _assign_toc_chapters(
-    blocks: list[_Block], starts: list[tuple[int, str]], body_size: float
+    blocks: list[_Block],
+    starts: list[tuple[int, str]],
+    back_start: int | None,
+    body_size: float,
 ) -> list[Segment]:
     """Assign chapters from an embedded TOC: each block inherits its page's start.
 
     Blocks before the first content start are chapter 0 (front matter); a block
-    on or after the i-th content start (1-based) is chapter i with that title.
+    on or after the i-th content start (1-based) is chapter i with that title;
+    blocks from ``back_start`` onward fold into one trailing back-matter chapter
+    (so notes/index prose is recognizable and excluded from prose sampling).
 
     Args:
         blocks: Ordered reflow blocks.
         starts: Content chapter starts from :func:`_toc_content_starts`.
+        back_start: Page where back matter begins, or ``None`` for no back matter.
         body_size: Estimated body font size (for heading levels).
 
     Returns:
         Ordered segments with TOC-driven chapter indices and titles.
     """
     start_pages = [page for page, _ in starts]
+    back_chapter_index = len(starts) + 1
     segments: list[Segment] = []
     for block in blocks:
-        index = bisect.bisect_right(start_pages, block.page_index)
-        if index == 0:
-            chapter_index, chapter_title = 0, None
+        if back_start is not None and block.page_index >= back_start:
+            chapter_index, chapter_title = back_chapter_index, BACK_MATTER_CHAPTER_TITLE
         else:
-            chapter_index, chapter_title = index, starts[index - 1][1]
+            index = bisect.bisect_right(start_pages, block.page_index)
+            if index == 0:
+                chapter_index, chapter_title = 0, None
+            else:
+                chapter_index, chapter_title = index, starts[index - 1][1]
         segments.append(
             _segment_from_block(block, chapter_index, chapter_title, len(segments), body_size)
         )
@@ -805,7 +913,7 @@ def _assign_heuristic_chapters(
         if phase != "back" and block.page_index >= back_start:
             phase = "back"
             chapter_index += 1
-            chapter_title = None
+            chapter_title = BACK_MATTER_CHAPTER_TITLE
             just_minted = False
         is_chapter = block.kind is SegmentType.HEADING and _is_strong_chapter(
             block.text, block.size, body_size

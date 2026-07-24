@@ -20,10 +20,11 @@ import pytest
 from berilo.models import Book, Segment, SegmentType
 from berilo.normalize.pdf import (
     _dehyphenate,
+    _is_caption,
     normalize_pdf,
 )
 from berilo.providers.base import CompletionResult, LLMClient
-from berilo.screen import sample_segments, screen_segments
+from berilo.screen import back_matter_chapter_indices, sample_segments, screen_segments
 
 # Font sizes used when laying out synthetic PDFs.
 _BODY_SIZE = 11.0
@@ -327,6 +328,112 @@ def test_no_toc_back_matter_does_not_spawn_chapters(tmp_path: Path) -> None:
         if seg.text in {"CHAPTER 2", "The Godfather", "Bounty Hunters"}
     }
     assert notes_heading_chapters == {2}
+
+
+# --------------------------------------------------------------------------- #
+# Screen-gate fixes: captions, cross-page merge, back-matter exclusion
+# --------------------------------------------------------------------------- #
+
+
+def test_is_caption_recognizes_source_credits() -> None:
+    """Parenthetical caption/source-credit lines are captions, prose is not."""
+    assert _is_caption("(National Diet Library)")
+    assert _is_caption("KGB disinformation targeted the SAC. (U.S. Air Force)")
+    assert _is_caption("...important voices on disinformation. (Elizabeth Spaulding)")
+    # Real prose — ends with a sentence period, or an un-credited parenthetical.
+    assert not _is_caption("He returned to Moscow that winter and never left.")
+    assert not _is_caption("They met in Moscow (the capital) during the thaw.")
+    assert not _is_caption("See chapter three for the full account (page 3).")
+
+
+def test_caption_line_is_typed_caption_and_excluded_from_sampling(tmp_path: Path) -> None:
+    """A parenthetical caption becomes a CAPTION segment, not a sampled paragraph."""
+    pages = [
+        _header(1)
+        + [
+            (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+            (_LEFT_MARGIN, 160.0, "A real paragraph of ordinary book prose here.", _BODY_SIZE),
+            (_LEFT_MARGIN, 200.0, "(National Diet Library)", _BODY_SIZE),
+        ]
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, pages, name="caption.pdf"))
+
+    caption = _find_segment(book, "National Diet Library")
+    assert caption.type is SegmentType.CAPTION
+    # Captions are never offered to the prose screen.
+    assert all(seg.type is SegmentType.PARAGRAPH for seg in sample_segments(book, 30, 42))
+    assert not any("National Diet Library" in seg.text for seg in sample_segments(book, 30, 42))
+
+
+def test_cross_page_blockquote_lines_merge_into_one_paragraph(tmp_path: Path) -> None:
+    """Indented block-quote lines that wrap mid-sentence merge, not fragment.
+
+    Each quote line is indented (which normally starts a new paragraph) and ends
+    mid-sentence; the continuation override rejoins them into one segment.
+    """
+    page1 = _header(1) + [
+        (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+        (
+            _INDENT_X,
+            160.0,
+            "U.S. involvement in these less-developed nations threatened by",
+            _BODY_SIZE,
+        ),
+        (
+            _INDENT_X,
+            176.0,
+            "insurgency is part of the world-wide U.S. involvement in the",
+            _BODY_SIZE,
+        ),
+    ]
+    page2 = _header(2) + [
+        (_INDENT_X, 120.0, "struggle against Communism everywhere in the world.", _BODY_SIZE),
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, [page1, page2], name="blockquote.pdf"))
+
+    merged = _find_segment(book, "less-developed nations threatened by")
+    assert "insurgency is part of the world-wide" in merged.text
+    assert "struggle against Communism everywhere" in merged.text  # spans the page break
+
+
+def test_back_matter_chapter_excluded_from_prose_sampling() -> None:
+    """sample_segments drops paragraphs in notes/index chapters."""
+    body = [
+        Segment(
+            id=f"body-{i}",
+            type=SegmentType.PARAGRAPH,
+            text=f"Body prose paragraph number {i}.",
+            chapter_index=1,
+            chapter_title="1. The Trust",
+            position=i,
+        )
+        for i in range(20)
+    ]
+    notes = [
+        Segment(
+            id=f"note-{i}",
+            type=SegmentType.PARAGRAPH,
+            text=f'(2007), p. 6. {i}. "Ein Agent," Der Spiegel.',
+            chapter_index=2,
+            chapter_title="Notes",
+            position=20 + i,
+        )
+        for i in range(20)
+    ]
+    book = Book(
+        title="B",
+        authors=[],
+        language="en",
+        source_path="mem.pdf",
+        source_format="pdf",
+        segments=body + notes,
+    )
+
+    assert back_matter_chapter_indices(book) == {2}
+    sampled = sample_segments(book, n=30, seed=42)
+    assert sampled  # body paragraphs remain
+    assert all(seg.chapter_index == 1 for seg in sampled)
+    assert not any("Der Spiegel" in seg.text for seg in sampled)
 
 
 # --------------------------------------------------------------------------- #
