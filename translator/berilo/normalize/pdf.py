@@ -14,8 +14,13 @@ line-break hyphens. This module reconstructs the logical document:
    ``example``) while keeping genuine mid-line hyphens.
 4. **Reflow** hard-wrapped lines back into paragraphs using first-line indent
    and vertical-gap signals, merging across page boundaries.
-5. **Detect chapter headings** by font-size outliers and standalone
-   chapter-pattern lines, opening a new chapter for each.
+5. **Assign chapters.** When the PDF carries an embedded table of contents,
+   its content entries (front/back matter filtered out) are the authoritative
+   chapter starts. Otherwise chapter minting is bracketed to the body — front
+   matter ends at the last "Contents" page, back matter begins at the first
+   Notes/Index running header — and only high-confidence headings inside that
+   bracket open a chapter, so OCR debris on scanned notes/index pages and
+   cover/praise front matter cannot inflate the chapter count.
 
 The result is a :class:`~berilo.models.Book` whose segments carry a 1:1
 mapping to the logical paragraphs and headings of the source — no segment is
@@ -24,6 +29,7 @@ a bare page number, running header, or empty string.
 
 from __future__ import annotations
 
+import bisect
 import logging
 import re
 from collections import Counter
@@ -73,10 +79,25 @@ PARA_GAP_RATIO = 1.6
 # (part) heading; smaller outliers are chapter-level.
 HEADING_LEVEL1_RATIO = 1.9
 
-# A back-matter section title only folds the chapter count when it appears in
-# the final stretch of the document — otherwise a "Copyright" page in the
-# front matter would swallow the entire body.
-BACK_MATTER_MIN_FRACTION = 0.55
+# Chapter minting for books WITHOUT an embedded TOC is bracketed to the body:
+# the front-matter boundary is the last "Contents" page in the opening
+# fraction; the back-matter boundary is the first page in the closing fraction
+# whose running header names a back-matter section (Notes/Index/...). Outside
+# the bracket no new chapters are minted, so the OCR debris on scanned
+# notes/index pages and the cover/praise front matter cannot inflate the count.
+FRONT_MATTER_SCAN_FRACTION = 0.25
+BACK_MATTER_SCAN_FRACTION = 0.5
+
+# A font-outlier heading may mint a chapter only if it is a well-formed title:
+# no more than this many digits, at least this fraction of its words
+# capitalized (Title Case / ALL CAPS), and free of junk symbols. This is what
+# separates real OCR chapter titles ("Closet of Secrets") from OCR gibberish
+# ("oats tan each tea aarane>", "AMES AS oot gh and >").
+STRONG_TITLE_MAX_DIGITS = 2
+TITLE_CASE_MIN_RATIO = 0.6
+# A descriptive title dominated by <=3-char words is OCR debris, not a title.
+SHORT_WORD_MAX_LEN = 3
+SHORT_WORD_MAX_RATIO = 0.5
 
 # Chapter-heading text patterns (matched case-insensitively on the stripped
 # line). Numbered titles (``12. Dirty Business``) are matched separately.
@@ -97,6 +118,30 @@ _HEADING_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBERED_TITLE_RE = re.compile(r"^\d{1,3}[.)]\s+\S")
+
+# Strong chapter-label prefixes. A heading opening with one of these is a
+# high-confidence chapter/section start (used to bracket and mint chapters in
+# the no-embedded-TOC path).
+_CHAPTER_LABEL_RE = re.compile(
+    r"^(?:prologue|epilogue|aftermath|afterword|foreword|preface|introduction"
+    r"|conclusion|appendix|author|part|chapter|book)\b",
+    re.IGNORECASE,
+)
+
+# Normalized front-matter titles, excluded when reading an embedded TOC as the
+# chapter list. Prefixes catch "Copyright Notice", "Praise for ...", etc.
+_FRONT_MATTER_TITLES = frozenset(
+    {
+        "titlepage",
+        "halftitle",
+        "contents",
+        "tableofcontents",
+        "dedication",
+        "epigraph",
+        "frontispiece",
+    }
+)
+_FRONT_MATTER_PREFIXES = ("copyright", "praise", "alsoby")
 
 # Normalized titles that mark the start of back matter. Everything from the
 # first such heading onward is kept (segment integrity) but folded into a
@@ -134,6 +179,13 @@ _WORD_RE = re.compile(r"\w", re.UNICODE)
 # A run of 3+ letters (Unicode-aware, excluding digits/underscore) — the mark
 # of a real word, used to tell headings from OCR debris.
 _WORD_RUN_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+# Alphabetic words (for title-case scoring) and junk symbols that never appear
+# in a real chapter title but litter OCR debris.
+_ALPHA_WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+_JUNK_SYMBOL_RE = re.compile(r"[=<>©®+&~|/\\{}\[\]]")
+# Letter-run shapes that mark OCR gibberish rather than a real title word.
+_VOWEL_RUN_RE = re.compile(r"[aeiou]{3,}")
+_CONSONANT_RUN_RE = re.compile(r"[bcdfghjklmnpqrstvwxz]{4,}")
 
 
 @dataclass(frozen=True)
@@ -173,6 +225,7 @@ def normalize_pdf(path: Path) -> Book:
     path = Path(path)
     with fitz.open(path) as doc:
         pages = [_extract_page_lines(doc[i], i) for i in range(doc.page_count)]
+        toc = doc.get_toc(simple=True) or []
         metadata = doc.metadata or {}
     title = metadata.get("title") or path.stem
     author = metadata.get("author") or ""
@@ -180,7 +233,15 @@ def normalize_pdf(path: Path) -> Book:
     running_heads = _detect_running_heads(pages)
     body_pages = [_strip_page_furniture(page, running_heads) for page in pages]
     body_size = _body_font_size(body_pages)
-    segments = _reflow_to_segments(body_pages, body_size)
+    blocks = _iter_blocks(body_pages, body_size)
+
+    toc_starts = _toc_content_starts(toc)
+    if toc_starts:
+        segments = _assign_toc_chapters(blocks, toc_starts, body_size)
+    else:
+        front_end = _front_matter_end_page(pages)
+        back_start = _back_matter_start_page(pages)
+        segments = _assign_heuristic_chapters(blocks, body_size, front_end, back_start)
 
     authors = [author] if author else []
     logger.info(
@@ -464,50 +525,51 @@ def _build_segment(
     )
 
 
-def _reflow_to_segments(pages: list[list[_Line]], body_size: float) -> list[Segment]:
-    """Reflow body lines into ordered paragraph and heading segments.
+@dataclass(frozen=True)
+class _Block:
+    """A logical block produced by reflow, before chapter assignment.
+
+    Attributes:
+        kind: :class:`SegmentType.HEADING` or :class:`SegmentType.PARAGRAPH`.
+        text: Cleaned block text.
+        page_index: Source page where the block starts.
+        size: Font size (largest span) for headings; body size for paragraphs.
+    """
+
+    kind: SegmentType
+    text: str
+    page_index: int
+    size: float
+
+
+def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
+    """Reflow body lines into ordered heading/paragraph blocks (no chapters).
 
     Paragraph boundaries are drawn on headings, first-line indents, and large
     vertical gaps; everything else is merged, joining line-break hyphens.
-    Paragraphs merge across page boundaries. Each detected heading opens a new
-    chapter.
+    Paragraphs merge across page boundaries.
 
     Args:
         pages: Body lines per page (after furniture removal).
         body_size: Estimated body font size.
 
     Returns:
-        Ordered segments with stable IDs, chapter indices, and titles.
+        Ordered blocks, each tagged with its start page and font size.
     """
     indent_threshold = _column_left_margin(pages) + body_size * INDENT_RATIO
-    back_matter_page = len(pages) * BACK_MATTER_MIN_FRACTION
 
-    segments: list[Segment] = []
+    blocks: list[_Block] = []
     buffer: list[str] = []
-    state = {
-        "chapter_index": 0,
-        "chapter_title": None,
-        "emitted": False,
-        "in_back_matter": False,
-    }
+    buffer_page = 0
 
     def flush() -> None:
+        nonlocal buffer
         if not buffer:
             return
         text = _clean_segment_text(" ".join(buffer))
-        buffer.clear()
-        if _is_droppable(text):
-            return
-        segments.append(
-            _build_segment(
-                SegmentType.PARAGRAPH,
-                text,
-                state["chapter_index"],
-                state["chapter_title"],
-                len(segments),
-            )
-        )
-        state["emitted"] = True
+        buffer = []
+        if not _is_droppable(text):
+            blocks.append(_Block(SegmentType.PARAGRAPH, text, buffer_page, body_size))
 
     for page in pages:
         page_gap = _median_line_gap(page)
@@ -519,46 +581,269 @@ def _reflow_to_segments(pages: list[list[_Line]], body_size: float) -> list[Segm
             if _looks_like_heading(line, body_size):
                 flush()
                 title = _clean_segment_text(line.text)
-                if _is_droppable(title):
-                    continue
-                entering_back_matter = (
-                    not state["in_back_matter"]
-                    and line.page_index >= back_matter_page
-                    and _is_back_matter_title(title)
-                )
-                # A new chapter opens for each body heading, and once for the
-                # start of back matter; further back-matter headings (endnote /
-                # index sub-headers) stay within that single trailing chapter.
-                if state["emitted"] and (not state["in_back_matter"] or entering_back_matter):
-                    state["chapter_index"] += 1
-                if entering_back_matter:
-                    state["in_back_matter"] = True
-                state["chapter_title"] = title
-                segments.append(
-                    _build_segment(
-                        SegmentType.HEADING,
-                        title,
-                        state["chapter_index"],
-                        state["chapter_title"],
-                        len(segments),
-                        heading_level=_heading_level(line.size, body_size),
-                    )
-                )
-                state["emitted"] = True
+                if not _is_droppable(title):
+                    blocks.append(_Block(SegmentType.HEADING, title, line.page_index, line.size))
                 continue
 
             if _starts_new_paragraph(line, indent_threshold, gap, page_gap, bool(buffer)):
                 flush()
 
-            if buffer:
-                joined = _dehyphenate(buffer[-1], line.text)
-                if joined is not None:
-                    buffer[-1] = joined
-                    continue
+            if not buffer:
+                buffer_page = line.page_index
+            elif (joined := _dehyphenate(buffer[-1], line.text)) is not None:
+                buffer[-1] = joined
+                continue
             buffer.append(line.text)
 
     flush()
+    return blocks
+
+
+def _is_front_matter_title(title: str) -> bool:
+    """Return True if a title is front matter (excluded from TOC chapters)."""
+    key = _normalize_head_key(title)
+    if not key:
+        return True
+    return key in _FRONT_MATTER_TITLES or key.startswith(_FRONT_MATTER_PREFIXES)
+
+
+def _toc_content_starts(toc: list) -> list[tuple[int, str]]:
+    """Extract content chapter starts from an embedded TOC.
+
+    Front- and back-matter entries (title/copyright pages, notes, index, ...)
+    are dropped so the count reflects reading chapters. Entries are returned as
+    ``(zero_based_start_page, title)`` sorted by page, one per page.
+
+    Args:
+        toc: ``doc.get_toc(simple=True)`` output — ``[level, title, page]`` rows
+            with 1-based page numbers.
+
+    Returns:
+        Content chapter starts, or an empty list if the PDF has no TOC.
+    """
+    starts: list[tuple[int, str]] = []
+    seen_pages: set[int] = set()
+    for entry in toc:
+        title = str(entry[1]).strip()
+        page = int(entry[2])
+        if page < 1 or _is_front_matter_title(title) or _is_back_matter_title(title):
+            continue
+        start = page - 1
+        if start in seen_pages:
+            continue
+        seen_pages.add(start)
+        starts.append((start, title))
+    starts.sort(key=lambda item: item[0])
+    return starts
+
+
+def _front_matter_end_page(pages: list[list[_Line]]) -> int:
+    """Return the first body page index, past any front-matter Contents pages.
+
+    Args:
+        pages: Extracted lines per page (before furniture removal).
+
+    Returns:
+        The index after the last "Contents" page in the opening fraction of the
+        document, or 0 if none is found.
+    """
+    scan_limit = len(pages) * FRONT_MATTER_SCAN_FRACTION
+    last_contents = -1
+    for page_index, page in enumerate(pages):
+        if page_index > scan_limit:
+            break
+        if any(_normalize_head_key(line.text) == "contents" for line in page):
+            last_contents = page_index
+    return last_contents + 1
+
+
+def _back_matter_start_page(pages: list[list[_Line]]) -> int:
+    """Return the page index where back matter (Notes/Index/...) begins.
+
+    Detected by a running header naming a back-matter section in the closing
+    fraction of the document; falls back to the page count (no back matter).
+
+    Args:
+        pages: Extracted lines per page (before furniture removal).
+
+    Returns:
+        The zero-based start page of back matter, or ``len(pages)`` if none.
+    """
+    scan_start = len(pages) * BACK_MATTER_SCAN_FRACTION
+    markers = _BACK_MATTER_TITLES
+    for page_index, page in enumerate(pages):
+        if page_index < scan_start:
+            continue
+        for line in page:
+            if line.in_band and _normalize_head_key(line.text) in markers:
+                return page_index
+    return len(pages)
+
+
+def _is_strong_chapter(text: str, size: float, body_size: float) -> bool:
+    """Return True if a heading is a high-confidence chapter/section start.
+
+    Strong signals: a chapter-label prefix (PART/CHAPTER/PROLOGUE/...), a
+    numbered title (``12. Dirty Business``), or a multi-word font-size outlier
+    that is not OCR "digit soup".
+
+    Args:
+        text: Heading text.
+        size: Heading font size.
+        body_size: Estimated body font size.
+    """
+    if _CHAPTER_LABEL_RE.match(text) or _NUMBERED_TITLE_RE.match(text):
+        return True
+    words = text.split()
+    if not (size >= body_size * HEADING_SIZE_RATIO and 2 <= len(words) <= HEADING_MAX_WORDS):
+        return False
+    if sum(char.isdigit() for char in text) > STRONG_TITLE_MAX_DIGITS:
+        return False
+    if _JUNK_SYMBOL_RE.search(text) or text.endswith((".", "!", "?")):
+        return False
+    return _is_title_cased(text) and _is_wordlike_title(text)
+
+
+def _is_title_cased(text: str) -> bool:
+    """Return True if most alphabetic words start uppercase (Title Case/CAPS)."""
+    words = _ALPHA_WORD_RE.findall(text)
+    if len(words) < 2:
+        return False
+    capitalized = sum(1 for word in words if word[0].isupper())
+    return capitalized / len(words) >= TITLE_CASE_MIN_RATIO
+
+
+def _is_wordlike_title(text: str) -> bool:
+    """Return True if every word looks like a real word (not OCR gibberish).
+
+    Rejects titles containing a multi-letter vowelless token ("Tg", "Pst"), a
+    run of 3+ vowels ("Uiindicaerces"), or 4+ consonants ("dhstenus") — patterns
+    that do not occur in real English titles but pepper OCR debris.
+    """
+    words = _ALPHA_WORD_RE.findall(text)
+    for word in words:
+        lowered = word.lower()
+        if len(lowered) >= 2 and not any(vowel in lowered for vowel in "aeiouy"):
+            return False
+        if _VOWEL_RUN_RE.search(lowered) or _CONSONANT_RUN_RE.search(lowered):
+            return False
+    # A real multi-word title has substance: reject when most words are tiny
+    # (OCR debris such as "Or iar Ta", "As Sle al").
+    short = sum(1 for word in words if len(word) <= SHORT_WORD_MAX_LEN)
+    return not (words and short / len(words) > SHORT_WORD_MAX_RATIO)
+
+
+def _prefer_title(current: str | None, candidate: str) -> str:
+    """Pick the more descriptive of two adjacent heading titles.
+
+    A bare label ("CHAPTER 2", "PART I") is superseded by a following
+    descriptive title ("The Fucking Salmon"); otherwise the current title
+    stands.
+    """
+    if current and _CHAPTER_LABEL_RE.match(current) and not _CHAPTER_LABEL_RE.match(candidate):
+        return candidate
+    return current or candidate
+
+
+def _assign_toc_chapters(
+    blocks: list[_Block], starts: list[tuple[int, str]], body_size: float
+) -> list[Segment]:
+    """Assign chapters from an embedded TOC: each block inherits its page's start.
+
+    Blocks before the first content start are chapter 0 (front matter); a block
+    on or after the i-th content start (1-based) is chapter i with that title.
+
+    Args:
+        blocks: Ordered reflow blocks.
+        starts: Content chapter starts from :func:`_toc_content_starts`.
+        body_size: Estimated body font size (for heading levels).
+
+    Returns:
+        Ordered segments with TOC-driven chapter indices and titles.
+    """
+    start_pages = [page for page, _ in starts]
+    segments: list[Segment] = []
+    for block in blocks:
+        index = bisect.bisect_right(start_pages, block.page_index)
+        if index == 0:
+            chapter_index, chapter_title = 0, None
+        else:
+            chapter_index, chapter_title = index, starts[index - 1][1]
+        segments.append(
+            _segment_from_block(block, chapter_index, chapter_title, len(segments), body_size)
+        )
     return segments
+
+
+def _assign_heuristic_chapters(
+    blocks: list[_Block], body_size: float, front_end: int, back_start: int
+) -> list[Segment]:
+    """Assign chapters without a TOC, minting only inside the body bracket.
+
+    Front matter (before ``front_end``) is chapter 0; back matter (from
+    ``back_start``) folds into a single trailing chapter; between them, each
+    high-confidence heading opens a new chapter.
+
+    Args:
+        blocks: Ordered reflow blocks.
+        body_size: Estimated body font size.
+        front_end: First body page index (front matter ends before it).
+        back_start: Page index where back matter begins.
+
+    Returns:
+        Ordered segments with bracketed chapter indices and titles.
+    """
+    segments: list[Segment] = []
+    chapter_index = 0
+    chapter_title: str | None = None
+    phase = "front"
+    # A chapter number ("CHAPTER 2") and its title ("The Fucking Salmon") are
+    # separate heading lines; ``just_minted`` (no paragraph seen since the last
+    # mint) merges the pair into one chapter instead of counting both.
+    just_minted = False
+    for block in blocks:
+        if phase != "back" and block.page_index >= back_start:
+            phase = "back"
+            chapter_index += 1
+            chapter_title = None
+            just_minted = False
+        is_chapter = block.kind is SegmentType.HEADING and _is_strong_chapter(
+            block.text, block.size, body_size
+        )
+        if is_chapter and phase == "front" and block.page_index >= front_end:
+            phase = "body"
+            chapter_index += 1
+            chapter_title = block.text
+            just_minted = True
+        elif is_chapter and phase == "body":
+            if just_minted:
+                chapter_title = _prefer_title(chapter_title, block.text)
+            else:
+                chapter_index += 1
+                chapter_title = block.text
+                just_minted = True
+        segments.append(
+            _segment_from_block(block, chapter_index, chapter_title, len(segments), body_size)
+        )
+        if block.kind is SegmentType.PARAGRAPH:
+            just_minted = False
+    return segments
+
+
+def _segment_from_block(
+    block: _Block,
+    chapter_index: int,
+    chapter_title: str | None,
+    position: int,
+    body_size: float,
+) -> Segment:
+    """Build a :class:`Segment` from a block and its assigned chapter."""
+    heading_level = (
+        _heading_level(block.size, body_size) if block.kind is SegmentType.HEADING else None
+    )
+    return _build_segment(
+        block.kind, block.text, chapter_index, chapter_title, position, heading_level
+    )
 
 
 def _column_left_margin(pages: list[list[_Line]]) -> float:

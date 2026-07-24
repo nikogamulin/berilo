@@ -230,6 +230,106 @@ def test_segment_positions_are_sequential(reflow_book: Book) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Chapter assignment: embedded TOC vs no-TOC bracketing
+# --------------------------------------------------------------------------- #
+
+
+def test_embedded_toc_drives_chapters(tmp_path: Path) -> None:
+    """When a TOC is present its content entries are the chapter authority.
+
+    Front/back-matter TOC entries are excluded, and a stray font-outlier line
+    that would otherwise mint a chapter does not add one.
+    """
+    doc = fitz.open()
+    for _ in range(3):
+        doc.new_page()
+    # page 0: Chapter One; page 1: Chapter Two (+ a decoy big-font line);
+    # page 2: notes, which folds into the last content chapter.
+    doc[0].insert_text((_LEFT_MARGIN, 120.0), "Alpha prose on the first page.", fontsize=_BODY_SIZE)
+    # A real-word big-font line that WOULD mint a chapter in the no-TOC path.
+    doc[1].insert_text((_LEFT_MARGIN, 120.0), "Decoy Heading", fontsize=_HEADING_SIZE)
+    doc[1].insert_text((_LEFT_MARGIN, 160.0), "Beta prose on the second page.", fontsize=_BODY_SIZE)
+    doc[2].insert_text(
+        (_LEFT_MARGIN, 120.0), "Gamma notes prose on the third.", fontsize=_BODY_SIZE
+    )
+    doc.set_toc(
+        [
+            [1, "Title Page", 1],
+            [1, "Chapter One", 1],
+            [1, "Chapter Two", 2],
+            [1, "Notes", 3],
+        ]
+    )
+    path = tmp_path / "toc.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    book = normalize_pdf(path)
+
+    # Two content chapters (Title Page + Notes filtered); the decoy adds none.
+    assert book.chapter_count == 2
+    titles = {seg.chapter_title for seg in book.segments}
+    assert titles == {"Chapter One", "Chapter Two"}
+    alpha = _find_segment(book, "Alpha prose")
+    beta = _find_segment(book, "Beta prose")
+    gamma = _find_segment(book, "Gamma notes prose")
+    assert alpha.chapter_title == "Chapter One"
+    assert beta.chapter_title == "Chapter Two"
+    assert gamma.chapter_title == "Chapter Two"  # Notes folds into last chapter
+
+
+def test_no_toc_back_matter_does_not_spawn_chapters(tmp_path: Path) -> None:
+    """No-TOC: citation/back-matter pages under a NOTES header mint no chapters.
+
+    Big-font "chapter-like" lines on scanned notes pages (an OCR failure mode)
+    must fold into a single trailing chapter, not multiply the count.
+    """
+    notes_header = (_LEFT_MARGIN, _HEADER_Y, "NOTES", 8.0)
+    pages = [
+        [(_LEFT_MARGIN, 120.0, "Front matter opening paragraph here.", _BODY_SIZE)],
+        [(_LEFT_MARGIN, 120.0, "CONTENTS", _BODY_SIZE)],
+        [
+            (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+            (_LEFT_MARGIN, 160.0, "Body of chapter one begins here now.", _BODY_SIZE),
+        ],
+        [(_LEFT_MARGIN, 120.0, "More body prose for chapter one here.", _BODY_SIZE)],
+        [
+            notes_header,
+            (_LEFT_MARGIN, 120.0, "CHAPTER 2", _HEADING_SIZE),
+            (_LEFT_MARGIN, 160.0, "Citation text referencing chapter one.", _BODY_SIZE),
+        ],
+        [
+            notes_header,
+            (_LEFT_MARGIN, 120.0, "The Godfather", _HEADING_SIZE),
+            (_LEFT_MARGIN, 160.0, "Another endnote paragraph of prose here.", _BODY_SIZE),
+        ],
+        [
+            notes_header,
+            (_LEFT_MARGIN, 120.0, "Bounty Hunters", _HEADING_SIZE),
+            (_LEFT_MARGIN, 160.0, "Yet another endnote paragraph follows on.", _BODY_SIZE),
+        ],
+    ]
+    path = _make_pdf(tmp_path, pages, name="notes.pdf")
+
+    book = normalize_pdf(path)
+
+    # Front matter (0), the one real body chapter, and a single folded back
+    # matter chapter — the notes-page display headings add nothing.
+    assert book.chapter_count == 3
+    # The real chapter is detected in the body bracket...
+    body_chapter = _find_segment(book, "Body of chapter one begins here now.").chapter_index
+    assert body_chapter == 1
+    # ...and all three notes-page display headings collapse into one chapter,
+    # distinct from (and after) the body chapter.
+    notes_heading_chapters = {
+        seg.chapter_index
+        for seg in book.segments
+        if seg.text in {"CHAPTER 2", "The Godfather", "Bounty Hunters"}
+    }
+    assert notes_heading_chapters == {2}
+
+
+# --------------------------------------------------------------------------- #
 # Screen tests (LLM mocked)
 # --------------------------------------------------------------------------- #
 
