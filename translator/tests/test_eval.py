@@ -20,8 +20,11 @@ from berilo.cli import cli
 from berilo.eval import runner, sampling
 from berilo.eval.judge import Judge, JudgeError, parse_score
 from berilo.eval.rubric_t import (
+    RUBRIC_VERSION,
     AlignmentError,
+    _term_occurrences,
     align,
+    excluded_chapter_indices,
     score_book,
     score_cost,
     score_extraction,
@@ -112,15 +115,21 @@ def make_book(
     *,
     source_format: str = "epub",
     title: str = "Test Book",
+    titles: dict[int, str] | None = None,
 ) -> Book:
-    """Build a :class:`Book` from ``(type, text, chapter_index, heading_level)`` specs."""
+    """Build a :class:`Book` from ``(type, text, chapter_index, heading_level)`` specs.
+
+    ``titles`` optionally overrides the chapter title per chapter index (used to
+    exercise front/back-matter recognition, which keys on chapter title).
+    """
+    titles = titles or {}
     segments = [
         Segment(
             id=make_segment_id(text, chapter, pos),
             type=seg_type,
             text=text,
             chapter_index=chapter,
-            chapter_title=f"Chapter {chapter}",
+            chapter_title=titles.get(chapter, f"Chapter {chapter}"),
             position=pos,
             heading_level=level,
         )
@@ -395,18 +404,20 @@ def test_extraction_pdf_screens_paragraphs() -> None:
         [(SegmentType.PARAGRAPH, f"para {i}", 0, None) for i in range(30)], source_format="pdf"
     )
     judge = Judge(ScriptedJudgeClient(screen=1))
-    dim, scores = score_extraction(source_fmt, translated, judge, sample_size=20, seed=1)
+    dim, scores, fell_back = score_extraction(source_fmt, translated, judge, sample_size=20, seed=1)
     assert len(scores) == 20  # sampled 20 paragraphs
     assert judge.calls == 20
     assert dim.fraction == pytest.approx(1.0)
+    assert fell_back is False
 
 
 def test_extraction_epub_is_automatic_full_no_calls() -> None:
     translated = make_book([(SegmentType.PARAGRAPH, "p", 0, None)])
     judge = Judge(ExplodingClient())
-    dim, scores = score_extraction("epub", translated, judge, sample_size=20, seed=1)
+    dim, scores, fell_back = score_extraction("epub", translated, judge, sample_size=20, seed=1)
     assert dim.fraction == pytest.approx(1.0)
     assert scores == []
+    assert fell_back is False
 
 
 def test_cost_scoring_bands() -> None:
@@ -465,7 +476,9 @@ def test_score_row_schema_and_append(tmp_path: Path) -> None:
     ):
         assert key in row
     assert row["rubric"] == "T"
-    assert row["prompt_versions"]["meaning"] == "meaning_v1"
+    assert row["version"] == "1.1"  # v1.1 rubric revision recorded
+    assert RUBRIC_VERSION == "1.1"
+    assert row["prompt_versions"]["meaning"] == "meaning_v1"  # prompts unchanged
     assert set(row["dimensions"]) == {"T1", "T2", "T3", "T4", "T5", "T6", "T7"}
 
     dest = tmp_path / "scores.jsonl"
@@ -658,3 +671,120 @@ def test_cli_alignment_failure_exits_loudly(epub_builder, monkeypatch) -> None:
         )
     assert result.exit_code == 2
     assert "ALIGNMENT FAILURE" in result.output
+
+
+# --------------------------------------------------------------------------
+# v1.1: body-prose sampling pools + word-boundary T4.
+# --------------------------------------------------------------------------
+
+
+class ContentScreenClient(ScriptedJudgeClient):
+    """Screen client that judges a paragraph clean iff its text contains 'Body'."""
+
+    def complete(self, prompt=None, messages=None, **kwargs):  # noqa: ANN001
+        text = prompt or ""
+        if _SCREEN_MARKER in text:
+            self.calls.append("screen")
+            score = 1 if "Body" in text else 0
+            return CompletionResult(f"SCORE: {score}", 10, 3, 0.0001, self.model)
+        return super().complete(prompt, messages, **kwargs)
+
+
+def _book_with_notes(*, body_per_chapter: int = 10) -> Book:
+    """Source book with two body chapters and a back-matter 'Notes' chapter (2)."""
+    specs: list[tuple[SegmentType, str, int, int | None]] = []
+    for ch in (0, 1):
+        specs.append((SegmentType.HEADING, f"Chapter {ch}", ch, 1))
+        for i in range(body_per_chapter):
+            specs.append((SegmentType.PARAGRAPH, f"Body {ch}-{i} prose sentence.", ch, None))
+    specs.append((SegmentType.HEADING, "Notes", 2, 1))
+    for i in range(body_per_chapter):
+        specs.append((SegmentType.PARAGRAPH, f"Note {i} citation fragment.", 2, None))
+    return make_book(specs, titles={2: "Notes"})
+
+
+def test_excluded_chapter_indices_recognizes_front_and_back_matter() -> None:
+    specs = [
+        (SegmentType.PARAGRAPH, "body", 0, None),
+        (SegmentType.PARAGRAPH, "notes citation", 1, None),
+        (SegmentType.PARAGRAPH, "copyright text", 2, None),
+        (SegmentType.PARAGRAPH, "index entry", 3, None),
+    ]
+    book = make_book(specs, titles={0: "Chapter 1", 1: "Notes", 2: "Copyright", 3: "Index"})
+    assert excluded_chapter_indices(book) == {1, 2, 3}
+
+
+def test_t23_sampling_excludes_back_matter_chapter() -> None:
+    source = _book_with_notes()
+    translated = _translate(source)
+    id_to_chapter = {seg.id: seg.chapter_index for seg in source.segments}
+    result = score_book(source, translated, Judge(ScriptedJudgeClient()), sample_size=12, seed=42)
+    # No sampled pair comes from the Notes back-matter chapter (index 2).
+    assert result.sample_ids
+    assert all(id_to_chapter[sid] != 2 for sid in result.sample_ids)
+    assert not any("fell back" in n for n in result.notes)
+
+
+def test_t23_sampling_falls_back_when_body_pool_too_small() -> None:
+    # Only 2 body paragraphs, but a large Notes chapter; sample_size 10 > body pool.
+    specs: list[tuple[SegmentType, str, int, int | None]] = [
+        (SegmentType.HEADING, "Chapter 0", 0, 1),
+        (SegmentType.PARAGRAPH, "Body 0-0 prose.", 0, None),
+        (SegmentType.PARAGRAPH, "Body 0-1 prose.", 0, None),
+        (SegmentType.HEADING, "Notes", 1, 1),
+    ]
+    for i in range(20):
+        specs.append((SegmentType.PARAGRAPH, f"Note {i} citation.", 1, None))
+    source = make_book(specs, titles={1: "Notes"})
+    translated = _translate(source)
+    result = score_book(source, translated, Judge(ScriptedJudgeClient()), sample_size=10, seed=42)
+    # Fallback engaged: pool reverted to the full paragraph set, and it is noted.
+    assert any("fell back" in n for n in result.notes)
+    assert len(result.sample_ids) == 10
+
+
+def test_t6_sampling_excludes_back_matter_paragraphs() -> None:
+    # PDF source: body paragraphs are 'clean', Notes paragraphs are 'dirty'.
+    specs: list[tuple[SegmentType, str, int, int | None]] = []
+    for i in range(20):
+        specs.append((SegmentType.PARAGRAPH, f"Body {i} clean prose.", 0, None))
+    for i in range(20):
+        specs.append((SegmentType.PARAGRAPH, f"Note {i} junk header 12.", 1, None))
+    translated = make_book(specs, source_format="pdf", titles={1: "Notes"})
+    judge = Judge(ContentScreenClient())
+    dim, scores, fell_back = score_extraction(
+        "pdf", translated, judge, sample_size=20, seed=1, excluded_chapters={1}
+    )
+    # Only body (chapter 0) paragraphs screened -> all clean, no fallback.
+    assert fell_back is False
+    assert len(scores) == 20
+    assert dim.fraction == pytest.approx(1.0)
+
+
+def test_term_occurrences_uses_word_boundaries() -> None:
+    # The classic bug: 'UN' matched inside 'united'/'understand' as a substring.
+    text = "The UN met. The united nations understand the UN."
+    assert _term_occurrences("UN", text) == 2  # two standalone 'UN', not 4
+    assert _term_occurrences("un", text) == 2  # case-insensitive, still boundary-anchored
+    assert _term_occurrences("nations", text) == 1
+
+
+def test_terminology_word_boundary_no_substring_inflation() -> None:
+    source = make_book(
+        [
+            (SegmentType.PARAGRAPH, "The UN is united. Nations understand.", 0, None),
+            (SegmentType.PARAGRAPH, "The UN acts.", 0, None),
+        ]
+    )
+    translated = make_book(
+        [
+            (SegmentType.PARAGRAPH, "OZN je združena. Narodi razumejo.", 0, None),
+            (SegmentType.PARAGRAPH, "OZN ukrepa.", 0, None),
+        ]
+    )
+    glossary = {"UN": "OZN"}
+    dim = score_terminology(align(source, translated), glossary)
+    # 2 whole-word 'UN' occurrences, both rendered 'OZN' -> 2/2, not diluted by
+    # 'united'/'understand' substring hits.
+    assert dim.fraction == pytest.approx(1.0)
+    assert "2/2" in dim.detail
