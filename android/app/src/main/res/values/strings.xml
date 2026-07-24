@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Berilo</string>
+
+    <string name="library_title">Library</string>
+    <string name="library_empty_title">Add your first book</string>
+    <string name="library_empty_body">Tap the + button and choose an EPUB to start reading.</string>
+    <string name="library_add_book_cd">Add a book</string>
+    <string name="library_book_cover_cd">Cover of %1$s</string>
+    <string name="library_progress_cd">%1$d%% read</string>
+
+    <string name="library_import_success">Added to your library</string>
+    <string name="library_import_duplicate">Already in your library</string>
+    <string name="library_import_failed">Could not import: %1$s</string>
+
+    <string name="delete_book_title">Delete this book?</string>
+    <string name="delete_book_body">"%1$s" and its notes will be removed from this device. This can\'t be undone.</string>
+    <string name="delete_book_confirm">Delete</string>
+    <string name="delete_book_cancel">Cancel</string>
+
+    <string name="reader_loading">Opening…</string>
+    <string name="reader_now_reading">Now reading</string>
+    <string name="reader_not_found">Book not found</string>
+</resources>
