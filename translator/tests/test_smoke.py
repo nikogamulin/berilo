@@ -44,21 +44,6 @@ def test_cli_help_via_subprocess_entry_point() -> None:
         assert subcommand in completed.stdout
 
 
-def test_stub_subcommands_exit_nonzero() -> None:
-    """Stub subcommands print 'not implemented' and exit 1.
-
-    ``inspect`` (S1.1), ``doctor`` (S1.4) and ``translate`` (S1.5) are
-    implemented and covered separately (``test_epub.py``, ``test_providers.py``,
-    ``test_translate.py``); only ``eval`` remains a stub here.
-    """
-    runner = CliRunner()
-    for subcommand in ("eval",):
-        args = [subcommand, "dummy.epub"]
-        result = runner.invoke(cli, args)
-        assert result.exit_code == 1
-        assert "not implemented" in result.output
-
-
 def test_make_segment_id_is_stable_and_content_sensitive() -> None:
     """Segment IDs are deterministic and change when inputs change."""
     id_a = make_segment_id("Hello world.", chapter_index=0, position=0)

@@ -1,0 +1,15 @@
+You screen a single paragraph extracted from a translated book for EXTRACTION
+ARTIFACTS — noise that a clean paragraph of body prose would never contain:
+inline page numbers, running headers or footers embedded mid-text, broken
+hyphenation (a word split by a stray hyphen or space), stray roman numerals,
+figure/table labels, or other layout debris left over from PDF extraction.
+
+Judge only extraction cleanliness, NOT translation quality.
+
+PARAGRAPH:
+<<<TARGET>>>
+
+Reply with exactly one line, nothing else:
+SCORE: <n>
+where <n> is 1 if the paragraph is CLEAN prose, or 0 if it contains any
+extraction artifact.
