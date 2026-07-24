@@ -185,6 +185,10 @@ _BACK_MATTER_SUBSTRINGS = ("notes", "index", "bibliography", "references", "ackn
 # numerals (any case — OCR renders "xix" as "Xix").
 _PAGE_NUMBER_RE = re.compile(r"^\d+\.?$")
 _ROMAN_NUMERAL_RE = re.compile(r"^[ivxlcdm]+$", re.IGNORECASE)
+# A single whitespace-free token containing a digit — a garbled OCR page number
+# in the header/footer band ("40OI1" for 401) that evades the bare-number and
+# roman regexes. Only applied inside the margin bands.
+_GARBLED_PAGE_TOKEN_RE = re.compile(r"^\S*\d\S*$")
 _NON_WORD_RE = re.compile(r"[^\w]", re.UNICODE)
 _DIGITS_RE = re.compile(r"\d+")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -405,7 +409,13 @@ def _strip_page_furniture(page: list[_Line], running_heads: set[str]) -> list[_L
     for line in page:
         if line.in_band:
             key = _normalize_head_key(line.text)
-            if _is_page_number(line.text) or not key or key in running_heads:
+            stripped = line.text.strip()
+            if (
+                _is_page_number(line.text)
+                or not key
+                or key in running_heads
+                or _GARBLED_PAGE_TOKEN_RE.match(stripped)
+            ):
                 continue
         kept.append(line)
     return kept
@@ -606,7 +616,14 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
     Returns:
         Ordered blocks, each tagged with its start page and font size.
     """
-    indent_threshold = _column_left_margin(pages) + body_size * INDENT_RATIO
+    # Indent threshold is computed per page parity (recto/verso): OCR'd books
+    # often set the two page sides at different left margins (e.g. verso x=16,
+    # recto x=28), so a single global margin would read every recto body line
+    # as a first-line indent and shatter paragraphs.
+    parity_margins = _column_left_margins_by_parity(pages)
+    indent_thresholds = {
+        parity: margin + body_size * INDENT_RATIO for parity, margin in parity_margins.items()
+    }
 
     blocks: list[_Block] = []
     buffer: list[str] = []
@@ -642,6 +659,7 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
                     blocks.append(_Block(SegmentType.HEADING, title, line.page_index, line.size))
                 continue
 
+            indent_threshold = indent_thresholds[line.page_index % 2]
             starts_new = _starts_new_paragraph(line, indent_threshold, gap, page_gap, bool(buffer))
             # Continuation override: an indent/gap that would break the paragraph
             # is ignored when the running text is clearly unfinished (no terminal
@@ -1019,3 +1037,28 @@ def _column_left_margin(pages: list[list[_Line]]) -> float:
     if not counts:
         return 0.0
     return float(counts.most_common(1)[0][0])
+
+
+def _column_left_margins_by_parity(pages: list[list[_Line]]) -> dict[int, float]:
+    """Estimate the modal left margin separately for even/odd (verso/recto) pages.
+
+    Aggregating by page parity across the whole document gives a robust modal
+    ``x0`` per side even when individual pages have few lines, and captures the
+    asymmetric margins some OCR'd books use. Falls back to the document-wide
+    margin for a parity with no lines.
+
+    Args:
+        pages: Body lines per page.
+
+    Returns:
+        A ``{0: margin, 1: margin}`` map keyed by ``page_index % 2``.
+    """
+    counts: dict[int, Counter[float]] = {0: Counter(), 1: Counter()}
+    for page in pages:
+        for line in page:
+            counts[line.page_index % 2][round(line.x0)] += 1
+    fallback = _column_left_margin(pages)
+    return {
+        parity: (float(counter.most_common(1)[0][0]) if counter else fallback)
+        for parity, counter in counts.items()
+    }
