@@ -183,7 +183,7 @@ _BACK_MATTER_SUBSTRINGS = ("notes", "index", "bibliography", "references", "ackn
 
 # Segments that must never survive: bare arabic page numbers and bare roman
 # numerals (any case — OCR renders "xix" as "Xix").
-_PAGE_NUMBER_RE = re.compile(r"^\d+$")
+_PAGE_NUMBER_RE = re.compile(r"^\d+\.?$")
 _ROMAN_NUMERAL_RE = re.compile(r"^[ivxlcdm]+$", re.IGNORECASE)
 _NON_WORD_RE = re.compile(r"[^\w]", re.UNICODE)
 _DIGITS_RE = re.compile(r"\d+")
@@ -201,6 +201,25 @@ _CAPTION_TAIL_RE = re.compile(r"\([^)]{2,}\)\s*$")
 # A trailing parenthetical made only of 1-4 capitalized words — a photo/source
 # credit ("(National Diet Library)", "(Elizabeth Spaulding)").
 _CAPTION_CREDIT_RE = re.compile(r"\([A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,3}\)\s*$")
+# Photo-position markers ("Strauss (right), speaking with …") mark figure
+# captions; body prose essentially never parenthesizes these bare words.
+_CAPTION_POSITION_RE = re.compile(r"\((?:right|left|center|centre|top|bottom|above|below)\)", re.I)
+# Plate-section captions without credits open with a depiction phrase.
+_CAPTION_LEAD_RE = re.compile(
+    r"^(?:Image|Photograph|Photo|Portrait|Cartoon|Illustration|Map|Poster|Facsimile|Front page"
+    r"|Cover) of\b"
+)
+# A lone token with digits ("CINCUSAREUR.20") is an endnote-marker artifact,
+# never a prose paragraph.
+_SINGLE_TOKEN_WITH_DIGIT_RE = re.compile(r"^\S*\d\S*$")
+# Chapter-opening scene setters: a bare date ("November 2020") or a
+# "Place, Region" line ("Fort Meade, Maryland").
+SCENE_SETTER_MAX_WORDS = 6
+_DATELINE_RE = re.compile(
+    r"^(?:January|February|March|April|May|June|July|August|September|October|November"
+    r"|December)(?:\s+\d{1,2},?)?\s+\d{4}$"
+)
+_PLACELINE_RE = re.compile(r"^[A-Z][\w.'’-]*(?:\s+[A-Z][\w.'’-]*){0,2},\s+[A-Z][\w.'’ -]+$")
 # Sentence-terminal characters, checked after stripping trailing quotes/brackets.
 _TERMINAL_PUNCT = ".!?…"
 _TRAILING_CLOSERS = "”’\"')]»"
@@ -481,6 +500,8 @@ def _is_droppable(text: str) -> bool:
         return True
     if _is_page_number(stripped):
         return True
+    if _SINGLE_TOKEN_WITH_DIGIT_RE.match(stripped):
+        return True
     return not _WORD_RE.search(stripped)
 
 
@@ -599,7 +620,12 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
         buffer = []
         if _is_droppable(text):
             return
-        kind = SegmentType.CAPTION if _is_caption(text) else SegmentType.PARAGRAPH
+        if _is_caption(text):
+            kind = SegmentType.CAPTION
+        elif _is_scene_setter(text):
+            kind = SegmentType.OTHER
+        else:
+            kind = SegmentType.PARAGRAPH
         blocks.append(_Block(kind, text, buffer_page, body_size))
 
     for page in pages:
@@ -622,7 +648,12 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
             # punctuation) and this line resumes it (starts lowercase). This
             # re-joins block quotes and prose that wraps across page/column
             # boundaries into coherent segments instead of per-line fragments.
-            if starts_new and buffer and _looks_incomplete(buffer[-1]) and _starts_lowercase(line):
+            if (
+                starts_new
+                and buffer
+                and _looks_incomplete(buffer[-1])
+                and (_starts_lowercase(line) or buffer[-1].rstrip().endswith(","))
+            ):
                 starts_new = False
             if starts_new:
                 flush()
@@ -656,7 +687,25 @@ def _is_caption(text: str) -> bool:
             return True
     if word_count <= CAPTION_CREDIT_MAX_WORDS and _CAPTION_CREDIT_RE.search(stripped):
         return True
+    if word_count <= CAPTION_CREDIT_MAX_WORDS and _CAPTION_POSITION_RE.search(stripped):
+        return True
+    if word_count <= CAPTION_CREDIT_MAX_WORDS and _CAPTION_LEAD_RE.match(stripped):
+        return True
     return False
+
+
+def _is_scene_setter(text: str) -> bool:
+    """Return True for chapter-opening dateline/place lines, not prose.
+
+    Examples: ``"November 2020"``, ``"Fort Meade, Maryland"``. Short, no
+    terminal punctuation, and shaped like a bare date or ``Place, Region``
+    line. Typed OTHER: kept (and translated) but excluded from prose QA
+    sampling.
+    """
+    stripped = text.strip()
+    if len(stripped.split()) > SCENE_SETTER_MAX_WORDS or not _looks_incomplete(stripped):
+        return False
+    return bool(_DATELINE_RE.match(stripped) or _PLACELINE_RE.match(stripped))
 
 
 def _looks_incomplete(text: str) -> bool:

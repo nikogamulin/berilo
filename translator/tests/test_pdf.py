@@ -344,6 +344,42 @@ def test_is_caption_recognizes_source_credits() -> None:
     assert not _is_caption("He returned to Moscow that winter and never left.")
     assert not _is_caption("They met in Moscow (the capital) during the thaw.")
     assert not _is_caption("See chapter three for the full account (page 3).")
+    # Positional markers and depiction-phrase leads are captions too.
+    assert _is_caption("Franz-Josef Strauss (right), speaking with the delegation")
+    assert _is_caption("Image of a lynched man from an inauthentic pamphlet titled")
+    # But prose merely mentioning an image is not.
+    assert not _is_caption("The image of the west that the pamphlet projected was grim.")
+
+
+def test_scene_setter_lines_typed_other() -> None:
+    """Dateline/place chapter openers are OTHER, not prose paragraphs."""
+    from berilo.normalize.pdf import _is_scene_setter
+
+    assert _is_scene_setter("November 2020")
+    assert _is_scene_setter("June 13, 2017")
+    assert _is_scene_setter("Fort Meade, Maryland")
+    assert not _is_scene_setter("November 2020 was the coldest month on record.")
+    assert not _is_scene_setter("He left for Fort Meade, Maryland.")
+
+
+def test_comma_continuation_merges_across_break() -> None:
+    """A block ending with a comma merges with an uppercase continuation."""
+    from berilo.normalize.pdf import _looks_incomplete
+
+    assert _looks_incomplete("moved the operation from Australia to")
+    assert _looks_incomplete("hit ports in Rotterdam,")
+    assert not _looks_incomplete("The operation ended.")
+
+
+def test_single_token_with_digit_is_droppable() -> None:
+    """Endnote-marker artifacts like 'CINCUSAREUR.20' and '28.' are junk."""
+    from berilo.normalize.pdf import _is_droppable
+
+    assert _is_droppable("CINCUSAREUR.20")
+    assert _is_droppable("28.")
+    assert _is_droppable("28")
+    assert not _is_droppable("Moscow.")
+    assert not _is_droppable("The 20 divisions moved west.")
 
 
 def test_caption_line_is_typed_caption_and_excluded_from_sampling(tmp_path: Path) -> None:
