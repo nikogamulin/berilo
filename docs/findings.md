@@ -52,6 +52,19 @@
   back matter by default would roughly double cost for near-zero reader
   value — S1.5 should expose `--skip-back-matter` (or similar) and dry-run
   estimates should show per-chapter breakdown.
+- [2026-07-24] Deterministic EPUB output: `zipfile.writestr(name, data)`
+  stamps wall-clock time — build explicit `ZipInfo` with fixed
+  `date_time=(1980,1,1,...)` per entry, fixed entry order, fixed
+  `dcterms:modified` (done in `assemble.py`; the S1.5 byte-identical cache
+  Verify depends on it).
+- [2026-07-24] Don't validate the inline-emphasis subset by XML round-trip
+  (`ET.fromstring`): literal `&`/`<` in prose is legit content, not
+  malformed markup. Use a regex tokenizer + open/close tag stack
+  (`assemble._render_inline`); attribute-bearing tags fall back to full
+  escaping (XSS/injection safe, reviewer-probed).
+- [2026-07-24] `normalize/epub.py` only emits known block tags: prose
+  sitting directly in a `<div>`/`<td>` with no block wrapper is skipped —
+  known limitation, 0 occurrences in the example books.
 - [2026-07-24] `data/` is gitignored and holds copyrighted books — never
   commit, never upload contents anywhere except segment batches to the
   configured LLM API during translation.

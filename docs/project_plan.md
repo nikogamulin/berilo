@@ -52,7 +52,8 @@
 - **Verify:** translate the EPUB example to `sl` twice — second run makes 0 API calls (cache log) and is byte-identical; kill the first run at ~50% and resume — completes with no re-billed segments (call count in log); T1 completeness = 100%.
 
 ### S1.6 — Assemble EPUB (3 pt)
-- [ ] Build valid EPUB 3 from translated segments: chapters, TOC, metadata (`[SL] <title>`), emphasis retained; `--bilingual` variant with collapsible/adjacent source paragraphs
+- [x] Build valid EPUB 3 from translated segments: chapters, TOC, metadata (`[SL] <title>`), emphasis retained; `--bilingual` variant with collapsible/adjacent source paragraphs — landed 2026-07-24; epubcheck exit 0 on both variants verified on main
+- [ ] Verify residual: Calibre-viewer open (manual, Niko) + T5 ≥ 9/10 (needs S1.7 harness) — box below stays open until both run
 - **Verify:** `epubcheck` exits 0 on both variants; output opens in Calibre viewer; T5 structural-fidelity script ≥ 9/10.
 
 ### S1.7 — Eval harness (Rubric T) (3 pt)
