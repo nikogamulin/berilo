@@ -64,7 +64,8 @@
 - **Verify:** `berilo eval <translated epub> --sample 40 --seed 42` prints score + 95% CI and writes a ledger row; running twice with same seed gives identical sample selection.
 
 ### S1.8 — Full-book milestone run (2 pt)
-- [ ] Translate all 3 example books EN→SL at default models; record costs; fix top defects found by eval; iterate until gate
+- [x] All 3 books translated EN→SL 2026-07-24 (gpt-5-mini, reasoning=low; content-policy batches via claude-haiku fallback); T v1.1: 88.5 [86.0,90.8] / 85.0 [82.6,87.5] / 86.7 [84.3,89.0] — all ≥85 with CI lower ≥80; epubcheck 0 errors ×3; total cost ≈ €3.4 ≤ €5; defects fixed en route (reasoning cost, moderation fallback, CAPTION/OTHER round-trip, rubric v1.1)
+- [ ] Residual: 2-page manual spot-read sign-off by Niko (record in issue #11)
 - **Verify:** Rubric **T ≥ 85 (CI lower bound ≥ 80) on all 3 books**; total cost ≤ €5; scores in `rubric_scores.jsonl`; 2-page manual spot-read by Niko signed off (recorded in issue).
 
 ---
