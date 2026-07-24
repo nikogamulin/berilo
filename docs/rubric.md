@@ -17,6 +17,15 @@ Judge model defaults to `BERILO_JUDGE_MODEL`; judge prompts live in
 `translator/berilo/eval/prompts/` and are versioned — score rows record the
 prompt version.
 
+**v1.1 (2026-07-24):** T2/T3 pair sampling and the T6 screen pool draw from
+body-prose PARAGRAPH segments only (front/back-matter chapters excluded;
+fallback to the full pool is logged and noted in the score row). T4 counts
+term occurrences on word boundaries, not substrings ("UN" no longer matches
+inside "united"). Rationale: defect investigation showed v1.0 pooled Notes
+citation fragments as prose and inflated T4 denominators — measurement
+artifacts, not translation quality (evidence in `loops/build/ledger.jsonl`
+and `docs/findings.md`).
+
 | Dim | What | Weight | Measurement |
 |-----|------|--------|-------------|
 | T1 | **Completeness** | 20 | % of source segments with non-empty translation, 1:1 mapping. Computed exactly (no sampling). <100% caps the total rubric score at 40 — a book with holes is not a book. |
