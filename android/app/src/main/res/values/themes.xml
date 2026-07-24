@@ -9,4 +9,14 @@
         <item name="android:statusBarColor">@color/berilo_paper</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>
+
+    <!--
+        Reader-only theme. Readium's EpubNavigatorFragment inflates AppCompat
+        widgets, which require an AppCompat (or descendant) activity theme at
+        runtime; the DayNight parent tracks the system light/dark setting while
+        the reflowable content colors are driven by EpubPreferences.
+    -->
+    <style name="Theme.Berilo.Reader" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/berilo_paper</item>
+    </style>
 </resources>

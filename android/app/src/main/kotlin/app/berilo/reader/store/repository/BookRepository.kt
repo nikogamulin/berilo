@@ -29,6 +29,16 @@ class BookRepository(
         bookDao.update(entity.copy(lastOpenedAt = openedAt))
     }
 
+    /** Reads the last persisted reading position (Readium Locator JSON), or null. */
+    suspend fun getProgression(id: String): String? = bookDao.getProgression(id)
+
+    /**
+     * Persists the reading position and refreshes `lastOpenedAt` in a single
+     * write. Called on the debounced position-save path from the reader.
+     */
+    suspend fun saveProgression(id: String, progressionJson: String, openedAt: Long) =
+        bookDao.updateProgression(id, progressionJson, openedAt)
+
     /** Deletes the book row and its on-disk copy (EPUB + cover, if present). */
     suspend fun deleteBook(book: Book) =
         withContext(ioDispatcher) {
