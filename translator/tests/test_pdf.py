@@ -21,6 +21,7 @@ from berilo.models import Book, Segment, SegmentType
 from berilo.normalize.pdf import (
     _dehyphenate,
     _is_caption,
+    _is_ocr_gibberish,
     normalize_pdf,
 )
 from berilo.providers.base import CompletionResult, LLMClient
@@ -522,6 +523,57 @@ def test_front_matter_folds_drops_gibberish_and_excludes_from_sampling(tmp_path:
     assert sampled
     assert all(seg.chapter_index not in front_matter_chapter_indices(book) for seg in sampled)
     assert any("clean body paragraph" in seg.text for seg in sampled)
+
+
+def test_is_ocr_gibberish_keeps_real_short_sentences() -> None:
+    """The gibberish guard flags scan residue but never a real short sentence."""
+    assert _is_ocr_gibberish("Hf j")
+    assert _is_ocr_gibberish(": ~tg aie")
+    assert not _is_ocr_gibberish("To whom would they not?")
+    assert not _is_ocr_gibberish("How would those exploits be used?")
+
+
+def test_body_scan_residue_is_typed_other_not_dropped(tmp_path: Path) -> None:
+    """A zero-real-word body fragment ("Hf j") becomes OTHER and stays in the
+    Book (translated, not sampled); a real short sentence stays PARAGRAPH."""
+    # A long first paragraph fixes the median line gap small; blank-gap breaks
+    # then isolate the two short blocks that follow.
+    long_para = [
+        (_LEFT_MARGIN, 150.0 + 16.0 * i, line, _BODY_SIZE)
+        for i, line in enumerate(
+            [
+                "The investigators kept circling the same unanswered question",
+                "that had haunted them for months, unable to move past it or",
+                "to let it go, and every meeting returned to the same nagging",
+                "doubt about who was really pulling the strings behind all of",
+                "the events, and the room fell silent whenever it came up",
+                "again in this widening and increasingly dangerous affair.",
+            ]
+        )
+    ]
+    page0 = [
+        (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+        *long_para,
+        (_LEFT_MARGIN, 296.0, "To whom would they not?", _BODY_SIZE),  # real short sentence
+        (_LEFT_MARGIN, 346.0, "Hf j", _BODY_SIZE),  # zero-real-word scan residue
+        (
+            _LEFT_MARGIN,
+            396.0,
+            "A final grounding paragraph of clean body prose ends it.",
+            _BODY_SIZE,
+        ),
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, [page0], name="residue.pdf"))
+
+    question = _find_segment(book, "To whom would they not?")
+    assert question.type is SegmentType.PARAGRAPH
+    residue = _find_segment(book, "Hf j")
+    assert residue.type is SegmentType.OTHER  # reclassified, not dropped
+    assert residue in book.segments  # integrity: kept in the book
+    # OTHER residue is excluded from the prose sample; real prose is not.
+    sampled = sample_segments(book, n=30, seed=42)
+    assert not any(seg.text == "Hf j" for seg in sampled)
+    assert any("To whom would they not?" in seg.text for seg in sampled)
 
 
 # --------------------------------------------------------------------------- #

@@ -25,6 +25,12 @@ line-break hyphens. This module reconstructs the logical document:
 The result is a :class:`~berilo.models.Book` whose segments carry a 1:1
 mapping to the logical paragraphs and headings of the source — no segment is
 a bare page number, running header, or empty string.
+
+Segment typing marks non-prose so extraction-quality screening can skip it:
+``CAPTION`` for figure/source-credit lines and ``OTHER`` for scan residue —
+illustration/cover OCR gibberish that is not real text. ``OTHER`` segments are
+kept in the book and still translated (segment integrity holds); they are only
+excluded from the clean-prose sample.
 """
 
 from __future__ import annotations
@@ -648,7 +654,9 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
             return
         if _is_caption(text):
             kind = SegmentType.CAPTION
-        elif _is_scene_setter(text):
+        elif _is_scene_setter(text) or _is_ocr_gibberish(text):
+            # Scan residue (illustration OCR) is marked OTHER — kept in the book
+            # and translated, but never sampled as prose.
             kind = SegmentType.OTHER
         else:
             kind = SegmentType.PARAGRAPH
