@@ -3,6 +3,7 @@ package app.berilo.reader.annotations
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -111,16 +112,25 @@ private fun NoteEditorSheet(state: AnnotationEditorUiState.NoteEditor, actions: 
     }
 }
 
+/** Swatch diameter kept small (matches the muted-fill scale in the design guidelines); the
+ * surrounding clickable [Box] is padded out to [MIN_TOUCH_TARGET_DP] so the tap area still
+ * meets the WCAG AA 48dp minimum (design_guidelines.md Accessibility). */
+private val MIN_TOUCH_TARGET_DP = 48.dp
+
 @Composable
-internal fun ColorSwatch(color: HighlightColor, onClick: () -> Unit, selected: Boolean = false, modifier: Modifier = Modifier) {
+internal fun ColorSwatch(color: HighlightColor, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false) {
     val ringColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
-    Surface(
+    val swatchSize = if (selected) 36.dp else 32.dp
+    Box(
         modifier = modifier
-            .size(if (selected) 36.dp else 32.dp)
-            .clip(CircleShape)
-            .background(color.toComposeColor())
+            .size(MIN_TOUCH_TARGET_DP)
             .clickable(onClick = onClick),
-        color = androidx.compose.ui.graphics.Color.Transparent,
-        border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, ringColor),
-    ) {}
+        contentAlignment = androidx.compose.ui.Alignment.Center,
+    ) {
+        Surface(
+            modifier = Modifier.size(swatchSize).clip(CircleShape).background(color.toComposeColor()),
+            color = androidx.compose.ui.graphics.Color.Transparent,
+            border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, ringColor),
+        ) {}
+    }
 }

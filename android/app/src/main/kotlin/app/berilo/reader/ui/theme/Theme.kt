@@ -18,6 +18,10 @@ private val LightColors =
         surface = Paper,
         onSurface = Ink,
         surfaceVariant = InkLight,
+        onSurfaceVariant = OnSurfaceVariantLight,
+        outline = OutlineLight,
+        error = ErrorLight,
+        onError = OnErrorLight,
     )
 
 private val DarkColors =
@@ -28,6 +32,11 @@ private val DarkColors =
         onBackground = Paper,
         surface = PaperDark,
         onSurface = Paper,
+        surfaceVariant = InkDarkVariant,
+        onSurfaceVariant = OnSurfaceVariantDark,
+        outline = OutlineDark,
+        error = ErrorDark,
+        onError = OnErrorDark,
     )
 
 @Composable

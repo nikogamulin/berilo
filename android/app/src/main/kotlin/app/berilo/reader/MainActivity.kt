@@ -7,12 +7,16 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.berilo.reader.store.repository.Book
 import app.berilo.reader.reader.ReaderActivity
 import app.berilo.reader.settings.SettingsActivity
+import app.berilo.reader.ui.library.LibraryEvent
 import app.berilo.reader.ui.library.LibraryScreen
 import app.berilo.reader.ui.library.LibraryViewModel
 import app.berilo.reader.ui.theme.BeriloTheme
@@ -36,11 +40,23 @@ class MainActivity : ComponentActivity() {
         setContent {
             BeriloTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+                val snackbarHostState = remember { SnackbarHostState() }
 
+                val importedMessage = stringResource(R.string.library_import_success)
+                val duplicateMessage = stringResource(R.string.library_import_duplicate)
                 LaunchedEffect(Unit) {
-                    // Events are transient (snackbar-worthy); S2.7 adds a Snackbar host.
-                    // For S2.1 they are consumed silently so the sealed type has a call site.
-                    viewModel.events.collect { /* no-op until S2.7 surfaces a Snackbar */ }
+                    // One-shot import outcomes surface as a Snackbar (design_guidelines.md
+                    // "instant, quiet feedback" — never a toast covering text).
+                    viewModel.events.collect { event ->
+                        val message =
+                            when (event) {
+                                LibraryEvent.Imported -> importedMessage
+                                LibraryEvent.AlreadyInLibrary -> duplicateMessage
+                                is LibraryEvent.ImportFailed ->
+                                    getString(R.string.library_import_failed, event.reason)
+                            }
+                        snackbarHostState.showSnackbar(message)
+                    }
                 }
 
                 LibraryScreen(
@@ -49,6 +65,7 @@ class MainActivity : ComponentActivity() {
                     onOpenBook = ::openReader,
                     onDeleteBook = viewModel::deleteBook,
                     onOpenSettings = ::openSettings,
+                    snackbarHostState = snackbarHostState,
                 )
             }
         }
