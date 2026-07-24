@@ -1,5 +1,25 @@
 # Findings register (Tier 2)
 
+- [2026-07-24] Book-1 milestone numbers (The New Rules of War, EN→SL,
+  gpt-5-mini @ reasoning_effort=low): translation €0.56 actual (dry-run
+  estimated €0.53 at default effort — the low-effort surcharge constant now
+  overestimates; recalibrate `translate.py`'s reasoning additive), eval
+  €0.04. T=89.7 [87.9,91.6]: weak dims T3 fluency 15.3/20, T4 terminology
+  6.1/10 — first iteration targets if a re-run is wanted. Eval prints a
+  benign "Could not parse nav document at nav.xhtml" warning on our own
+  EPUBs (assembler names/paths differ from the eval parser's expectation) —
+  cosmetic, T5 still scores; worth a 1-line fix in eval's nav lookup.
+- [2026-07-24] Readium hosting recipe (S2.2): `fragment-compose` 1.8.9 must
+  be a DIRECT app dependency (navigator keeps androidx.fragment at runtime
+  scope); host with classic FragmentActivity + supportFragmentManager.
+  fragmentFactory + FragmentContainerView (AndroidFragment can't inject
+  Readium's FragmentFactory); activity theme must descend from
+  Theme.AppCompat (framework Theme.Material crashes the navigator; AppCompat
+  resources reach the merge from runtime-scope AARs); call
+  `EpubNavigatorFragment.createDummyFactory()` before super.onCreate() for
+  restored-fragment safety; Robolectric required for JVM tests touching
+  Locator/Link (android.net.Uri); `buildFeatures { buildConfig = true }`
+  needed for BuildConfig.DEBUG gating.
 - [2026-07-24] Android coroutine-test gotchas: a `TestDispatcher` injected as
   a client's ioDispatcher must be constructed with the enclosing
   `TestScope.testScheduler` (else `delay()` throws "different schedulers");

@@ -47,21 +47,20 @@
 - [x] One `LLMClient` interface; OpenAI + Anthropic implementations; models/keys from `.env`/flags; retry with backoff; token+cost accounting per call
 - **Verify:** `make test` unit tests pass with mocked HTTP (no live calls in CI); live smoke `berilo doctor` translates one hardcoded sentence via each configured provider and prints cost > €0.
 
-### S1.5 — Translate engine (5 pt)
-- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES, both fixes folded: `--yes`/confirm gate, glossary cost in summary); offline Verify green (85 tests: cache 0-call re-run, kill/resume no-rebill, 1:1 integrity)
-- [ ] Paid Verify residual (Supervisor + Niko go-ahead): real double-run byte-identical, killed/resumed run, T1 = 100% — planned with S1.8
-- [ ] Batched paragraph translation with rolling context; glossary pass (extract names/terms → fixed renderings, injected into every batch); SQLite cache keyed `(book_hash, segment_hash, model, lang)`; strict 1:1 mapping with loud failure + retry for bad segments; `--dry-run` cost estimate
+### S1.5 — Translate engine ✅ (5 pt)
+- [x] Paid Verify passed live 2026-07-24 on *The New Rules of War*: run killed at 183/2309 → resumed with 0 re-billed segments; 2nd full run 0 API calls €0.0000 and byte-identical sha256; T1 = 100% (eval 20/20)
+- [x] Batched paragraph translation with rolling context; glossary pass (extract names/terms → fixed renderings, injected into every batch); SQLite cache keyed `(book_hash, segment_hash, model, lang)`; strict 1:1 mapping with loud failure + retry for bad segments; `--dry-run` cost estimate
 - **Verify:** translate the EPUB example to `sl` twice — second run makes 0 API calls (cache log) and is byte-identical; kill the first run at ~50% and resume — completes with no re-billed segments (call count in log); T1 completeness = 100%.
 
 ### S1.6 — Assemble EPUB (3 pt)
 - [x] Build valid EPUB 3 from translated segments: chapters, TOC, metadata (`[SL] <title>`), emphasis retained; `--bilingual` variant with collapsible/adjacent source paragraphs — landed 2026-07-24; epubcheck exit 0 on both variants verified on main
-- [ ] Verify residual: Calibre-viewer open (manual, Niko) + T5 ≥ 9/10 (needs S1.7 harness) — box below stays open until both run
+- [x] T5 residual met 2026-07-24: eval scored structural fidelity 10/10 on the translated example
+- [ ] Verify residual: Calibre-viewer open (manual, Niko)
 - **Verify:** `epubcheck` exits 0 on both variants; output opens in Calibre viewer; T5 structural-fidelity script ≥ 9/10.
 
-### S1.7 — Eval harness (Rubric T) (3 pt)
-- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES: docstring + prompts package-data, folded); offline Verify green (128 tests: seed determinism, T1 cap-at-40, paired bootstrap CI, dry-run 0 calls)
-- [ ] Live Verify residual: real judged run on a translated EPUB — runs with S1.8
-- [ ] `berilo eval` implements Rubric T end-to-end: sampled LLM-judge scoring (seed, bootstrap CI), completeness, terminology, structure checks; appends to `loops/build/rubric_scores.jsonl`
+### S1.7 — Eval harness (Rubric T) ✅ (3 pt)
+- [x] Live Verify passed 2026-07-24: `berilo eval "The New Rules of War.sl.epub" --sample 40 --seed 42` printed T=89.7 [87.9, 91.6] and wrote the score row; seed determinism test-proven
+- [x] `berilo eval` implements Rubric T end-to-end: sampled LLM-judge scoring (seed, bootstrap CI), completeness, terminology, structure checks; appends to `loops/build/rubric_scores.jsonl`
 - **Verify:** `berilo eval <translated epub> --sample 40 --seed 42` prints score + 95% CI and writes a ledger row; running twice with same seed gives identical sample selection.
 
 ### S1.8 — Full-book milestone run (2 pt)
@@ -77,6 +76,8 @@
 - **Verify:** `./gradlew assembleDebug test` green; APK installs on Boox; all 3 translated books import and show covers.
 
 ### S2.2 — Reader core (5 pt)
+- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES: open-path hang + publication leak, folded; 44 JVM tests)
+- [ ] Device residual: R1 walkthrough 25/25 + R2 latencies on Boox
 - [ ] Paginated Readium rendering; e-ink mode (no animations, full-refresh turns, pure B/W theme); font/margin settings; position persistence; chapter nav
 - **Verify:** Rubric R1 walkthrough = 25/25 on Boox; R2 measurements meet all 3 thresholds (debug overlay logs attached to issue).
 
