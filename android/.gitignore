@@ -14,3 +14,8 @@ app/schemas/
 hs_err_pid*.log
 replay_pid*.log
 core.[0-9]*
+
+# S2.8: real signing secrets — keystore.properties.example is the template
+keystore.properties
+*.keystore
+*.jks
