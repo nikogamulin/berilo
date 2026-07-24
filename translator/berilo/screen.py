@@ -27,6 +27,19 @@ logger = logging.getLogger(__name__)
 DEFAULT_SAMPLE_SIZE = 30
 DEFAULT_SEED = 42
 
+# Chapter-title substrings that mark back matter (notes/index/bibliography):
+# their segments are citation fragments, not body prose, so they are excluded
+# from the clean-prose sample. Mirrors the normalizer's back-matter titling.
+_BACK_MATTER_TITLE_SUBSTRINGS = (
+    "notes",
+    "endnotes",
+    "index",
+    "bibliography",
+    "references",
+    "acknowledg",
+    "about the author",
+)
+
 # Deterministic, single-token screening prompt. The model must answer with a
 # bare YES/NO so parsing is unambiguous across providers.
 _SCREEN_PROMPT = (
@@ -87,28 +100,54 @@ class ScreenReport:
         return [v for v in self.verdicts if not v.is_clean]
 
 
+def back_matter_chapter_indices(book: Book) -> set[int]:
+    """Return chapter indices whose title names back matter (notes/index/...).
+
+    Segments in these chapters are citation/reference fragments rather than
+    body prose, so extraction-quality screening excludes them.
+
+    Args:
+        book: The normalized book.
+
+    Returns:
+        The set of back-matter chapter indices (possibly empty).
+    """
+    return {
+        segment.chapter_index
+        for segment in book.segments
+        if segment.chapter_title
+        and any(sub in segment.chapter_title.lower() for sub in _BACK_MATTER_TITLE_SUBSTRINGS)
+    }
+
+
 def sample_segments(
     book: Book,
     n: int = DEFAULT_SAMPLE_SIZE,
     seed: int = DEFAULT_SEED,
 ) -> list[Segment]:
-    """Deterministically sample paragraph segments from a book.
+    """Deterministically sample body-prose paragraph segments from a book.
 
-    Sampling is restricted to :attr:`SegmentType.PARAGRAPH` segments (headings
-    and other structural segments are not prose to be screened) and is
-    reproducible for a given ``(n, seed)``: the same book yields the same
-    sample every time.
+    Sampling is restricted to :attr:`SegmentType.PARAGRAPH` segments (headings,
+    captions, and other structural segments are not prose to be screened) and
+    excludes back-matter chapters (notes/index/bibliography), whose segments are
+    citation fragments. It is reproducible for a given ``(n, seed)``: the same
+    book yields the same sample every time.
 
     Args:
         book: The normalized book to sample from.
-        n: Desired sample size. If the book has fewer paragraph segments, all
-            of them are returned.
+        n: Desired sample size. If the book has fewer eligible paragraph
+            segments, all of them are returned.
         seed: Seed for the deterministic RNG.
 
     Returns:
-        The sampled paragraph segments, in document order.
+        The sampled body-prose paragraph segments, in document order.
     """
-    paragraphs = [seg for seg in book.segments if seg.type is SegmentType.PARAGRAPH]
+    back_matter = back_matter_chapter_indices(book)
+    paragraphs = [
+        seg
+        for seg in book.segments
+        if seg.type is SegmentType.PARAGRAPH and seg.chapter_index not in back_matter
+    ]
     if n >= len(paragraphs):
         return paragraphs
     rng = random.Random(seed)
