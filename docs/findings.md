@@ -20,6 +20,17 @@
   restored-fragment safety; Robolectric required for JVM tests touching
   Locator/Link (android.net.Uri); `buildFeatures { buildConfig = true }`
   needed for BuildConfig.DEBUG gating.
+- [2026-07-24] Material3 `lightColorScheme()`/`darkColorScheme()` silently
+  fill unset roles (onSurfaceVariant/outline/error/…) with baseline PURPLE —
+  a one-accent design must pin every role it references; grep
+  `colorScheme\.` before using a new role (AA values pinned in
+  `ui/theme/Color.kt`, computationally verified). Downloadable Google Fonts
+  need GMS at runtime — wrong for offline-first e-ink; system serif until a
+  font-bundling story.
+- [2026-07-24] `stateIn(scope, WhileSubscribed, seed)` JVM ViewModel tests:
+  assert via `.value` after a no-op `backgroundScope` collector +
+  `advanceUntilIdle()`; a list-collector reliably captures only the seed
+  (coroutines 1.10.2 / lifecycle 2.8.7 ordering quirk, isolated repro).
 - [2026-07-24] Android coroutine-test gotchas: a `TestDispatcher` injected as
   a client's ioDispatcher must be constructed with the enclosing
   `TestScope.testScheduler` (else `delay()` throws "different schedulers");

@@ -106,6 +106,8 @@
 - **Verify:** R5 scripted 10-action sequence 15/15; export file renders correctly in Obsidian.
 
 ### S2.7 — Design pass + walkthrough checklist (3 pt)
+- [x] Design pass + `docs/checklists/reader_walkthrough.md` landed 2026-07-24 (reviewer LAND; WCAG contrast verified computationally; 176 tests)
+- [ ] Device residual: full Rubric R scoring run on Boox (checklist ready)
 - [ ] Apply `design_guidelines.md`; create `docs/checklists/reader_walkthrough.md`; full rubric R scoring run
 - **Verify:** Rubric **R ≥ 85** recorded in `rubric_scores.jsonl`; R6 checklist ≥ 10/12; screenshots archived in issue.
 
