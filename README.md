@@ -21,17 +21,58 @@ interpretation of dense paragraphs, highlights and notes.
 Plan and objective acceptance criteria: [`docs/project_plan.md`](docs/project_plan.md).
 Quality rubrics the project optimizes: [`docs/rubric.md`](docs/rubric.md).
 
-## Quick start (Phase 1)
+## Translator CLI (Phase 1)
 
 ```bash
-cp .env.example .env      # add your OpenAI or Anthropic key
+cp .env.example .env             # add your OpenAI or Anthropic key
 cd translator && pip install -e .
-berilo translate mybook.epub --to sl --dry-run   # cost estimate first
-berilo translate mybook.epub --to sl
+berilo doctor                    # provider smoke test, one sentence, ~€0
+berilo inspect mybook.epub       # extraction preview, no API cost
+berilo translate mybook.epub --to sl --dry-run   # cost estimate — always run first
+berilo translate mybook.epub --to sl             # translated EPUB alongside the source
 ```
 
 Requires Python 3.10+. MOBI input additionally requires Calibre
 (`ebook-convert`).
+
+## Reader app (Phase 2, Android / Boox)
+
+The reader is an offline EPUB app (Readium-based) with an LLM dictionary,
+paragraph interpretation, and notes. It reads whatever the translator CLI
+produced — no cloud dependency.
+
+**Install a release build (recommended):**
+
+1. Download the latest `app-release.apk` from the
+   [GitHub Releases page](https://github.com/nikogamulin/berilo/releases).
+2. On the Boox, enable unknown-source installs: **Settings → Apps → Special
+   app access → Install unknown apps**, allow it for the browser or file
+   manager you'll install from.
+3. Open the downloaded APK on-device and confirm the install.
+
+**Install via adb (USB, for development devices):**
+
+```bash
+adb install -r app-release.apk
+```
+
+The app never uploads your books; your LLM API key is stored in
+EncryptedSharedPreferences on-device only.
+
+## Development
+
+```bash
+# Translator
+cd translator && pip install -e ".[dev]"
+make test && make lint
+
+# Android
+cd android
+./gradlew assembleDebug test lintDebug   # everyday dev loop
+./gradlew assembleRelease                # minified release build (debug-signed
+                                          # unless android/keystore.properties exists —
+                                          # see keystore.properties.example)
+```
 
 ## Principles
 
