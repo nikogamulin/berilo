@@ -20,6 +20,19 @@
   restored-fragment safety; Robolectric required for JVM tests touching
   Locator/Link (android.net.Uri); `buildFeatures { buildConfig = true }`
   needed for BuildConfig.DEBUG gating.
+- [2026-07-24] Book-2 milestone numbers (Active Measures, PDF): translation
+  €0.94, eval €0.064 (+€0.008 wasted on the pre-fix aligned-failure run).
+  T=78.6 [75.9,81.3] < 85 gate — investigation in flight; T1/T5/T7 perfect.
+  Root-cause candidate: T2/T3/T6 sampling pools the translated Notes back
+  matter (989 citation fragments).
+- [2026-07-24] PDF-sourced books need CAPTION/OTHER types to round-trip
+  through assembled EPUBs (class-tagged `<p>`, mapped back in
+  normalize_epub) or eval alignment fails on rebuilt books — fixed; rebuilds
+  from cache cost €0.
+- [2026-07-24] Throwaway `postgres:15-alpine` + stubbed `auth.jwt()` +
+  `SET LOCAL` session vars can functionally exercise Supabase RLS/trigger
+  logic offline for €0 (proved the delete-wins trigger + shelf-ownership
+  check before any deployment exists) — reuse for schema stories.
 - [2026-07-24] Material3 `lightColorScheme()`/`darkColorScheme()` silently
   fill unset roles (onSurfaceVariant/outline/error/…) with baseline PURPLE —
   a one-accent design must pin every role it references; grep
