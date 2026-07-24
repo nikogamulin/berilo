@@ -24,6 +24,14 @@ ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 ENV_TRANSLATION_MODEL = "BERILO_TRANSLATION_MODEL"
 ENV_JUDGE_MODEL = "BERILO_JUDGE_MODEL"
 ENV_TARGET_LANG = "BERILO_TARGET_LANG"
+ENV_REASONING_EFFORT = "BERILO_REASONING_EFFORT"
+
+#: Default reasoning effort for OpenAI reasoning models (gpt-5*/o*).
+#: Translation is not a deep-reasoning task: at the default effort gpt-5-mini
+#: burned ~4× the estimated cost in hidden reasoning tokens (S1.8 run,
+#: 2026-07-24) — "low" keeps quality for translation while cutting cost and
+#: latency. Override per-run with BERILO_REASONING_EFFORT.
+DEFAULT_REASONING_EFFORT = "low"
 
 
 @dataclass
@@ -46,6 +54,7 @@ class Config:
     translation_model: str = DEFAULT_TRANSLATION_MODEL
     judge_model: str = DEFAULT_JUDGE_MODEL
     target_lang: str = DEFAULT_TARGET_LANG
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT
 
 
 def load_config(env_file: str | Path | None = None, **overrides: object) -> Config:
@@ -89,6 +98,7 @@ def load_config(env_file: str | Path | None = None, **overrides: object) -> Conf
         "translation_model": _get(ENV_TRANSLATION_MODEL, DEFAULT_TRANSLATION_MODEL),
         "judge_model": _get(ENV_JUDGE_MODEL, DEFAULT_JUDGE_MODEL),
         "target_lang": _get(ENV_TARGET_LANG, DEFAULT_TARGET_LANG),
+        "reasoning_effort": _get(ENV_REASONING_EFFORT, DEFAULT_REASONING_EFFORT),
     }
     resolved.update({key: value for key, value in overrides.items() if value is not None})
     return Config(**resolved)

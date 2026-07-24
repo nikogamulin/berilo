@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gpt-5-mini"
 
+#: Model families that accept the ``reasoning_effort`` parameter.
+_REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
 #: Transient/retryable OpenAI SDK exceptions: rate limits, timeouts,
 #: connection drops, and 5xx server errors. Authentication/bad-request/
 #: permission errors are not retried — they won't succeed on retry.
@@ -38,7 +41,12 @@ class OpenAIClient(LLMClient):
         model: Model identifier to use for completions.
     """
 
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_MODEL,
+        reasoning_effort: str | None = None,
+    ) -> None:
         """Initialize the client.
 
         Args:
@@ -46,8 +54,13 @@ class OpenAIClient(LLMClient):
                 underlying SDK client (``openai.OpenAI``); never stored as a
                 plain attribute or logged.
             model: Model identifier to use for completions.
+            reasoning_effort: Reasoning effort for reasoning models
+                (``gpt-5*``/``o*``): ``"minimal"``/``"low"``/``"medium"``/
+                ``"high"``. ``None`` leaves the API default. Ignored for
+                non-reasoning models.
         """
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self._client = openai_sdk.OpenAI(api_key=api_key)
 
     def complete(
@@ -94,6 +107,8 @@ class OpenAIClient(LLMClient):
             kwargs: dict[str, object] = {"model": self.model, "messages": chat_messages}
             if max_tokens is not None:
                 kwargs["max_completion_tokens"] = max_tokens
+            if self.reasoning_effort is not None and self.model.startswith(_REASONING_PREFIXES):
+                kwargs["reasoning_effort"] = self.reasoning_effort
             return self._client.chat.completions.create(**kwargs)
 
         response = retry_with_backoff(

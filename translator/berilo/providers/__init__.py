@@ -69,7 +69,11 @@ def create_client(model: str, config: Config) -> LLMClient:
             )
         from berilo.providers.openai import OpenAIClient
 
-        return OpenAIClient(api_key=config.openai_api_key, model=model)
+        return OpenAIClient(
+            api_key=config.openai_api_key,
+            model=model,
+            reasoning_effort=config.reasoning_effort,
+        )
 
     raise ValueError(
         f"Unrecognized model '{model}': expected an OpenAI model (gpt-*, o*) "

@@ -332,6 +332,27 @@ def test_openai_client_complete_accounts_tokens_and_cost(monkeypatch: pytest.Mon
     assert not hasattr(client, "api_key")
 
 
+def test_openai_client_passes_reasoning_effort_for_reasoning_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """reasoning_effort reaches the API for gpt-5*/o* and is omitted otherwise."""
+    fake_sdk_client = _FakeOpenAISDKClient(
+        [_openai_response("ok", 1, 1), _openai_response("ok", 1, 1)]
+    )
+    monkeypatch.setattr(
+        "berilo.providers.openai.openai_sdk.OpenAI", lambda api_key: fake_sdk_client
+    )
+
+    client = OpenAIClient(api_key=FAKE_OPENAI_KEY, model="gpt-5-mini", reasoning_effort="low")
+    client.complete(prompt="x")
+    assert fake_sdk_client.chat.completions.calls[0]["reasoning_effort"] == "low"
+
+    plain = OpenAIClient(api_key=FAKE_OPENAI_KEY, model="gpt-5-mini", reasoning_effort=None)
+    plain._client = fake_sdk_client
+    plain.complete(prompt="x")
+    assert "reasoning_effort" not in fake_sdk_client.chat.completions.calls[1]
+
+
 def test_openai_client_requires_exactly_one_of_prompt_or_messages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
