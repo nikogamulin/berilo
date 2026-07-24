@@ -31,8 +31,8 @@
 
 ## Phase 1 — Translator CLI (milestone `m1`) — target: Rubric T ≥ 85 on all 3 example books
 
-### S1.1 — Normalize: EPUB → segments (3 pt)
-- [ ] Parse EPUB into ordered segment list (JSON): chapters, headings, paragraphs, inline emphasis retained; stable segment IDs (content hash)
+### S1.1 — Normalize: EPUB → segments ✅ (3 pt)
+- [x] Parse EPUB into ordered segment list (JSON): chapters, headings, paragraphs, inline emphasis retained; stable segment IDs (content hash)
 - **Verify:** `berilo inspect "data/examples/The New Rules of War.epub" --json` reports ≥ 500 segments, ≥ 8 chapters, 0 empty segments; round-trip test in `make test` asserts segment order = document order.
 
 ### S1.2 — Normalize: PDF → segments (5 pt)

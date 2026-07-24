@@ -44,6 +44,14 @@
 - [2026-07-24] `data/` exists only in the main checkout, not in agent
   worktrees (gitignored ⇒ not shared): `data/`-gated integration tests must
   skip gracefully; run real-book Verify numbers from the main checkout.
+- [2026-07-24] EPUB3 `<nav>` documents (TOC/landmarks) must be excluded from
+  segment extraction or their `<li>/<a>` structure injects a duplicate TOC
+  as junk segments at chapter 0 (handled in `normalize/epub.py`).
+- [2026-07-24] *The New Rules of War* back matter is huge: Notes+Index+
+  Bibliography ≈ 1086 of 2309 segments (47%; Index alone 757). Translating
+  back matter by default would roughly double cost for near-zero reader
+  value — S1.5 should expose `--skip-back-matter` (or similar) and dry-run
+  estimates should show per-chapter breakdown.
 - [2026-07-24] `data/` is gitignored and holds copyrighted books — never
   commit, never upload contents anywhere except segment batches to the
   configured LLM API during translation.
