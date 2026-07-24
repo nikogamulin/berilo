@@ -24,7 +24,12 @@ from berilo.normalize.pdf import (
     normalize_pdf,
 )
 from berilo.providers.base import CompletionResult, LLMClient
-from berilo.screen import back_matter_chapter_indices, sample_segments, screen_segments
+from berilo.screen import (
+    back_matter_chapter_indices,
+    front_matter_chapter_indices,
+    sample_segments,
+    screen_segments,
+)
 
 # Font sizes used when laying out synthetic PDFs.
 _BODY_SIZE = 11.0
@@ -470,6 +475,53 @@ def test_back_matter_chapter_excluded_from_prose_sampling() -> None:
     assert sampled  # body paragraphs remain
     assert all(seg.chapter_index == 1 for seg in sampled)
     assert not any("Der Spiegel" in seg.text for seg in sampled)
+
+
+def test_front_matter_folds_drops_gibberish_and_excludes_from_sampling(tmp_path: Path) -> None:
+    """No-TOC front matter folds into a 'Front Matter' chapter: cover-art OCR
+    gibberish is dropped, real copyright text is kept, and none of it is sampled.
+    """
+    page0 = [  # front matter: cover-art gibberish, then (after a gap) copyright
+        (_LEFT_MARGIN, 120.0, "Pel OO ays por Umi", _BODY_SIZE),
+        (_LEFT_MARGIN, 136.0, "wa", _BODY_SIZE),  # merges with the gibberish above
+        # Large vertical gap => a new paragraph: the real copyright block.
+        (
+            _LEFT_MARGIN,
+            220.0,
+            "Bloomsbury Publishing Inc. and its logos are trademarks.",
+            _BODY_SIZE,
+        ),
+        (
+            _LEFT_MARGIN,
+            236.0,
+            "This paperback edition published 2023 by the publisher.",
+            _BODY_SIZE,
+        ),
+    ]
+    page1 = [  # body
+        (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+        (
+            _LEFT_MARGIN,
+            160.0,
+            "A clean body paragraph of real prose opens the first chapter here.",
+            _BODY_SIZE,
+        ),
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, [page0, page1], name="frontmatter.pdf"))
+
+    # Cover-art gibberish is dropped entirely.
+    assert not any("Pel OO" in seg.text for seg in book.segments)
+    assert not any("Umi" in seg.text for seg in book.segments)
+    # Real copyright text survives, folded under the Front Matter chapter.
+    copyright_seg = _find_segment(book, "Bloomsbury Publishing Inc.")
+    assert copyright_seg.chapter_title == "Front Matter"
+    assert "This paperback edition published 2023" in copyright_seg.text
+    assert front_matter_chapter_indices(book) == {copyright_seg.chapter_index}
+    # Front matter is never offered to the prose screen; the body chapter is.
+    sampled = sample_segments(book, n=30, seed=42)
+    assert sampled
+    assert all(seg.chapter_index not in front_matter_chapter_indices(book) for seg in sampled)
+    assert any("clean body paragraph" in seg.text for seg in sampled)
 
 
 # --------------------------------------------------------------------------- #

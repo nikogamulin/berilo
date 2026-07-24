@@ -40,6 +40,20 @@ _BACK_MATTER_TITLE_SUBSTRINGS = (
     "about the author",
 )
 
+# Chapter-title substrings that mark front matter (cover/title/copyright/TOC):
+# not body prose either, and excluded from the clean-prose sample. Mirrors the
+# normalizer's front-matter titling (FRONT_MATTER_CHAPTER_TITLE = "Front Matter").
+_FRONT_MATTER_TITLE_SUBSTRINGS = (
+    "front matter",
+    "title page",
+    "half title",
+    "copyright",
+    "contents",
+    "dedication",
+    "epigraph",
+    "praise for",
+)
+
 # Deterministic, single-token screening prompt. The model must answer with a
 # bare YES/NO so parsing is unambiguous across providers.
 _SCREEN_PROMPT = (
@@ -112,11 +126,30 @@ def back_matter_chapter_indices(book: Book) -> set[int]:
     Returns:
         The set of back-matter chapter indices (possibly empty).
     """
+    return _chapter_indices_matching(book, _BACK_MATTER_TITLE_SUBSTRINGS)
+
+
+def front_matter_chapter_indices(book: Book) -> set[int]:
+    """Return chapter indices whose title names front matter (cover/copyright/...).
+
+    Segments in these chapters are cover art, title/copyright pages, and TOC
+    entries — not body prose — so extraction-quality screening excludes them.
+
+    Args:
+        book: The normalized book.
+
+    Returns:
+        The set of front-matter chapter indices (possibly empty).
+    """
+    return _chapter_indices_matching(book, _FRONT_MATTER_TITLE_SUBSTRINGS)
+
+
+def _chapter_indices_matching(book: Book, substrings: tuple[str, ...]) -> set[int]:
+    """Chapter indices whose title contains any of ``substrings`` (lowercased)."""
     return {
         segment.chapter_index
         for segment in book.segments
-        if segment.chapter_title
-        and any(sub in segment.chapter_title.lower() for sub in _BACK_MATTER_TITLE_SUBSTRINGS)
+        if segment.chapter_title and any(sub in segment.chapter_title.lower() for sub in substrings)
     }
 
 
@@ -129,9 +162,10 @@ def sample_segments(
 
     Sampling is restricted to :attr:`SegmentType.PARAGRAPH` segments (headings,
     captions, and other structural segments are not prose to be screened) and
-    excludes back-matter chapters (notes/index/bibliography), whose segments are
-    citation fragments. It is reproducible for a given ``(n, seed)``: the same
-    book yields the same sample every time.
+    excludes back-matter chapters (notes/index/bibliography) and front-matter
+    chapters (cover/title/copyright/TOC), whose segments are not body prose. It
+    is reproducible for a given ``(n, seed)``: the same book yields the same
+    sample every time.
 
     Args:
         book: The normalized book to sample from.
@@ -142,11 +176,11 @@ def sample_segments(
     Returns:
         The sampled body-prose paragraph segments, in document order.
     """
-    back_matter = back_matter_chapter_indices(book)
+    excluded = back_matter_chapter_indices(book) | front_matter_chapter_indices(book)
     paragraphs = [
         seg
         for seg in book.segments
-        if seg.type is SegmentType.PARAGRAPH and seg.chapter_index not in back_matter
+        if seg.type is SegmentType.PARAGRAPH and seg.chapter_index not in excluded
     ]
     if n >= len(paragraphs):
         return paragraphs
