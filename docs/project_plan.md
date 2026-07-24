@@ -107,18 +107,22 @@
 > close; headline stories now:
 
 ### S3.1 — API contract + Supabase schema (3 pt)
-- [ ] OpenAPI spec for sync endpoints; Supabase schema (users, books-metadata, highlights, notes, vocabulary, progress) with RLS; every query paginated
+- [ ] OpenAPI spec for sync endpoints; Supabase schema (users, books-metadata, highlights, notes, vocabulary, progress, shelves, ratings, shared-passages) with RLS; every query paginated
 - **Verify:** contract committed in **this** repo (`docs/sync_api.md`); RLS audit script: user A gets 0 rows of user B across all tables; S6 synthetic 2500-row test returns complete data.
 
 ### S3.2 — App sync client (5 pt)
-- [ ] Auth (Supabase), background sync of notes/highlights/vocabulary/progress, last-write-wins with `updated_at` UTC, offline queue
+- [ ] Auth (Clerk JWTs against Supabase RLS), background sync of notes/highlights/vocabulary/progress, last-write-wins with `updated_at` UTC, offline queue
 - **Verify:** Rubric S1 scenario matrix 100%; S3 chaos test 0 data loss; DST-boundary test green.
 
 ### S3.3 — Web review app (5 pt)
-- [ ] Next.js on Vercel: login, notes/highlights browser (search, filter by book/color/date), vocabulary review, Markdown export
+- [ ] Next.js on Vercel: Clerk login, notes/highlights browser (search, filter by book/color/date), vocabulary review, Markdown export
 - **Verify:** S4 checklist 10/10; S5 LCP ≤ 2.5 s on Vercel analytics; e2e Playwright suite green in CI.
 
-### S3.4 — Launch gate (2 pt)
+### S3.4 — Reading page — social layer (5 pt) *(spec §6.1)*
+- [ ] Public reading page on berilo.app, Slovenian-first: profiles & shelves (book metadata only), shared passages (≤ 500-char excerpt, title+author attribution), 1–5 ratings + short reviews, per-item opt-in sharing (private by default), design per `design_guidelines.md`
+- **Verify:** Playwright e2e: sign up → shelve book → share passage → rate → anonymous visitor sees only opted-in content; passage > 500 chars rejected server-side; UI strings render šumniki correctly (č/š/ž spot-check on live page); Lighthouse accessibility ≥ 95 on the reading page.
+
+### S3.5 — Launch gate (2 pt)
 - [ ] Privacy policy (only user-created data syncs, books never leave device), free-tier limits, error monitoring
 - **Verify:** Rubric **S ≥ 85**; S2 and S3 gates at max; policy page live.
 

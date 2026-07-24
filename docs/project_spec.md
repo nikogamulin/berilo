@@ -136,8 +136,9 @@ this app lives. **Recommendation: native Kotlin.** Target: Android 8.0+
 
 ## 6. Phase 3 — Cloud service (`berilo-cloud`, separate private repo)
 
-- **Stack:** Next.js (App Router) on Vercel; Supabase — auth, Postgres with RLS,
-  1000-row pagination on every query.
+- **Stack:** Next.js (App Router) on Vercel at **berilo.app**; Supabase —
+  Postgres with RLS, 1000-row pagination on every query; **Clerk** for auth
+  (integrated with Supabase RLS via Clerk third-party-auth JWTs).
 - **Sync:** app ⇄ cloud sync of notes, highlights, vocabulary, reading progress.
   Last-write-wins per record with `updated_at` (UTC); device is source of truth
   for reading position. Sync is optional — the app remains fully functional
@@ -147,6 +148,27 @@ this app lives. **Recommendation: native Kotlin.** Target: Android 8.0+
   (notes, highlights, progress, lookups) syncs.
 - **Boundary:** the open-source app talks to the service through a small,
   documented REST API; the service implementation stays private.
+
+### 6.1 Reading page — the social layer (Slovenian-first)
+
+A public web page on berilo.app where readers share what they read. Built to
+the bar in [`design_guidelines.md`](design_guidelines.md): the text is the
+hero, one accent color, no engagement mechanics — no infinite-scroll bait,
+no like-count theater, no algorithmic feed. A well-set page, not a network.
+
+- **Profiles & shelves:** what a reader is reading / has read — book
+  *metadata only* (title, author, cover, language pair). Book files never
+  touch the service.
+- **Shared passages:** a highlight becomes a typographically clean quote
+  (Literata), **capped at 500 characters** with title + author attribution —
+  citation-length excerpts only; no piracy surface.
+- **Ratings:** 1–5 stars with an optional short review; a book page
+  aggregates ratings and shared passages across readers.
+- **Slovenian-first:** UI copy in Slovenian with proper šumniki; English
+  fallback. The wedge is the small-language reading community the big
+  platforms ignore.
+- **Privacy default:** everything is private until explicitly shared,
+  per item. Deleting a share deletes it everywhere.
 
 ## 7. Non-goals (all phases)
 
