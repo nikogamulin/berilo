@@ -88,6 +88,8 @@
 - **Verify:** R7 audit passes: `adb logcat` during a lookup session contains no key substring; backup extract contains no plaintext key; invalid key shows actionable error.
 
 ### S2.4 — LLM dictionary (3 pt)
+- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES, folded; 107 JVM tests; capture = select + Define action)
+- [ ] Device residual: R3 latency/disambiguation thresholds on Boox
 - [ ] Tap word → bottom-sheet definition in context (sentence sent along); Room cache; offline + error states
 - **Verify:** R3 thresholds met (p50 ≤ 4 s over 10 logged lookups, cached ≤ 300 ms, 5/5 ambiguous words disambiguated — word list fixed in test doc).
 
