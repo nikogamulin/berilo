@@ -5,7 +5,7 @@
 *.key
 
 # Data — books, outputs, caches (copyrighted content stays local)
-data/
+/data/
 *.pdf
 *.epub
 *.mobi

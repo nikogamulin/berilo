@@ -1,5 +1,26 @@
 # Findings register (Tier 2)
 
+- [2026-07-24] Android build env: box has JRE-only OpenJDK (no javac, no
+  sudo) — JDK 21.0.2 bootstrapped at `~/.local/share/jdk-bootstrap/jdk-21.0.2`;
+  every Android gradle invocation needs
+  `JAVA_HOME=$HOME/.local/share/jdk-bootstrap/jdk-21.0.2` +
+  `ANDROID_HOME=$HOME/Android/Sdk`. (adoptium mirrors 504'd;
+  download.java.net worked.)
+- [2026-07-24] Android dependency ceiling with platform-35 only: AGP 8.8.2 +
+  Gradle 8.10.2 (AGP 8.8.2 needs ≥8.10.2) + Kotlin 2.1.0 + Room 2.8.4 +
+  Readium 3.1.2 (needs core-library desugaring on minSdk 26) + Coil 3.2.0 +
+  coreKtx 1.15/lifecycle 2.8.7/activityCompose 1.9.3. Later androidx/Readium
+  need compileSdk 36+/AGP 9.1+ — hold this set or install platforms;android-36
+  and rebase. Verified via each AAR's aar-metadata `minCompileSdk`.
+- [2026-07-24] Room `exportSchema=true` + schemaLocation crashes
+  kspReleaseKotlin (AbstractMethodError, kotlinx-serialization clash on this
+  dep set) — left `exportSchema=false` until a migration needs it.
+- [2026-07-24] Android testability pattern: inject the IO dispatcher
+  (constructor param defaulting to Dispatchers.IO) — hardcoded
+  `withContext(Dispatchers.IO)` escapes `runTest` virtual time and flakes.
+- [2026-07-24] Root `.gitignore` had unanchored `data/` which silently
+  unstaged ANY directory named `data` (bit the Android package layout —
+  package renamed `store/`); pattern now anchored to `/data/`.
 - [2026-07-24] Android SDK installed headlessly at `~/Android/Sdk`
   (cmdline-tools latest, platform-tools/adb 37, platforms;android-35,
   build-tools;35.0.0; licenses accepted). No system gradle — projects use
