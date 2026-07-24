@@ -30,6 +30,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.berilo.reader.R
+import app.berilo.reader.dictionary.DictionarySheet
+import app.berilo.reader.dictionary.DictionaryUiState
 
 /**
  * The reader's chrome overlay: a top bar (current chapter + entry points to
@@ -65,6 +67,7 @@ fun ReaderChromeOverlay(
             ReaderTopBar(
                 chapterTitle = state.chapterTitle,
                 onChaptersClick = actions.onOpenChapters,
+                onDefineClick = actions.onDefineSelection,
                 onSettingsClick = actions.onOpenSettings,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
@@ -90,6 +93,10 @@ fun ReaderChromeOverlay(
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
         }
+
+        // Hosts the LLM dictionary (S2.4): a "Define" tap in the top bar captures the
+        // navigator's current text selection and drives this state via DictionaryViewModel.
+        DictionarySheet(uiState = state.dictionaryState, onDismiss = actions.onDismissDictionary)
     }
 }
 
@@ -97,6 +104,7 @@ fun ReaderChromeOverlay(
 private fun ReaderTopBar(
     chapterTitle: String,
     onChaptersClick: () -> Unit,
+    onDefineClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -119,6 +127,9 @@ private fun ReaderTopBar(
                     .weight(1f)
                     .padding(horizontal = 8.dp),
             )
+            TextButton(onClick = onDefineClick) {
+                Text(stringResource(R.string.reader_define))
+            }
             TextButton(onClick = onSettingsClick) {
                 Text(stringResource(R.string.reader_settings))
             }
@@ -299,6 +310,7 @@ data class ReaderChromeState(
     val progressFraction: Float,
     val preferences: ReaderPreferences,
     val chapters: List<TocChapter>,
+    val dictionaryState: DictionaryUiState = DictionaryUiState.Idle,
 )
 
 /** Callbacks the [ReaderScaffold] invokes; wired to the [ReaderViewModel]. */
@@ -314,4 +326,6 @@ data class ReaderChromeActions(
     val onMarginsWider: () -> Unit,
     val onEinkModeChange: (Boolean) -> Unit,
     val onDarkThemeChange: (Boolean) -> Unit,
+    val onDefineSelection: () -> Unit = {},
+    val onDismissDictionary: () -> Unit = {},
 )

@@ -48,4 +48,14 @@
     <string name="reader_eink_mode">E-ink mode</string>
     <string name="reader_dark_theme">Dark theme</string>
     <string name="reader_open_failed">This book could not be opened. The file may be missing or damaged.</string>
+    <string name="reader_define">Define</string>
+    <string name="reader_no_selection">Select a word first, then tap Define.</string>
+
+    <string name="dictionary_loading">Looking up…</string>
+    <string name="dictionary_error_network">You\'re offline — dictionary needs a connection.</string>
+    <string name="dictionary_error_auth">No API key configured — check Settings.</string>
+    <string name="dictionary_error_generic">Lookup failed — try again.</string>
+    <string name="dictionary_base_form">Base form: %1$s</string>
+    <string name="dictionary_cached_badge">Cached</string>
+    <string name="dictionary_cost">€%1$s</string>
 </resources>
