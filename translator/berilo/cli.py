@@ -1,9 +1,8 @@
 """Command-line entry point for the Berilo translator.
 
-Subcommands: ``translate``, ``inspect``, ``eval``, ``doctor``. ``inspect``
-(S1.1) and ``doctor`` (S1.4) are implemented; ``translate`` and ``eval``
-remain stubs — each prints "not implemented" and exits 1, except the
-``--help`` paths (handled by click) which exit 0.
+Subcommands: ``translate`` (S1.5), ``inspect`` (S1.1), ``doctor`` (S1.4) are
+implemented; ``eval`` remains a stub — it prints "not implemented" and exits 1,
+except the ``--help`` paths (handled by click) which exit 0.
 """
 
 from __future__ import annotations
@@ -11,18 +10,27 @@ from __future__ import annotations
 import json
 import logging
 import zipfile
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import click
 
 from berilo.models import Book
 from berilo.normalize import normalize
 
+if TYPE_CHECKING:
+    from berilo.translate import CostEstimate, TranslationStats
+
 logger = logging.getLogger(__name__)
 
 NOT_IMPLEMENTED_EXIT_CODE = 1
+INPUT_ERROR_EXIT_CODE = 1
 PREVIEW_SEGMENT_COUNT = 3
 PREVIEW_CHAR_LIMIT = 120
+
+#: Errors from ``normalize`` that mean "bad/unsupported input file", surfaced to
+#: the user as a clean message + nonzero exit rather than a traceback.
+_NORMALIZE_ERRORS = (ValueError, NotImplementedError, OSError, zipfile.BadZipFile)
 
 
 @click.group()
@@ -33,22 +41,215 @@ def cli() -> None:
 
 @cli.command()
 @click.argument("source_file", type=click.Path())
-@click.option("--to", "target_language", default="sl", help="Target language code.")
+@click.option(
+    "--to", "target_language", default=None, help="Target language code (default from config)."
+)
 @click.option("--model", default=None, help="Override the default translation model.")
-@click.option("--bilingual", is_flag=True, help="Emit a bilingual source+target EPUB.")
 @click.option("--dry-run", is_flag=True, help="Estimate cost without calling the API.")
+@click.option("--bilingual", is_flag=True, help="Emit a bilingual source+target EPUB.")
+@click.option(
+    "--skip-back-matter",
+    is_flag=True,
+    help="Skip translating Index/Notes/Bibliography-style chapters (passed through untranslated).",
+)
+@click.option("--no-glossary", is_flag=True, help="Disable the per-book glossary pass.")
+@click.option(
+    "--cache-db",
+    default=None,
+    type=click.Path(),
+    help="Override the translation cache database path.",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=click.Path(),
+    help="Output EPUB path (default: <source stem>.<lang>.epub next to the source).",
+)
 @click.pass_context
 def translate(
     ctx: click.Context,
     source_file: str,
-    target_language: str,
+    target_language: str | None,
     model: str | None,
-    bilingual: bool,
     dry_run: bool,
+    bilingual: bool,
+    skip_back_matter: bool,
+    no_glossary: bool,
+    cache_db: str | None,
+    output: str | None,
 ) -> None:
-    """Translate SOURCE_FILE into --to and write a translated EPUB."""
-    click.echo("translate: not implemented")
-    ctx.exit(NOT_IMPLEMENTED_EXIT_CODE)
+    """Translate SOURCE_FILE into --to and write a translated EPUB.
+
+    A real run REQUIRES the user's go-ahead for the printed cost estimate (this
+    is enforced socially — the estimate and a "proceeding" line print first).
+    Use ``--dry-run`` to see the estimate without spending anything.
+    """
+    from dotenv import find_dotenv
+
+    from berilo.config import load_config
+    from berilo.translate import back_matter_segment_ids, estimate_cost
+
+    try:
+        book = normalize(source_file)
+    except _NORMALIZE_ERRORS as exc:
+        click.echo(f"translate: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    env_file = find_dotenv(usecwd=True) or None
+    config = load_config(env_file=env_file, translation_model=model, target_lang=target_language)
+    model_name = config.translation_model
+    lang = config.target_lang
+    skip_ids = back_matter_segment_ids(book) if skip_back_matter else set()
+
+    if dry_run:
+        estimate = estimate_cost(
+            book,
+            model=model_name,
+            target_lang=lang,
+            skip_segment_ids=skip_ids,
+            glossary=not no_glossary,
+        )
+        _print_estimate(estimate, skip_back_matter=skip_back_matter)
+        ctx.exit(0)
+        return
+
+    from berilo.cache import DEFAULT_CACHE_PATH, TranslationCache
+    from berilo.glossary import build_glossary
+    from berilo.translate import translate_book
+
+    try:
+        from berilo.providers import create_client
+
+        client = create_client(model_name, config)
+    except ValueError as exc:
+        click.echo(f"translate: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    estimate = estimate_cost(
+        book,
+        model=model_name,
+        target_lang=lang,
+        skip_segment_ids=skip_ids,
+        glossary=not no_glossary,
+    )
+    click.echo(
+        f"Estimated cost: €{estimate.cost_eur:.4f} "
+        f"({estimate.translatable_segments} segments, ~{estimate.batches} batches, "
+        f"model {model_name})."
+    )
+    click.echo(f"Proceeding with translation into '{lang}' — press Ctrl-C to abort.")
+
+    latest: dict[str, TranslationStats] = {}
+
+    def _on_progress(stats: TranslationStats) -> None:
+        latest["stats"] = stats
+        click.echo(
+            f"  ch {stats.current_chapter_index} "
+            f"({stats.current_chapter_title or '—'}): "
+            f"{stats.processed_segments}/{stats.total_segments} segments, "
+            f"€{stats.cost_eur:.4f} spent"
+        )
+
+    cache = TranslationCache(cache_db or DEFAULT_CACHE_PATH)
+    try:
+        glossary = None
+        if not no_glossary:
+            glossary = build_glossary(
+                book, client=client, target_lang=lang, model=model_name, cache=cache
+            )
+        translated = translate_book(
+            book,
+            client=client,
+            target_lang=lang,
+            cache=cache,
+            glossary=glossary,
+            skip_segment_ids=skip_ids,
+            on_progress=_on_progress,
+        )
+        _print_summary(latest.get("stats"), skip_back_matter=skip_back_matter)
+
+        out_path = Path(output) if output else _default_output_path(source_file, lang)
+        _assemble_output(translated, out_path, bilingual=bilingual, source_book=book)
+    finally:
+        cache.close()
+
+
+def _default_output_path(source_file: str, lang: str) -> Path:
+    """Return the default translated-EPUB path next to the source file."""
+    source = Path(source_file)
+    return source.with_name(f"{source.stem}.{lang}.epub")
+
+
+def _print_estimate(estimate: CostEstimate, *, skip_back_matter: bool) -> None:
+    """Print the dry-run per-chapter table and total estimated cost."""
+    click.echo(f"Dry run — model {estimate.model} → '{estimate.target_lang}'. No API calls.")
+    click.echo(f"{'chapter':<48} {'segments':>9} {'est.tokens':>11}")
+    for chapter in estimate.chapters:
+        title = (chapter.title or f"chapter {chapter.index}")[:46]
+        tokens = chapter.input_tokens + chapter.output_tokens
+        click.echo(f"{title:<48} {chapter.segments:>9} {tokens:>11}")
+    click.echo(
+        f"\nTranslatable segments: {estimate.translatable_segments} "
+        f"(of {estimate.total_segments}); "
+        f"skipped back matter: {estimate.skipped_segments}; empty: {estimate.empty_segments}."
+    )
+    click.echo(
+        f"Estimated tokens: {estimate.input_tokens} in / {estimate.output_tokens} out "
+        f"(incl. {estimate.reasoning_tokens} reasoning tokens)."
+    )
+    click.echo(f"Estimated cost: €{estimate.cost_eur:.4f} across ~{estimate.batches} batches.")
+    if skip_back_matter and estimate.skipped_segments:
+        click.echo(
+            f"Back matter ({estimate.skipped_segments} segments) will pass through UNTRANSLATED."
+        )
+
+
+def _print_summary(stats: TranslationStats | None, *, skip_back_matter: bool) -> None:
+    """Print the end-of-run summary line."""
+    if stats is None:
+        return
+    click.echo(
+        f"Done: {stats.total_segments} segments "
+        f"({stats.translated_segments} translated, {stats.cached_segments} from cache, "
+        f"{stats.skipped_segments} back matter, {stats.empty_segments} empty). "
+        f"{stats.api_calls} API calls, "
+        f"{stats.input_tokens} in / {stats.output_tokens} out tokens, "
+        f"€{stats.cost_eur:.4f}."
+    )
+    if skip_back_matter and stats.skipped_segments:
+        click.echo(
+            f"{stats.skipped_segments} back-matter segments were passed through UNTRANSLATED."
+        )
+
+
+def _assemble_output(book: Book, output_path: Path, *, bilingual: bool, source_book: Book) -> None:
+    """Assemble the final EPUB (the last step); tolerate a not-yet-built assembler.
+
+    Translation is already fully persisted to the cache before this runs, so if
+    the assembler is unavailable the run is still resumable — re-running will
+    reuse every cached segment at zero cost.
+    """
+    from berilo import assemble
+
+    build_epub = getattr(assemble, "build_epub", None)
+    if build_epub is None:
+        click.echo(
+            "Translation complete and cached; EPUB assembly (build_epub) is not "
+            "available yet — re-run once it lands to emit the EPUB (0 API cost)."
+        )
+        return
+    try:
+        result_path = build_epub(book, output_path, bilingual=bilingual, source_book=source_book)
+    except NotImplementedError:
+        click.echo(
+            "Translation complete and cached; EPUB assembly is not implemented yet "
+            "— re-run once it lands to emit the EPUB (0 API cost)."
+        )
+        return
+    click.echo(f"Wrote {result_path}")
 
 
 def _summarize(book: Book) -> dict[str, Any]:
