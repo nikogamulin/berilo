@@ -47,11 +47,12 @@ def test_cli_help_via_subprocess_entry_point() -> None:
 def test_stub_subcommands_exit_nonzero() -> None:
     """Stub subcommands print 'not implemented' and exit 1.
 
-    ``inspect`` is implemented (S1.1) and is covered separately in
-    ``test_epub.py``, not by this stub-behavior check.
+    ``inspect`` (S1.1), ``doctor`` (S1.4) and ``translate`` (S1.5) are
+    implemented and covered separately (``test_epub.py``, ``test_providers.py``,
+    ``test_translate.py``); only ``eval`` remains a stub here.
     """
     runner = CliRunner()
-    for subcommand in ("translate", "eval"):
+    for subcommand in ("eval",):
         args = [subcommand, "dummy.epub"]
         result = runner.invoke(cli, args)
         assert result.exit_code == 1
