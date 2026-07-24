@@ -65,6 +65,24 @@
 - [2026-07-24] `normalize/epub.py` only emits known block tags: prose
   sitting directly in a `<div>`/`<td>` with no block wrapper is skipped —
   known limitation, 0 occurrences in the example books.
+- [2026-07-24] PDF reflow: a single global modal-x0 indent threshold breaks
+  on alternating recto/verso margins (World Ends verso x≈16 / recto x≈28) —
+  every minority-margin line reads as an indent and capitalized wraps split
+  into orphan fragments (raw p.371: 1 paragraph → 3 segments). Threshold
+  must be per-page/per-parity. Active Measures (equal margins x=77) is
+  unaffected — the bug is input-conditional.
+- [2026-07-24] Garbled OCR page numbers in the header band ("40OI1" = p.401)
+  evade bare-number/roman regexes AND ≥3-page recurrence, then reflow's
+  continuation-override merges them into the next body paragraph — strip
+  in-band single tokens matching `^\S*\d\S*$` BEFORE reflow, not post-merge.
+- [2026-07-24] Screen-gate design caveat: World Ends has a source-OCR garble
+  floor (~1/30 in the seed-42 sample: "s500" for "$500", "/eet" for "leet" —
+  verbatim in the PDF text layer). A perfect extractor may still hover near
+  95% on OCR books; if the gate fails purely on source-OCR flags, that is a
+  gate-design decision (exempt OCR sources / optional correction pass), not
+  a normalize defect. Screen-fix iterations must target artifact CLASSES —
+  each pool change redraws the seed-42 sample, so instance-chasing never
+  converges.
 - [2026-07-24] Rubric T alignment (`berilo/eval/rubric_t.py`): difflib
   SequenceMatcher over (chapter, type, heading_level) fingerprints —
   structural scramble raises AlignmentError (exit 2), truncation flows into
