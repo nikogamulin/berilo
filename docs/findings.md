@@ -35,8 +35,8 @@
   estimates must include a reasoning-token multiplier or they will
   underestimate badly. claude-haiku-4-5 returned 25 output tokens for the
   same sentence.
-- [2026-07-24] Synthetic API keys in tests must NOT use real prefixes
-  (`sk-proj`/`sk-ant`) or the §7 secret scan false-positives — use
+- [2026-07-24] Synthetic API keys in tests must NOT use real vendor key
+  prefixes ("sk-" + proj/ant forms) or the §7 secret scan false-positives — use
   `test-openai-key-...` style. Real vendor exception types for retry tests
   are constructed with a fake `httpx.Response(429, request=...)`; OpenAI and
   Anthropic SDK clients construct offline with dummy keys (no network at
