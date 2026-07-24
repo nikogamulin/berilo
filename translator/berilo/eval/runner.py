@@ -248,7 +248,12 @@ def describe_plan(
         for s, t in alignment.pairs
         if t is not None and s.type.value == "paragraph" and s.text.strip() and t.text.strip()
     ]
-    n_pairs = min(sample_size, len(eligible))
+    # v1.1: sampling draws from body prose only (front/back matter excluded).
+    excluded = rubric_t.excluded_chapter_indices(source)
+    pool, _ = rubric_t.restrict_to_body(
+        eligible, lambda pair: pair[0].chapter_index, excluded, sample_size, "T2/T3"
+    )
+    n_pairs = min(sample_size, len(pool))
     is_pdf = source.source_format == "pdf"
     n_screen = rubric_t.T6_SAMPLE if is_pdf else 0
     judge_calls = 2 * n_pairs + n_screen  # meaning + fluency per pair, + screen

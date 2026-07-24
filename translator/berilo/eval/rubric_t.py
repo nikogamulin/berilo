@@ -28,11 +28,14 @@ from dataclasses import dataclass, field
 from berilo.eval import sampling
 from berilo.eval.judge import Judge
 from berilo.models import Book, Segment, SegmentType
+from berilo.screen import back_matter_chapter_indices, front_matter_chapter_indices
 
 logger = logging.getLogger(__name__)
 
-#: Rubric revision recorded in every score row.
-RUBRIC_VERSION = "1.0"
+#: Rubric revision recorded in every score row. v1.1 (2026-07-24): restrict
+#: T2/T3/T6 sampling to body-prose paragraphs (exclude front/back matter) and
+#: fix T4 to count term occurrences on word boundaries, not substrings.
+RUBRIC_VERSION = "1.1"
 
 #: Dimension weights (sum to 100), keyed by dimension id.
 WEIGHTS: dict[str, int] = {
@@ -335,18 +338,28 @@ def _rendering_matches(rendering: str, text: str) -> bool:
     """Whether ``text`` contains ``rendering`` prefix-tolerantly (per word).
 
     Case-insensitive; each whitespace-delimited word of ``rendering`` must
-    appear in ``text`` as a stem prefix, tolerating Slovenian declension
-    suffixes.
+    appear in ``text`` as a stem prefix ANCHORED ON A WORD BOUNDARY, tolerating
+    Slovenian declension suffixes (v1.1: word-boundary anchored so a stem no
+    longer matches mid-word).
     """
-    text_lower = text.lower()
-    return all(_stem(word) in text_lower for word in rendering.split() if word)
+    for word in rendering.split():
+        if not word:
+            continue
+        if not re.search(rf"\b{re.escape(_stem(word))}", text, re.IGNORECASE):
+            return False
+    return True
 
 
-def _term_occurrences(term: str, text_lower: str) -> int:
-    """Count case-insensitive occurrences of ``term`` in already-lowered text."""
+def _term_occurrences(term: str, text: str) -> int:
+    """Count whole-word occurrences of ``term`` in ``text``, case-insensitive.
+
+    v1.1: matches on word boundaries (``\\b``) rather than as a substring, so a
+    short term like ``"UN"`` no longer counts inside an unrelated word such as
+    ``"united"`` (the bug that inflated book-2's T4 denominator).
+    """
     if not term:
         return 0
-    return text_lower.count(term.lower())
+    return len(re.findall(rf"\b{re.escape(term)}\b", text, re.IGNORECASE))
 
 
 def score_terminology(alignment: Alignment, glossary: dict[str, str] | None) -> DimensionScore:
@@ -360,12 +373,11 @@ def score_terminology(alignment: Alignment, glossary: dict[str, str] | None) -> 
             detail="no glossary in cache — dimension dropped, weights renormalized",
         )
 
-    pairs = [(s, t) for s, t in alignment.pairs if t is not None]
-    lowered = [(s.text.lower(), t.text) for s, t in pairs]
+    pairs_text = [(s.text, t.text) for s, t in alignment.pairs if t is not None]
 
-    # Rank glossary terms by total occurrence in the source.
+    # Rank glossary terms by total (word-boundary) occurrence in the source.
     freq = {
-        term: sum(_term_occurrences(term, src_lower) for src_lower, _ in lowered)
+        term: sum(_term_occurrences(term, src_text) for src_text, _ in pairs_text)
         for term in glossary
     }
     top_terms = [
@@ -375,8 +387,8 @@ def score_terminology(alignment: Alignment, glossary: dict[str, str] | None) -> 
     total = matched = 0
     for term in top_terms:
         rendering = glossary[term]
-        for src_lower, tgt_text in lowered:
-            occ = _term_occurrences(term, src_lower)
+        for src_text, tgt_text in pairs_text:
+            occ = _term_occurrences(term, src_text)
             if occ == 0:
                 continue
             total += occ
@@ -443,6 +455,54 @@ def _bootstrap_points(
     return fraction, ci
 
 
+def excluded_chapter_indices(source: Book) -> set[int]:
+    """Chapters excluded from prose sampling: front + back matter (v1.1).
+
+    Reuses the canonical title-recognition helpers from :mod:`berilo.screen`
+    (notes/index/bibliography and cover/title/copyright/TOC), computed on the
+    SOURCE book whose English chapter titles the substrings match. Translation
+    preserves ``chapter_index``, so the same set applies to the translated book.
+    """
+    return back_matter_chapter_indices(source) | front_matter_chapter_indices(source)
+
+
+def restrict_to_body(
+    items: list,
+    chapter_of,
+    excluded: set[int],
+    sample_size: int,
+    label: str,
+):
+    """Restrict ``items`` to body-prose chapters, with a logged fallback (v1.1).
+
+    Args:
+        items: The full candidate pool (paragraph pairs or segments).
+        chapter_of: Maps an item to its chapter index.
+        excluded: Front/back-matter chapter indices to drop.
+        sample_size: Requested sample size.
+        label: Human label for the log/note (e.g. ``"T2/T3"``).
+
+    Returns:
+        ``(pool, fell_back)`` — the restricted pool, or the full pool with
+        ``fell_back=True`` when restriction would leave fewer items than
+        ``sample_size``.
+    """
+    if not excluded:
+        return items, False
+    body = [it for it in items if chapter_of(it) not in excluded]
+    if len(body) >= sample_size:
+        return body, False
+    logger.warning(
+        "%s: body-prose pool (%d) smaller than sample size (%d); "
+        "falling back to full paragraph pool (%d).",
+        label,
+        len(body),
+        sample_size,
+        len(items),
+    )
+    return items, True
+
+
 def score_extraction(
     source_format: str,
     translated: Book,
@@ -450,11 +510,16 @@ def score_extraction(
     *,
     sample_size: int,
     seed: int,
-) -> tuple[DimensionScore, list[int]]:
+    excluded_chapters: set[int] | None = None,
+) -> tuple[DimensionScore, list[int], bool]:
     """T6: extraction cleanliness. Automatic full for non-PDF sources.
 
-    Returns the dimension and the per-paragraph 0/1 screen scores (empty for
-    non-PDF sources) so the total's bootstrap can resample them.
+    Screens only body-prose paragraphs — front/back-matter chapters (which hold
+    citation fragments and TOC/title debris, not body prose) are excluded, with
+    a fallback to the full paragraph pool when that leaves too few (v1.1).
+
+    Returns the dimension, the per-paragraph 0/1 screen scores (empty for
+    non-PDF sources), and whether the pool fell back to the full paragraph set.
     """
     if source_format != "pdf":
         return (
@@ -466,15 +531,17 @@ def score_extraction(
                 detail=f"{source_format} source — automatic full",
             ),
             [],
+            False,
         )
 
     paragraphs = [
-        seg.text
-        for seg in translated.segments
-        if seg.type == SegmentType.PARAGRAPH and seg.text.strip()
+        seg for seg in translated.segments if seg.type == SegmentType.PARAGRAPH and seg.text.strip()
     ]
-    indices = sampling.select_indices(len(paragraphs), sample_size, seed)
-    scores = [judge.screen(paragraphs[i]) for i in indices]
+    pool, fell_back = restrict_to_body(
+        paragraphs, lambda seg: seg.chapter_index, excluded_chapters or set(), sample_size, "T6"
+    )
+    indices = sampling.select_indices(len(pool), sample_size, seed)
+    scores = [judge.screen(pool[i].text) for i in indices]
     fraction = sampling.mean(scores) if scores else 1.0
 
     def statistic(resample: list[int]) -> float:
@@ -487,6 +554,7 @@ def score_extraction(
             "T6", DIMENSION_NAMES["T6"], WEIGHTS["T6"], fraction, ci_points=ci, detail=detail
         ),
         scores,
+        fell_back,
     )
 
 
@@ -599,14 +667,19 @@ def score_book(
     t1 = score_completeness(alignment)
     complete = t1.fraction is not None and t1.fraction >= COMPLETE_FRACTION
 
-    # Sample judgeable prose pairs (deterministic).
+    # Sample judgeable body-prose pairs (deterministic). v1.1: exclude
+    # front/back-matter chapters, falling back to the full pool if too few.
+    excluded = excluded_chapter_indices(source)
     eligible = [
         (s, t)
         for s, t in alignment.pairs
         if t is not None and s.type in _JUDGEABLE_TYPES and s.text.strip() and t.text.strip()
     ]
-    sample_indices = sampling.select_indices(len(eligible), sample_size, seed)
-    sample_pairs = [eligible[i] for i in sample_indices]
+    pool, t23_fell_back = restrict_to_body(
+        eligible, lambda pair: pair[0].chapter_index, excluded, sample_size, "T2/T3"
+    )
+    sample_indices = sampling.select_indices(len(pool), sample_size, seed)
+    sample_pairs = [pool[i] for i in sample_indices]
     sample_ids = [s.id for s, _ in sample_pairs]
 
     meaning_scores = [judge.meaning(s.text, t.text) for s, t in sample_pairs]
@@ -641,8 +714,13 @@ def score_book(
 
     t4 = score_terminology(alignment, glossary)
     t5 = score_structure(source, translated)
-    t6, screen_scores = score_extraction(
-        source.source_format, translated, judge, sample_size=T6_SAMPLE, seed=seed + 1
+    t6, screen_scores, t6_fell_back = score_extraction(
+        source.source_format,
+        translated,
+        judge,
+        sample_size=T6_SAMPLE,
+        seed=seed + 1,
+        excluded_chapters=excluded,
     )
     word_count = sum(len(seg.text.split()) for seg in source.segments)
     t7 = score_cost(actual_cost_eur, word_count)
@@ -657,6 +735,16 @@ def score_book(
     if not complete:
         notes.append(
             f"INCOMPLETE: T1 {t1.fraction:.1%} < 100% — total capped at {INCOMPLETE_CAP:.0f}."
+        )
+    if t23_fell_back:
+        notes.append(
+            "T2/T3 body-prose pool smaller than sample size — fell back to the full "
+            "paragraph pool (front/back matter included)."
+        )
+    if t6_fell_back:
+        notes.append(
+            "T6 body-prose pool smaller than sample size — fell back to the full "
+            "paragraph pool (front/back matter included)."
         )
     dropped = [d.key for d in dims if not d.available]
     if dropped:
