@@ -1,19 +1,28 @@
 """Command-line entry point for the Berilo translator.
 
-Subcommands: ``translate``, ``inspect``, ``eval``, ``doctor``. All are stubs
-in this skeleton — each prints "not implemented" and exits 1, except the
+Subcommands: ``translate``, ``inspect``, ``eval``, ``doctor``. ``inspect``
+(S1.1) and ``doctor`` (S1.4) are implemented; ``translate`` and ``eval``
+remain stubs — each prints "not implemented" and exits 1, except the
 ``--help`` paths (handled by click) which exit 0.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import zipfile
+from typing import Any
 
 import click
+
+from berilo.models import Book
+from berilo.normalize import normalize
 
 logger = logging.getLogger(__name__)
 
 NOT_IMPLEMENTED_EXIT_CODE = 1
+PREVIEW_SEGMENT_COUNT = 3
+PREVIEW_CHAR_LIMIT = 120
 
 
 @click.group()
@@ -42,14 +51,77 @@ def translate(
     ctx.exit(NOT_IMPLEMENTED_EXIT_CODE)
 
 
+def _summarize(book: Book) -> dict[str, Any]:
+    """Build the JSON-serializable inspection summary for a normalized book.
+
+    Args:
+        book: The normalized book to summarize.
+
+    Returns:
+        A dict with book metadata, aggregate segment counts, per-type
+        counts, and a per-chapter breakdown.
+    """
+    chapters: dict[int, dict[str, Any]] = {}
+    empty_segment_count = 0
+    segment_type_counts: dict[str, int] = {}
+    for segment in book.segments:
+        if not segment.text.strip():
+            empty_segment_count += 1
+        segment_type_counts[segment.type.value] = segment_type_counts.get(segment.type.value, 0) + 1
+        chapter = chapters.setdefault(
+            segment.chapter_index,
+            {"index": segment.chapter_index, "title": segment.chapter_title, "segment_count": 0},
+        )
+        chapter["segment_count"] += 1
+
+    chapter_list = [chapters[index] for index in sorted(chapters)]
+    return {
+        "title": book.title,
+        "authors": book.authors,
+        "language": book.language,
+        "source_format": book.source_format,
+        "chapter_count": len(chapter_list),
+        "segment_count": len(book.segments),
+        "empty_segment_count": empty_segment_count,
+        "segment_type_counts": segment_type_counts,
+        "chapters": chapter_list,
+    }
+
+
 @cli.command()
 @click.argument("source_file", type=click.Path())
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
 @click.pass_context
 def inspect(ctx: click.Context, source_file: str, as_json: bool) -> None:
     """Preview SOURCE_FILE's extraction quality and segment statistics."""
-    click.echo("inspect: not implemented")
-    ctx.exit(NOT_IMPLEMENTED_EXIT_CODE)
+    try:
+        book = normalize(source_file)
+    except (ValueError, NotImplementedError, OSError, zipfile.BadZipFile) as exc:
+        click.echo(f"inspect: {exc}", err=True)
+        ctx.exit(NOT_IMPLEMENTED_EXIT_CODE)
+        return
+
+    summary = _summarize(book)
+    if as_json:
+        click.echo(json.dumps(summary, ensure_ascii=False, indent=2))
+        return
+
+    authors = ", ".join(summary["authors"]) or "unknown author"
+    click.echo(f"{summary['title']} — {authors}")
+    click.echo(f"language: {summary['language']}   format: {summary['source_format']}")
+    click.echo(
+        f"{summary['chapter_count']} chapters, {summary['segment_count']} segments, "
+        f"{summary['empty_segment_count']} empty"
+    )
+    click.echo("segment types:")
+    for type_name, count in summary["segment_type_counts"].items():
+        click.echo(f"  {type_name}: {count}")
+    click.echo(f"first {PREVIEW_SEGMENT_COUNT} segments:")
+    for segment in book.segments[:PREVIEW_SEGMENT_COUNT]:
+        preview = segment.text
+        if len(preview) > PREVIEW_CHAR_LIMIT:
+            preview = preview[:PREVIEW_CHAR_LIMIT] + "…"
+        click.echo(f"  [{segment.type.value}] {preview}")
 
 
 @cli.command(name="eval")
