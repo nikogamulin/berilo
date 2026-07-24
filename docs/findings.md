@@ -21,7 +21,13 @@
   (Ubuntu): no `gh label` command, `gh issue close` broken (git exit 128) —
   use `gh api repos/nikogamulin/berilo/...` for labels, milestones, issue
   state changes.
-- [2026-07-24] `epubcheck` is not installed (needed by S1.6 Verify);
+- [2026-07-24] The `pytest` shim on PATH (`~/.local/bin/pytest`) is shebang'd
+  to python3.12 while `pip install --user` targets python3 (3.10.12) — bare
+  `pytest` can't see the installed package. Always run `python3 -m pytest`
+  and `python3 -m black` (encoded in `translator/Makefile`); `ruff` is a
+  native binary and unaffected.
+- [2026-07-24] `epubcheck` 5.3.0 installed to `~/.local/bin/epubcheck`
+  (wrapper over jar in `~/.local/share/epubcheck-5.3.0/`, Java 21 present);
   `ebook-convert` and `pdftotext` are on PATH.
 - [2026-07-24] `data/` is gitignored and holds copyrighted books — never
   commit, never upload contents anywhere except segment batches to the

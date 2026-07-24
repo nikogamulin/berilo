@@ -18,8 +18,8 @@
 - [x] git initialized, initial commit
 - **Verify:** `git log --oneline | wc -l` ≥ 1; `git check-ignore .env data/` lists both; `git grep -iE 'sk-(proj|ant)' $(git rev-parse HEAD)` empty.
 
-### S0.2 — Translator package skeleton (1 pt)
-- [ ] `translator/` installable package: `pyproject.toml`, `berilo/` with CLI entry point, pytest wired, Black + Ruff configured, Makefile (`make test`, `make lint`)
+### S0.2 — Translator package skeleton ✅ (1 pt)
+- [x] `translator/` installable package: `pyproject.toml`, `berilo/` with CLI entry point, pytest wired, Black + Ruff configured, Makefile (`make test`, `make lint`)
 - **Verify:** `cd translator && pip install -e . && berilo --help` exits 0 and lists `translate|inspect|eval`; `make test` passes (≥1 placeholder test); `make lint` clean.
 
 ### S0.3 — GitHub repo wiring ✅ (1 pt)
