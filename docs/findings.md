@@ -1,5 +1,16 @@
 # Findings register (Tier 2)
 
+- [2026-07-24] Android coroutine-test gotchas: a `TestDispatcher` injected as
+  a client's ioDispatcher must be constructed with the enclosing
+  `TestScope.testScheduler` (else `delay()` throws "different schedulers");
+  JVM ViewModel tests need `Dispatchers.setMain`/`resetMain` or
+  `viewModelScope.launch` failures are silently swallowed. Prefer
+  `Icons.AutoMirrored.*` (app is RTL-enabled). Occasional gradle JVM SIGSEGV
+  in R8/C2 on this box — `./gradlew --stop` + retry, not a code bug.
+- [2026-07-24] S2.3 latent traps for S2.4/S2.5: SettingsViewModel.
+  persistCurrentState() drops dictionaryModel/interpretationModel (writes
+  null on any edit) — fix when those fields gain UI; key text fields lack
+  KeyboardOptions(Password) (IME dictionary risk, keys usually pasted).
 - [2026-07-24] Android build env: box has JRE-only OpenJDK (no javac, no
   sudo) — JDK 21.0.2 bootstrapped at `~/.local/share/jdk-bootstrap/jdk-21.0.2`;
   every Android gradle invocation needs
