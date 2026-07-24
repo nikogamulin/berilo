@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple open-book glyph placeholder; a designed mark lands with S2.7. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,34 L54,26 L54,82 L24,90 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M84,34 L54,26 L54,82 L84,90 Z"
+        android:fillAlpha="0.85" />
+</vector>

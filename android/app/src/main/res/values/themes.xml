@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        The window background before Compose takes over. E-ink first: true
+        white background, true black text (docs/design_guidelines.md).
+    -->
+    <style name="Theme.Berilo" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/berilo_paper</item>
+        <item name="android:statusBarColor">@color/berilo_paper</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
