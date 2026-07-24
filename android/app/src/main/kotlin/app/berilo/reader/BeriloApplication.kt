@@ -34,7 +34,7 @@ class AppContainer(app: Application) {
             // Version 1 (books-only) never shipped in a release build, so a destructive
             // fallback is safe — there is no user data to preserve across the S2.4 bump to
             // version 2 (adds dictionary_entries).
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
     private val booksDir = File(app.filesDir, "books")

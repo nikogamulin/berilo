@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import app.berilo.reader.llm.LlmError
 import app.berilo.reader.settings.SettingsRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -46,10 +47,13 @@ class DictionaryViewModel(
     private val _uiState = MutableStateFlow<DictionaryUiState>(DictionaryUiState.Idle)
     val uiState: StateFlow<DictionaryUiState> = _uiState.asStateFlow()
 
+    private var lookupJob: Job? = null
+
     /** Starts a lookup for [context], opening the sheet in its loading state. */
     fun lookup(context: SelectionContext) {
+        lookupJob?.cancel()
         _uiState.value = DictionaryUiState.Loading(context.word)
-        viewModelScope.launch {
+        lookupJob = viewModelScope.launch {
             val settings = settingsRepository.load()
             try {
                 val result = dictionaryRepository.lookup(settings, context.word, context.sentence)
@@ -66,8 +70,13 @@ class DictionaryViewModel(
         }
     }
 
-    /** Dismisses the sheet, returning to [DictionaryUiState.Idle]. */
+    /** Dismisses the sheet, returning to [DictionaryUiState.Idle].
+
+    Cancels any in-flight lookup so a late result cannot reopen the sheet.
+    */
     fun dismiss() {
+        lookupJob?.cancel()
+        lookupJob = null
         _uiState.value = DictionaryUiState.Idle
     }
 
