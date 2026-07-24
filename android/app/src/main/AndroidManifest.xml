@@ -22,7 +22,7 @@
         <activity
             android:name=".reader.ReaderActivity"
             android:exported="false"
-            android:theme="@style/Theme.Berilo" />
+            android:theme="@style/Theme.Berilo.Reader" />
 
     </application>
 

@@ -39,6 +39,8 @@ android {
 
     buildFeatures {
         compose = true
+        // BuildConfig.DEBUG gates the reader's page-turn timing overlay (PerfLog, R2).
+        buildConfig = true
     }
 
     packaging {
@@ -69,6 +71,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
+    // Hosts Readium's EpubNavigatorFragment: readium-navigator ships androidx.fragment
+    // only as a runtime dependency, so the fragment/FragmentActivity/ComposeView
+    // interop types are pulled in explicitly here (aar-metadata minCompileSdk 34 ≤ 35).
+    implementation(libs.androidx.fragment.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

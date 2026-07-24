@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Reader host: the Readium EpubNavigatorFragment renders the paginated book in
+    reader_container; reader_chrome (a ComposeView) overlays the chapter bar,
+    progress and settings/TOC panels. The overlay is GONE while reading so the
+    navigator's WebView receives touches; a Readium InputListener tap toggles it.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.fragment.app.FragmentContainerView
+        android:id="@+id/reader_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/reader_chrome"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+</FrameLayout>

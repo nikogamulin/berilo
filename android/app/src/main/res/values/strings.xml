@@ -35,5 +35,5 @@
     <string name="reader_margins_wider">Wider margins</string>
     <string name="reader_eink_mode">E-ink mode</string>
     <string name="reader_dark_theme">Dark theme</string>
-    <string name="reader_surface_pending">Paginated rendering surface</string>
+    <string name="reader_open_failed">This book could not be opened. The file may be missing or damaged.</string>
 </resources>

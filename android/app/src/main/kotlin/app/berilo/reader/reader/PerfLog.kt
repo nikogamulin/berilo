@@ -1,6 +1,7 @@
 package app.berilo.reader.reader
 
 import android.util.Log
+import app.berilo.reader.BuildConfig
 
 /**
  * Page-turn render timing for Rubric R2 (page turn ≤ 150 ms on the Boox). The
@@ -9,16 +10,17 @@ import android.util.Log
  * logged under the "BeriloPerf" tag so `adb logcat -s BeriloPerf` yields the R2
  * measurement series.
  *
- * Logging is off by default and cheap when off (no allocation, no formatting) —
- * the reader's debug settings flip [enabled] on when the overlay is toggled.
+ * Off in release builds and cheap when off (no allocation, no formatting).
+ * Defaults to [BuildConfig.DEBUG] so the overlay is a debug-only diagnostic; the
+ * reader's debug settings can still flip [enabled] at runtime.
  */
 object PerfLog {
 
     const val TAG = "BeriloPerf"
 
-    /** Toggled by the reader's debug timing-overlay setting. */
+    /** Debug-gated by default; the reader's debug timing-overlay setting can flip it. */
     @Volatile
-    var enabled: Boolean = false
+    var enabled: Boolean = BuildConfig.DEBUG
 
     /** Returns a start marker (monotonic nanos) for a page-turn request. */
     fun pageTurnRequested(): Long = System.nanoTime()

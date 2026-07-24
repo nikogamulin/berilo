@@ -32,19 +32,21 @@ import androidx.compose.ui.unit.dp
 import app.berilo.reader.R
 
 /**
- * The reader's chrome: a top bar (current chapter + entry points to chapters and
- * text settings), a bottom progress indicator, and the settings / TOC panels.
+ * The reader's chrome overlay: a top bar (current chapter + entry points to
+ * chapters and text settings), a bottom progress indicator, and the settings /
+ * TOC panels. Rendered in a ComposeView on top of the Readium navigator's
+ * rendering surface — it holds no reading surface of its own.
  *
- * Deference (design_guidelines.md §1): the chrome is absent while reading and
- * only appears when [chromeVisible] is true (tap-center toggles it). The
- * [readingSurface] slot hosts the paginated rendering underneath.
+ * Deference (design_guidelines.md §1): the chrome is absent while reading; the
+ * host makes this overlay visible only when [ReaderChromeState.chromeVisible] is
+ * true (a Readium tap toggles it). When shown, a tap on the scrim (anywhere not
+ * on a control) dismisses it again.
  */
 @Composable
-fun ReaderScaffold(
+fun ReaderChromeOverlay(
     state: ReaderChromeState,
     actions: ReaderChromeActions,
     modifier: Modifier = Modifier,
-    readingSurface: @Composable () -> Unit,
 ) {
     // No ripple/indication: an e-ink page must not flash on tap.
     val tapSource = remember { MutableInteractionSource() }
@@ -57,9 +59,7 @@ fun ReaderScaffold(
                     indication = null,
                     interactionSource = tapSource,
                 ),
-        ) {
-            readingSurface()
-        }
+        )
 
         if (state.chromeVisible) {
             ReaderTopBar(
