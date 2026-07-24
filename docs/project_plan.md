@@ -59,6 +59,8 @@
 - **Verify:** `epubcheck` exits 0 on both variants; output opens in Calibre viewer; T5 structural-fidelity script ≥ 9/10.
 
 ### S1.7 — Eval harness (Rubric T) (3 pt)
+- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES: docstring + prompts package-data, folded); offline Verify green (128 tests: seed determinism, T1 cap-at-40, paired bootstrap CI, dry-run 0 calls)
+- [ ] Live Verify residual: real judged run on a translated EPUB — runs with S1.8
 - [ ] `berilo eval` implements Rubric T end-to-end: sampled LLM-judge scoring (seed, bootstrap CI), completeness, terminology, structure checks; appends to `loops/build/rubric_scores.jsonl`
 - **Verify:** `berilo eval <translated epub> --sample 40 --seed 42` prints score + 95% CI and writes a ledger row; running twice with same seed gives identical sample selection.
 

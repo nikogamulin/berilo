@@ -65,6 +65,16 @@
 - [2026-07-24] `normalize/epub.py` only emits known block tags: prose
   sitting directly in a `<div>`/`<td>` with no block wrapper is skipped —
   known limitation, 0 occurrences in the example books.
+- [2026-07-24] Rubric T alignment (`berilo/eval/rubric_t.py`): difflib
+  SequenceMatcher over (chapter, type, heading_level) fingerprints —
+  structural scramble raises AlignmentError (exit 2), truncation flows into
+  T1<100% which caps the total at 40. Same-type in-chapter swaps pair
+  positionally by design (a real swap shows up as low T2). `berilo eval`
+  auto-discovers the source from `<stem>.<lang>.epub`.
+- [2026-07-24] T7's "≤1.5× dry-run estimate" clause is unevaluable — the
+  cache `calls` table stores only actual cost. T7 currently scores the
+  €1.50/100k-words clause only; persisting the estimate into the cache is a
+  small follow-up if the ratio clause should count.
 - [2026-07-24] S1.5 cost model: reasoning surcharge is a FIXED per-call
   additive (~464 output tokens/call, from the 479−15 doctor evidence), not a
   multiplier — a flat multiplier wildly overestimates long batches. Dry-run

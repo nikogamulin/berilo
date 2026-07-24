@@ -1,8 +1,7 @@
 """Command-line entry point for the Berilo translator.
 
-Subcommands: ``translate`` (S1.5), ``inspect`` (S1.1), ``doctor`` (S1.4) are
-implemented; ``eval`` remains a stub — it prints "not implemented" and exits 1,
-except the ``--help`` paths (handled by click) which exit 0.
+Subcommands (all implemented): ``translate`` (S1.5), ``inspect`` (S1.1, with
+``--screen`` from S1.2), ``eval`` (S1.7, Rubric T), ``doctor`` (S1.4).
 """
 
 from __future__ import annotations

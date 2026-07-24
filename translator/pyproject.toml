@@ -31,6 +31,9 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["berilo*"]
 
+[tool.setuptools.package-data]
+"berilo.eval.prompts" = ["*.txt"]
+
 [tool.black]
 line-length = 100
 target-version = ["py310"]
