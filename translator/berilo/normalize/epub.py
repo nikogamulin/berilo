@@ -236,7 +236,16 @@ def _iter_blocks(element: ET.Element):
         if tag in _SKIP_TAGS:
             continue
         if tag in _BLOCK_TAG_TYPES:
-            yield _BLOCK_TAG_TYPES[tag], _HEADING_LEVELS.get(tag), child
+            block_type = _BLOCK_TAG_TYPES[tag]
+            if tag == "p":
+                # Round-trip class-tagged types emitted by assemble.py so
+                # eval alignment fingerprints survive PDF→EPUB rebuilds.
+                css_class = child.get("class", "")
+                if "caption" in css_class.split():
+                    block_type = SegmentType.CAPTION
+                elif "other" in css_class.split():
+                    block_type = SegmentType.OTHER
+            yield block_type, _HEADING_LEVELS.get(tag), child
             continue
         yield from _iter_blocks(child)
 

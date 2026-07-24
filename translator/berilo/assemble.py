@@ -210,7 +210,11 @@ def _render_chapter_body(segments: list[Segment], source_by_id: dict[str, Segmen
             parts.append(f"<blockquote><p>{inline}</p></blockquote>")
         elif segment.type == SegmentType.CAPTION:
             parts.append(f'<p class="caption">{inline}</p>')
-        else:  # PARAGRAPH, OTHER
+        elif segment.type == SegmentType.OTHER:
+            # Class-tagged so normalize_epub round-trips the type (eval
+            # alignment fingerprints on segment types).
+            parts.append(f'<p class="other">{inline}</p>')
+        else:  # PARAGRAPH
             parts.append(f"<p>{inline}</p>")
 
         parts.append(source_paragraph(segment))
