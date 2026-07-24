@@ -332,8 +332,18 @@ def _summarize(book: Book) -> dict[str, Any]:
 @cli.command()
 @click.argument("source_file", type=click.Path())
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option("--screen", "do_screen", is_flag=True, help="LLM-screen sampled segments (paid).")
+@click.option("--sample", "sample_n", default=30, type=int, help="Segments to screen.")
+@click.option("--seed", default=42, type=int, help="Random seed for screening sample.")
 @click.pass_context
-def inspect(ctx: click.Context, source_file: str, as_json: bool) -> None:
+def inspect(
+    ctx: click.Context,
+    source_file: str,
+    as_json: bool,
+    do_screen: bool,
+    sample_n: int,
+    seed: int,
+) -> None:
     """Preview SOURCE_FILE's extraction quality and segment statistics."""
     try:
         book = normalize(source_file)
@@ -341,6 +351,24 @@ def inspect(ctx: click.Context, source_file: str, as_json: bool) -> None:
         click.echo(f"inspect: {exc}", err=True)
         ctx.exit(NOT_IMPLEMENTED_EXIT_CODE)
         return
+
+    if do_screen:
+        from dotenv import find_dotenv
+
+        from berilo.config import load_config
+        from berilo.providers import create_client
+        from berilo.screen import sample_segments, screen_segments
+
+        config = load_config(env_file=find_dotenv(usecwd=True) or None)
+        client = create_client(config.judge_model, config)
+        report = screen_segments(sample_segments(book, n=sample_n, seed=seed), client)
+        click.echo(
+            f"screen: {report.clean_count}/{report.total} clean "
+            f"({report.clean_fraction * 100:.1f}%), cost €{report.cost_eur:.4f}, "
+            f"model {config.judge_model}, seed {seed}"
+        )
+        for verdict in report.flagged:
+            click.echo(f"  flagged [{verdict.segment.id[:10]}]: {verdict.segment.text[:100]}")
 
     summary = _summarize(book)
     if as_json:
