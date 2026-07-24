@@ -31,6 +31,8 @@ import app.berilo.reader.R
 import app.berilo.reader.dictionary.DictionaryViewModel
 import app.berilo.reader.dictionary.SelectionContext
 import app.berilo.reader.dictionary.buildSelectionContext
+import app.berilo.reader.interpretation.InterpretationViewModel
+import app.berilo.reader.interpretation.resolveInterpretationPassage
 import app.berilo.reader.ui.theme.BeriloTheme
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -83,6 +85,11 @@ class ReaderActivity : FragmentActivity() {
     private val dictionaryViewModel: DictionaryViewModel by viewModels {
         val container = (application as BeriloApplication).container
         DictionaryViewModel.Factory(container.settingsRepository, container.dictionaryRepository)
+    }
+
+    private val interpretationViewModel: InterpretationViewModel by viewModels {
+        val container = (application as BeriloApplication).container
+        InterpretationViewModel.Factory(container.settingsRepository, container.interpretationRepository)
     }
 
     private var navigator: EpubNavigatorFragment? = null
@@ -217,6 +224,27 @@ class ReaderActivity : FragmentActivity() {
         return buildSelectionContext(text.before.orEmpty(), text.highlight.orEmpty(), text.after.orEmpty())
     }
 
+    /**
+     * "Interpret" tap handler: unlike [onDefineSelectionClicked], sends the WHOLE current
+     * selection (a passage/paragraph, not a single word) — no sentence reconstruction. Falls
+     * back to the currently visible locator's `text.highlight` when nothing is selected, so a
+     * long-press-free tap still interprets the page in view; if neither has text, tells the
+     * user to select something.
+     */
+    private fun onInterpretSelectionClicked() {
+        lifecycleScope.launch {
+            val selectionHighlight = navigator?.currentSelection()?.locator?.text?.highlight
+            val visibleHighlight = navigator?.currentLocator?.value?.text?.highlight
+            val passage = resolveInterpretationPassage(selectionHighlight, visibleHighlight)
+            val bookTitle = viewModel.book.value?.title.orEmpty()
+            if (passage == null) {
+                Toast.makeText(this@ReaderActivity, R.string.interpretation_no_selection, Toast.LENGTH_SHORT).show()
+            } else {
+                interpretationViewModel.interpret(passage, bookTitle)
+            }
+        }
+    }
+
     private fun onChapterSelected(chapter: TocChapter) {
         val fragment = navigator ?: return
         tocLinksByHref[chapter.href]?.let { link ->
@@ -262,6 +290,7 @@ class ReaderActivity : FragmentActivity() {
         val progress by progressFraction.collectAsStateWithLifecycle()
         val failed by openFailed.collectAsStateWithLifecycle()
         val dictionaryState by dictionaryViewModel.uiState.collectAsStateWithLifecycle()
+        val interpretationState by interpretationViewModel.uiState.collectAsStateWithLifecycle()
 
         BeriloTheme(useDarkTheme = !preferences.einkMode && preferences.darkTheme) {
             if (failed) {
@@ -287,6 +316,7 @@ class ReaderActivity : FragmentActivity() {
                 preferences = preferences,
                 chapters = chapters,
                 dictionaryState = dictionaryState,
+                interpretationState = interpretationState,
             )
             val actions = ReaderChromeActions(
                 onToggleChrome = { viewModel.toggleChrome() },
@@ -305,6 +335,8 @@ class ReaderActivity : FragmentActivity() {
                 onDarkThemeChange = viewModel::setDarkTheme,
                 onDefineSelection = ::onDefineSelectionClicked,
                 onDismissDictionary = dictionaryViewModel::dismiss,
+                onInterpretSelection = ::onInterpretSelectionClicked,
+                onDismissInterpretation = interpretationViewModel::dismiss,
             )
             ReaderChromeOverlay(state = state, actions = actions)
         }

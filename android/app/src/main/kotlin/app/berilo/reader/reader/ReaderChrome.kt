@@ -32,6 +32,8 @@ import androidx.compose.ui.unit.dp
 import app.berilo.reader.R
 import app.berilo.reader.dictionary.DictionarySheet
 import app.berilo.reader.dictionary.DictionaryUiState
+import app.berilo.reader.interpretation.InterpretationSheet
+import app.berilo.reader.interpretation.InterpretationUiState
 
 /**
  * The reader's chrome overlay: a top bar (current chapter + entry points to
@@ -68,6 +70,7 @@ fun ReaderChromeOverlay(
                 chapterTitle = state.chapterTitle,
                 onChaptersClick = actions.onOpenChapters,
                 onDefineClick = actions.onDefineSelection,
+                onInterpretClick = actions.onInterpretSelection,
                 onSettingsClick = actions.onOpenSettings,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
@@ -97,6 +100,11 @@ fun ReaderChromeOverlay(
         // Hosts the LLM dictionary (S2.4): a "Define" tap in the top bar captures the
         // navigator's current text selection and drives this state via DictionaryViewModel.
         DictionarySheet(uiState = state.dictionaryState, onDismiss = actions.onDismissDictionary)
+
+        // Hosts paragraph interpretation (S2.5): an "Interpret" tap in the top bar sends the
+        // whole current selection (or the visible locator's text as a fallback) and drives
+        // this state via InterpretationViewModel.
+        InterpretationSheet(uiState = state.interpretationState, onDismiss = actions.onDismissInterpretation)
     }
 }
 
@@ -105,6 +113,7 @@ private fun ReaderTopBar(
     chapterTitle: String,
     onChaptersClick: () -> Unit,
     onDefineClick: () -> Unit,
+    onInterpretClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -129,6 +138,9 @@ private fun ReaderTopBar(
             )
             TextButton(onClick = onDefineClick) {
                 Text(stringResource(R.string.reader_define))
+            }
+            TextButton(onClick = onInterpretClick) {
+                Text(stringResource(R.string.reader_interpret))
             }
             TextButton(onClick = onSettingsClick) {
                 Text(stringResource(R.string.reader_settings))
@@ -311,6 +323,7 @@ data class ReaderChromeState(
     val preferences: ReaderPreferences,
     val chapters: List<TocChapter>,
     val dictionaryState: DictionaryUiState = DictionaryUiState.Idle,
+    val interpretationState: InterpretationUiState = InterpretationUiState.Idle,
 )
 
 /** Callbacks the [ReaderScaffold] invokes; wired to the [ReaderViewModel]. */
@@ -328,4 +341,6 @@ data class ReaderChromeActions(
     val onDarkThemeChange: (Boolean) -> Unit,
     val onDefineSelection: () -> Unit = {},
     val onDismissDictionary: () -> Unit = {},
+    val onInterpretSelection: () -> Unit = {},
+    val onDismissInterpretation: () -> Unit = {},
 )
