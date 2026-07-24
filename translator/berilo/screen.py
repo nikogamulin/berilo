@@ -56,12 +56,25 @@ _FRONT_MATTER_TITLE_SUBSTRINGS = (
 
 # Deterministic, single-token screening prompt. The model must answer with a
 # bare YES/NO so parsing is unambiguous across providers.
+#
+# v2 (2026-07-24): scoped to EXTRACTION artifacts, matching Rubric T6's
+# definition ("inline page numbers, running headers, broken hyphenation").
+# Source-inherent OCR character substitutions ("s500" for "$500", "T think"
+# for "I think") are the scan's fault, not the pipeline's — a passage carrying
+# them still screens YES if the extraction itself is faithful body prose.
+SCREEN_PROMPT_VERSION = "v2"
 _SCREEN_PROMPT = (
     "You are screening text extracted from a book by an automated PDF "
-    "pipeline. Reply with exactly one word, YES or NO.\n"
-    "Answer YES if the passage is clean prose from the body of the book. "
-    "Answer NO if it is a running header, footer, page number, "
-    "table-of-contents entry, or garbled / broken text.\n\n"
+    "pipeline for EXTRACTION artifacts. Reply with exactly one word, YES or "
+    "NO.\n"
+    "Answer NO only if the passage shows an extraction defect: a running "
+    "header or footer, a page number, a table-of-contents entry, a fragment "
+    "cut off mid-sentence, lines from different paragraphs jumbled together, "
+    "duplicated text, or unreadable character soup.\n"
+    "Answer YES if the passage is body prose that was extracted faithfully — "
+    "even if the source scan itself contains OCR typos such as wrong "
+    "characters ('s500' for '$500', 'T think' for 'I think'); source typos "
+    "are not extraction defects.\n\n"
     "PASSAGE:\n{text}\n\nAnswer (YES or NO):"
 )
 

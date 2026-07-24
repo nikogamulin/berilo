@@ -75,6 +75,20 @@
   evade bare-number/roman regexes AND ≥3-page recurrence, then reflow's
   continuation-override merges them into the next body paragraph — strip
   in-band single tokens matching `^\S*\d\S*$` BEFORE reflow, not post-merge.
+- [2026-07-24] Prose-quality sampling must be PARAGRAPH-only with every
+  non-prose class explicitly typed: front matter folded to a "Front Matter"
+  chapter (mirroring the "Notes" back-matter fold, in BOTH TOC and heuristic
+  paths), captions → CAPTION, scene-setter datelines and body scan residue →
+  OTHER (retyped, NEVER dropped — `translate_book` translates all non-empty
+  segments so 1:1 integrity holds). `_is_ocr_gibberish` (real-word-ratio)
+  keeps real short sentences. Front/back matter must be fixed TOGETHER —
+  excluding one shifts the fixed-seed sample into the other's noise (screen
+  went 27→22/30 after a genuine fix purely from the pool redraw).
+- [2026-07-24] Screen prompt bumped to v2 (`screen.SCREEN_PROMPT_VERSION`),
+  scoped to EXTRACTION artifacts per Rubric T6's definition — source-OCR
+  character garble ("s500" for "$500", "T think" for "I think") screens YES
+  when extraction is faithful. Final S1.2 gate: AM 29/30, WE 29/30 (96.7%,
+  seed 42, gpt-5-mini).
 - [2026-07-24] Screen-gate design caveat: World Ends has a source-OCR garble
   floor (~1/30 in the seed-42 sample: "s500" for "$500", "/eet" for "leet" —
   verbatim in the PDF text layer). A perfect extractor may still hover near

@@ -167,3 +167,8 @@ git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!docs/
   checkout (recurred 3×) → **run worktree tests with
   `PYTHONPATH=<worktree>/translator`; keep `data/`-gated tests skippable;
   never copy books into worktrees** (details in `docs/findings.md`).
+- Screen-gate fixes chased flagged instances for 4 rounds while the
+  fixed-seed sample kept redrawing (recurred 3×) → **fix quality gates by
+  artifact CLASS (type/fold/exclude whole categories), never by instance;
+  any pool change redraws a seeded sample, so per-instance fixes are
+  non-monotonic** (evidence in `docs/findings.md`).
