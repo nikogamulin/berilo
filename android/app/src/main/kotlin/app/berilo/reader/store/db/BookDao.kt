@@ -21,6 +21,17 @@ interface BookDao {
     @Query("SELECT EXISTS(SELECT 1 FROM books WHERE id = :id)")
     suspend fun exists(id: String): Boolean
 
+    /** Reads back the persisted reading position (Readium Locator JSON), or null. */
+    @Query("SELECT progressionJson FROM books WHERE id = :id")
+    suspend fun getProgression(id: String): String?
+
+    /**
+     * Persists the reading position and bumps [BookEntity.lastOpenedAt] in one
+     * write, so a page turn does not read-modify-write the whole row.
+     */
+    @Query("UPDATE books SET progressionJson = :progressionJson, lastOpenedAt = :openedAt WHERE id = :id")
+    suspend fun updateProgression(id: String, progressionJson: String?, openedAt: Long)
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(book: BookEntity)
 

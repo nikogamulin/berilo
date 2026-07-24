@@ -21,4 +21,19 @@
     <string name="reader_loading">Opening…</string>
     <string name="reader_now_reading">Now reading</string>
     <string name="reader_not_found">Book not found</string>
+
+    <string name="reader_chapters">Chapters</string>
+    <string name="reader_settings">Text settings</string>
+    <string name="reader_done">Done</string>
+    <string name="reader_untitled_chapter">Untitled</string>
+    <string name="reader_progress_percent">%1$d%%</string>
+    <string name="reader_font_size">Font size</string>
+    <string name="reader_font_smaller">Smaller font</string>
+    <string name="reader_font_larger">Larger font</string>
+    <string name="reader_margins">Margins</string>
+    <string name="reader_margins_narrower">Narrower margins</string>
+    <string name="reader_margins_wider">Wider margins</string>
+    <string name="reader_eink_mode">E-ink mode</string>
+    <string name="reader_dark_theme">Dark theme</string>
+    <string name="reader_surface_pending">Paginated rendering surface</string>
 </resources>

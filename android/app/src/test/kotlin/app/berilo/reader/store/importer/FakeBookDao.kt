@@ -18,6 +18,14 @@ class FakeBookDao : BookDao {
 
     override suspend fun exists(id: String): Boolean = books.containsKey(id)
 
+    override suspend fun getProgression(id: String): String? = books[id]?.progressionJson
+
+    override suspend fun updateProgression(id: String, progressionJson: String?, openedAt: Long) {
+        val existing = books[id] ?: return
+        books[id] = existing.copy(progressionJson = progressionJson, lastOpenedAt = openedAt)
+        publish()
+    }
+
     override suspend fun insert(book: BookEntity) {
         check(!books.containsKey(book.id)) { "duplicate id ${book.id}" }
         books[book.id] = book
