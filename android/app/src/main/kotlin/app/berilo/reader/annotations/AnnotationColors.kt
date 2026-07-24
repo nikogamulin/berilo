@@ -10,10 +10,14 @@ import app.berilo.reader.store.db.HighlightColor
  */
 fun HighlightColor.toComposeColor(): Color =
     when (this) {
+        // Perceptual luma (0.299R+0.587G+0.114B) ≈ 187 — third band.
         HighlightColor.AMBER -> Color(0xFFE8B75B)
-        HighlightColor.SAGE -> Color(0xFFA9C79A)
-        HighlightColor.SKY -> Color(0xFF93B7D6)
-        HighlightColor.ROSE -> Color(0xFFD79A9A)
+        // ≈ 211 — lightest band.
+        HighlightColor.SAGE -> Color(0xFFC9DDBB)
+        // ≈ 142 — second band.
+        HighlightColor.SKY -> Color(0xFF7195B8)
+        // ≈ 114 — darkest band. Four bands stay apart when desaturated on e-ink.
+        HighlightColor.ROSE -> Color(0xFF9E5F5F)
     }
 
 /** The fixed display order the color row/notebook color picker present, alphabetical is
