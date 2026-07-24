@@ -1,6 +1,7 @@
 package app.berilo.reader.reader
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -30,10 +32,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.berilo.reader.R
+import app.berilo.reader.annotations.AnnotationEditorActions
+import app.berilo.reader.annotations.AnnotationEditorHost
+import app.berilo.reader.annotations.AnnotationEditorUiState
 import app.berilo.reader.dictionary.DictionarySheet
 import app.berilo.reader.dictionary.DictionaryUiState
 import app.berilo.reader.interpretation.InterpretationSheet
 import app.berilo.reader.interpretation.InterpretationUiState
+import app.berilo.reader.store.db.HighlightColor
 
 /**
  * The reader's chrome overlay: a top bar (current chapter + entry points to
@@ -71,6 +77,9 @@ fun ReaderChromeOverlay(
                 onChaptersClick = actions.onOpenChapters,
                 onDefineClick = actions.onDefineSelection,
                 onInterpretClick = actions.onInterpretSelection,
+                onHighlightClick = actions.onHighlightSelection,
+                onNoteClick = actions.onNoteSelection,
+                onNotebookClick = actions.onOpenNotebook,
                 onSettingsClick = actions.onOpenSettings,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
@@ -105,6 +114,21 @@ fun ReaderChromeOverlay(
         // whole current selection (or the visible locator's text as a fallback) and drives
         // this state via InterpretationViewModel.
         InterpretationSheet(uiState = state.interpretationState, onDismiss = actions.onDismissInterpretation)
+
+        // Hosts highlight/note creation (S2.6): "Highlight"/"Note" taps in the top bar capture
+        // the navigator's current selection and drive this state via HighlightViewModel.
+        AnnotationEditorHost(
+            state = state.annotationEditorState,
+            actions =
+                AnnotationEditorActions(
+                    onColorSelected = actions.onAnnotationColorSelected,
+                    onNoteColorChanged = actions.onAnnotationNoteColorChanged,
+                    onNoteTextChanged = actions.onAnnotationNoteTextChanged,
+                    onConfirmNote = actions.onConfirmAnnotationNote,
+                    onDismiss = actions.onDismissAnnotationEditor,
+                ),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }
 
@@ -114,6 +138,9 @@ private fun ReaderTopBar(
     onChaptersClick: () -> Unit,
     onDefineClick: () -> Unit,
     onInterpretClick: () -> Unit,
+    onHighlightClick: () -> Unit,
+    onNoteClick: () -> Unit,
+    onNotebookClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -136,14 +163,30 @@ private fun ReaderTopBar(
                     .weight(1f)
                     .padding(horizontal = 8.dp),
             )
-            TextButton(onClick = onDefineClick) {
-                Text(stringResource(R.string.reader_define))
-            }
-            TextButton(onClick = onInterpretClick) {
-                Text(stringResource(R.string.reader_interpret))
-            }
-            TextButton(onClick = onSettingsClick) {
-                Text(stringResource(R.string.reader_settings))
+            // Horizontally scrollable so the growing action set (S2.6 adds Highlight/Note/
+            // Notebook to Define/Interpret/Settings) never clips the chapter title above.
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(onClick = onDefineClick) {
+                    Text(stringResource(R.string.reader_define))
+                }
+                TextButton(onClick = onInterpretClick) {
+                    Text(stringResource(R.string.reader_interpret))
+                }
+                TextButton(onClick = onHighlightClick) {
+                    Text(stringResource(R.string.reader_highlight))
+                }
+                TextButton(onClick = onNoteClick) {
+                    Text(stringResource(R.string.reader_note))
+                }
+                TextButton(onClick = onNotebookClick) {
+                    Text(stringResource(R.string.reader_notebook))
+                }
+                TextButton(onClick = onSettingsClick) {
+                    Text(stringResource(R.string.reader_settings))
+                }
             }
         }
     }
@@ -324,6 +367,7 @@ data class ReaderChromeState(
     val chapters: List<TocChapter>,
     val dictionaryState: DictionaryUiState = DictionaryUiState.Idle,
     val interpretationState: InterpretationUiState = InterpretationUiState.Idle,
+    val annotationEditorState: AnnotationEditorUiState = AnnotationEditorUiState.Idle,
 )
 
 /** Callbacks the [ReaderScaffold] invokes; wired to the [ReaderViewModel]. */
@@ -343,4 +387,12 @@ data class ReaderChromeActions(
     val onDismissDictionary: () -> Unit = {},
     val onInterpretSelection: () -> Unit = {},
     val onDismissInterpretation: () -> Unit = {},
+    val onHighlightSelection: () -> Unit = {},
+    val onNoteSelection: () -> Unit = {},
+    val onOpenNotebook: () -> Unit = {},
+    val onAnnotationColorSelected: (HighlightColor) -> Unit = {},
+    val onAnnotationNoteColorChanged: (HighlightColor) -> Unit = {},
+    val onAnnotationNoteTextChanged: (String) -> Unit = {},
+    val onConfirmAnnotationNote: () -> Unit = {},
+    val onDismissAnnotationEditor: () -> Unit = {},
 )
