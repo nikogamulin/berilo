@@ -569,6 +569,81 @@ def test_screen_all_clean_is_full_fraction() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# Margin/header-garble fixes (per-parity indent threshold + pre-reflow strip)
+# --------------------------------------------------------------------------- #
+
+
+def test_recto_verso_margins_do_not_shatter_paragraphs(tmp_path: Path) -> None:
+    """A capitalized wrap onto a wider recto margin stays one paragraph.
+
+    Verso body sits at x=16, recto body at x=29. With a single global margin the
+    recto continuation reads as a first-line indent and (being capitalized, so
+    the lowercase-continuation override cannot save it) becomes an orphan
+    fragment. The per-parity indent threshold keeps it joined.
+    """
+    verso, recto, indent = 16.0, 29.0, 18.0
+    page0 = [
+        (72.0, _HEADER_Y, "1", 8.0),
+        (verso, 120.0, "CHAPTER 1", _HEADING_SIZE),
+        (
+            verso + indent,
+            160.0,
+            "The coalition included partners from many allied nations who",
+            _BODY_SIZE,
+        ),
+        (verso, 176.0, "coordinated operations closely and shared intelligence while", _BODY_SIZE),
+        (verso, 192.0, "working with", _BODY_SIZE),  # ends mid-sentence, no punctuation
+    ]
+    page1 = [
+        (72.0, _HEADER_Y, "2", 8.0),
+        # Capitalized continuation at the recto margin — must still merge.
+        (recto, 120.0, "Israeli and German engineers across the entire region.", _BODY_SIZE),
+        # A genuine recto first-line indent still starts a new paragraph.
+        (
+            recto + indent,
+            160.0,
+            "A brand-new paragraph then opens on the recto side here.",
+            _BODY_SIZE,
+        ),
+        (recto, 176.0, "and it runs onto a second line at the recto margin.", _BODY_SIZE),
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, [page0, page1], name="parity.pdf"))
+
+    merged = _find_segment(book, "coalition included partners")
+    assert "Israeli and German engineers across the entire region." in merged.text
+    # The truly-indented recto paragraph remains distinct.
+    other = _find_segment(book, "A brand-new paragraph then opens")
+    assert other.id != merged.id
+
+
+def test_header_band_garbled_page_number_is_stripped(tmp_path: Path) -> None:
+    """A garbled in-band page number ("40OI1") never enters a segment."""
+    page0 = [
+        (200.0, _HEADER_Y, "40OI1", 8.0),  # garbled OCR page number in header band
+        (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+        (
+            _LEFT_MARGIN,
+            160.0,
+            "The body paragraph must stay clean without header garble.",
+            _BODY_SIZE,
+        ),
+    ]
+    page1 = [
+        (200.0, _HEADER_Y, "40OI2", 8.0),  # another garbled page number
+        (_LEFT_MARGIN, 120.0, "A second clean paragraph continues the chapter here.", _BODY_SIZE),
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, [page0, page1], name="garble.pdf"))
+
+    for seg in book.segments:
+        assert "40OI1" not in seg.text
+        assert "40OI2" not in seg.text
+    # Body prose survives intact and is not prefixed by the garble token.
+    body = _find_segment(book, "The body paragraph must stay clean")
+    assert not body.text[0].isdigit()
+    assert _find_segment(book, "A second clean paragraph continues")
+
+
+# --------------------------------------------------------------------------- #
 # Integration tests against the real example PDFs (skipped when absent)
 # --------------------------------------------------------------------------- #
 
@@ -611,6 +686,24 @@ def test_real_pdf_extraction_is_clean(filename: str) -> None:
         assert seg.text.strip()
         assert not _NUMBER_RE.match(seg.text.strip())
         assert not _ROMAN_RE.match(seg.text.strip())
+
+
+def test_world_ends_recto_wrap_and_header_garble_fixed() -> None:
+    """Real World Ends: the page-371 recto-wrap paragraph is one segment and
+    the garbled header page number never leaks."""
+    pdf = _example_pdf(_WORLD_ENDS)
+    if pdf is None:
+        pytest.skip("example PDF not available")
+
+    book = normalize_pdf(pdf)
+
+    # BUG A: the paragraph that wraps across the recto margin (ending
+    # "Antarctica's research stations.") extracts as exactly one segment.
+    para = _find_segment(book, "Southern Ocean to Antarctica")
+    assert para.text.rstrip().endswith("research stations.")
+    assert "signed on for a weeks" in para.text  # an earlier sentence of the same paragraph
+    # BUG B: the garbled header page number "40OI1" (page 401) never appears.
+    assert not any("40OI1" in seg.text for seg in book.segments)
 
 
 # --------------------------------------------------------------------------- #
