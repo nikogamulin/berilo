@@ -1,5 +1,11 @@
 # Findings register (Tier 2)
 
+- [2026-07-24] Android SDK installed headlessly at `~/Android/Sdk`
+  (cmdline-tools latest, platform-tools/adb 37, platforms;android-35,
+  build-tools;35.0.0; licenses accepted). No system gradle — projects use
+  the wrapper. Set `ANDROID_HOME=~/Android/Sdk`; NEVER commit
+  `local.properties` (contains a local path → §7 scan trips).
+
 > Durable, session-discovered knowledge: gotchas, working commands,
 > conventions, stuck-patterns. **Scan before debugging or running non-obvious
 > commands.** Promote to CLAUDE.md §9 once a finding recurs or is endorsed.
