@@ -54,6 +54,10 @@ android {
                 signingConfigs.getByName("release")
             } else {
                 // Dev/CI fallback: debug-signed release build (see comment above).
+                logger.warn(
+                    "assembleRelease: no keystore.properties -> DEBUG-SIGNED build, " +
+                        "not for distribution"
+                )
                 signingConfigs.getByName("debug")
             }
         }

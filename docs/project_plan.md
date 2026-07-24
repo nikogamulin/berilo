@@ -112,6 +112,8 @@
 - **Verify:** Rubric **R ≥ 85** recorded in `rubric_scores.jsonl`; R6 checklist ≥ 10/12; screenshots archived in issue.
 
 ### S2.8 — Release v0.1 (1 pt)
+- [x] Build wiring + README landed 2026-07-24 (reviewer LAND-WITH-FIXES, folded; minified release APK 4.6 MiB builds; 352 tests)
+- [ ] Gated: real keystore (Niko), GitHub release publish after the Boox R pass, fresh-install R1 on device
 - [ ] Signed APK, GitHub release, README install instructions
 - **Verify:** `gh release view` shows APK asset; fresh install from the release artifact passes R1 on Boox.
 
