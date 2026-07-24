@@ -12,6 +12,10 @@ license = { text = "MIT" }
 authors = [{ name = "Niko Gamulin", email = "niko.gamulin@gmail.com" }]
 dependencies = [
     "click>=8.1",
+    "pymupdf>=1.24",
+    "openai>=1.50",
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
 ]
 
 [project.scripts]
