@@ -48,6 +48,8 @@
 - **Verify:** `make test` unit tests pass with mocked HTTP (no live calls in CI); live smoke `berilo doctor` translates one hardcoded sentence via each configured provider and prints cost > €0.
 
 ### S1.5 — Translate engine (5 pt)
+- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES, both fixes folded: `--yes`/confirm gate, glossary cost in summary); offline Verify green (85 tests: cache 0-call re-run, kill/resume no-rebill, 1:1 integrity)
+- [ ] Paid Verify residual (Supervisor + Niko go-ahead): real double-run byte-identical, killed/resumed run, T1 = 100% — planned with S1.8
 - [ ] Batched paragraph translation with rolling context; glossary pass (extract names/terms → fixed renderings, injected into every batch); SQLite cache keyed `(book_hash, segment_hash, model, lang)`; strict 1:1 mapping with loud failure + retry for bad segments; `--dry-run` cost estimate
 - **Verify:** translate the EPUB example to `sl` twice — second run makes 0 API calls (cache log) and is byte-identical; kill the first run at ~50% and resume — completes with no re-billed segments (call count in log); T1 completeness = 100%.
 

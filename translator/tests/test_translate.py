@@ -561,6 +561,7 @@ def test_cli_skip_back_matter_reports_and_passes_through(monkeypatch, epub_build
                 "gpt-5-mini",
                 "--to",
                 "sl",
+                "--yes",
                 "--skip-back-matter",
                 "--no-glossary",
                 "--cache-db",

@@ -17,6 +17,7 @@ import click
 
 from berilo.models import Book
 from berilo.normalize import normalize
+from berilo.providers.base import CompletionResult, LLMClient
 
 if TYPE_CHECKING:
     from berilo.translate import CostEstimate, TranslationStats
@@ -53,6 +54,7 @@ def cli() -> None:
     help="Skip translating Index/Notes/Bibliography-style chapters (passed through untranslated).",
 )
 @click.option("--no-glossary", is_flag=True, help="Disable the per-book glossary pass.")
+@click.option("--yes", "-y", "assume_yes", is_flag=True, help="Skip the cost confirmation prompt.")
 @click.option(
     "--cache-db",
     default=None,
@@ -76,6 +78,7 @@ def translate(
     bilingual: bool,
     skip_back_matter: bool,
     no_glossary: bool,
+    assume_yes: bool,
     cache_db: str | None,
     output: str | None,
 ) -> None:
@@ -140,7 +143,9 @@ def translate(
         f"({estimate.translatable_segments} segments, ~{estimate.batches} batches, "
         f"model {model_name})."
     )
-    click.echo(f"Proceeding with translation into '{lang}' — press Ctrl-C to abort.")
+    if not assume_yes and not click.confirm(f"Proceed with translation into '{lang}'?"):
+        ctx.exit(0)
+        return
 
     latest: dict[str, TranslationStats] = {}
 
@@ -154,22 +159,27 @@ def translate(
         )
 
     cache = TranslationCache(cache_db or DEFAULT_CACHE_PATH)
+    tracked_client = _CostTrackingClient(client)
     try:
         glossary = None
         if not no_glossary:
             glossary = build_glossary(
-                book, client=client, target_lang=lang, model=model_name, cache=cache
+                book, client=tracked_client, target_lang=lang, model=model_name, cache=cache
             )
         translated = translate_book(
             book,
-            client=client,
+            client=tracked_client,
             target_lang=lang,
             cache=cache,
             glossary=glossary,
             skip_segment_ids=skip_ids,
             on_progress=_on_progress,
         )
-        _print_summary(latest.get("stats"), skip_back_matter=skip_back_matter)
+        _print_summary(
+            latest.get("stats"),
+            skip_back_matter=skip_back_matter,
+            total_cost_eur=tracked_client.total_cost_eur,
+        )
 
         out_path = Path(output) if output else _default_output_path(source_file, lang)
         _assemble_output(translated, out_path, bilingual=bilingual, source_book=book)
@@ -207,17 +217,47 @@ def _print_estimate(estimate: CostEstimate, *, skip_back_matter: bool) -> None:
         )
 
 
-def _print_summary(stats: TranslationStats | None, *, skip_back_matter: bool) -> None:
+class _CostTrackingClient(LLMClient):
+    """LLMClient proxy that sums the EUR cost of every call it forwards.
+
+    Captures glossary + batch spend in one place so the end-of-run summary
+    reports the true total, not just batch-call cost.
+    """
+
+    def __init__(self, inner: LLMClient) -> None:
+        self._inner = inner
+        self.total_cost_eur = 0.0
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate every other attribute (e.g. ``model``) to the wrapped client."""
+        return getattr(self._inner, name)
+
+    def complete(
+        self,
+        prompt: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+        **kwargs: Any,
+    ) -> CompletionResult:
+        """Forward to the wrapped client and accumulate the call's cost."""
+        result = self._inner.complete(prompt=prompt, messages=messages, **kwargs)
+        self.total_cost_eur += result.cost_eur
+        return result
+
+
+def _print_summary(
+    stats: TranslationStats | None, *, skip_back_matter: bool, total_cost_eur: float | None = None
+) -> None:
     """Print the end-of-run summary line."""
     if stats is None:
         return
+    total = stats.cost_eur if total_cost_eur is None else total_cost_eur
     click.echo(
         f"Done: {stats.total_segments} segments "
         f"({stats.translated_segments} translated, {stats.cached_segments} from cache, "
         f"{stats.skipped_segments} back matter, {stats.empty_segments} empty). "
         f"{stats.api_calls} API calls, "
         f"{stats.input_tokens} in / {stats.output_tokens} out tokens, "
-        f"€{stats.cost_eur:.4f}."
+        f"€{total:.4f} total (incl. glossary)."
     )
     if skip_back_matter and stats.skipped_segments:
         click.echo(

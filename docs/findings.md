@@ -65,6 +65,16 @@
 - [2026-07-24] `normalize/epub.py` only emits known block tags: prose
   sitting directly in a `<div>`/`<td>` with no block wrapper is skipped —
   known limitation, 0 occurrences in the example books.
+- [2026-07-24] S1.5 cost model: reasoning surcharge is a FIXED per-call
+  additive (~464 output tokens/call, from the 479−15 doctor evidence), not a
+  multiplier — a flat multiplier wildly overestimates long batches. Dry-run
+  estimate includes the glossary call; the run summary now reports the true
+  total via a cost-tracking client proxy (`cli._CostTrackingClient`).
+- [2026-07-24] Translation cache keys on sha1(source text) not segment.id:
+  free dedup of identical paragraphs, position-independent resume.
+- [2026-07-24] CLI commands use `find_dotenv(usecwd=True)` → they WILL read
+  the repo `.env`; CLI tests must run inside
+  `CliRunner.isolated_filesystem()` to stay hermetic.
 - [2026-07-24] Calibre's default `.mobi` output is legacy MOBI 6 (no heading
   semantics, `<blockquote>` indent hack): EPUB→MOBI6→EPUB round-trip drifts
   2.56% in segment count (over S1.3's 2% bar); `--mobi-file-type both`
