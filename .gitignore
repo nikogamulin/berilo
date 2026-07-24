@@ -1,0 +1,50 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.key
+
+# Data — books, outputs, caches (copyrighted content stays local)
+data/
+*.pdf
+*.epub
+*.mobi
+*.azw3
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+translator/build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Translation working state
+*.sqlite
+*.sqlite3
+*.db
+
+# Node / Next.js
+node_modules/
+.next/
+.vercel/
+out/
+
+# Android
+android/**/build/
+android/.gradle/
+android/local.properties
+*.apk
+*.aab
+.kotlin/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
