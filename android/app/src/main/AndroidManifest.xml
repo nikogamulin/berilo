@@ -37,6 +37,23 @@
             android:exported="false"
             android:theme="@style/Theme.Berilo" />
 
+        <activity
+            android:name=".annotations.NotebookActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Berilo" />
+
+        <!-- S2.6: streams the notebook's Markdown export file to the share-sheet target
+             (e.g. Obsidian) without granting a world-readable file:// Uri. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
     </application>
 
 </manifest>

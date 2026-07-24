@@ -2,6 +2,7 @@ package app.berilo.reader
 
 import android.app.Application
 import androidx.room.Room
+import app.berilo.reader.annotations.AnnotationsRepository
 import app.berilo.reader.dictionary.DictionaryRepository
 import app.berilo.reader.dictionary.DictionaryService
 import app.berilo.reader.interpretation.InterpretationRepository
@@ -35,8 +36,8 @@ class AppContainer(app: Application) {
         Room.databaseBuilder(app, AppDatabase::class.java, AppDatabase.DATABASE_NAME)
             // Version 1 (books-only) never shipped in a release build, so a destructive
             // fallback is safe — there is no user data to preserve across the S2.4 bump to
-            // version 2 (adds dictionary_entries) or the S2.5 bump to version 3 (adds
-            // interpretation_entries).
+            // version 2 (adds dictionary_entries), the S2.5 bump to version 3 (adds
+            // interpretation_entries), or the S2.6 bump to version 4 (adds highlights).
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
@@ -58,4 +59,6 @@ class AppContainer(app: Application) {
     val dictionaryRepository = DictionaryRepository(database.dictionaryDao(), DictionaryService())
 
     val interpretationRepository = InterpretationRepository(database.interpretationDao(), InterpretationService())
+
+    val annotationsRepository = AnnotationsRepository(database.highlightDao())
 }

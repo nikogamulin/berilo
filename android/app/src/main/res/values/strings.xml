@@ -51,6 +51,9 @@
     <string name="reader_define">Define</string>
     <string name="reader_no_selection">Select a word first, then tap Define.</string>
     <string name="reader_interpret">Interpret</string>
+    <string name="reader_highlight">Highlight</string>
+    <string name="reader_note">Note</string>
+    <string name="reader_notebook">Notebook</string>
 
     <string name="dictionary_loading">Looking up…</string>
     <string name="dictionary_error_network">You\'re offline — dictionary needs a connection.</string>
@@ -68,4 +71,15 @@
     <string name="interpretation_error_generic">Interpretation failed — try again.</string>
     <string name="interpretation_cached_badge">Cached</string>
     <string name="interpretation_cost">€%1$s</string>
+
+    <string name="annotation_note_label">Note</string>
+    <string name="annotation_save">Save</string>
+    <string name="annotation_cancel">Cancel</string>
+
+    <string name="notebook_empty">No highlights or notes yet. Select text in the reader and tap Highlight or Note.</string>
+    <string name="notebook_export_cd">Export notebook</string>
+    <string name="notebook_edit_note">Edit note</string>
+    <string name="notebook_change_color">Change color</string>
+    <string name="notebook_delete">Delete</string>
+    <string name="notebook_delete_confirm_title">Delete this highlight?</string>
 </resources>
