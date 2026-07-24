@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.berilo.reader.store.repository.Book
 import app.berilo.reader.reader.ReaderActivity
+import app.berilo.reader.settings.SettingsActivity
 import app.berilo.reader.ui.library.LibraryScreen
 import app.berilo.reader.ui.library.LibraryViewModel
 import app.berilo.reader.ui.theme.BeriloTheme
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
                     onAddBook = { pickEpub.launch(arrayOf(EPUB_MEDIA_TYPE, "*/*")) },
                     onOpenBook = ::openReader,
                     onDeleteBook = viewModel::deleteBook,
+                    onOpenSettings = ::openSettings,
                 )
             }
         }
@@ -67,5 +69,9 @@ class MainActivity : ComponentActivity() {
 
     private fun openReader(book: Book) {
         startActivity(ReaderActivity.newIntent(this, book.id))
+    }
+
+    private fun openSettings() {
+        startActivity(SettingsActivity.newIntent(this))
     }
 }

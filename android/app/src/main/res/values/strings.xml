@@ -8,6 +8,7 @@
     <string name="library_add_book_cd">Add a book</string>
     <string name="library_book_cover_cd">Cover of %1$s</string>
     <string name="library_progress_cd">%1$d%% read</string>
+    <string name="library_settings_cd">Settings</string>
 
     <string name="library_import_success">Added to your library</string>
     <string name="library_import_duplicate">Already in your library</string>
@@ -21,4 +22,15 @@
     <string name="reader_loading">Opening…</string>
     <string name="reader_now_reading">Now reading</string>
     <string name="reader_not_found">Book not found</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_back_cd">Back</string>
+    <string name="settings_openai_key_label">OpenAI API key</string>
+    <string name="settings_anthropic_key_label">Anthropic API key</string>
+    <string name="settings_show_key">Show</string>
+    <string name="settings_hide_key">Hide</string>
+    <string name="settings_test_key">Test key</string>
+    <string name="settings_testing">Testing…</string>
+    <string name="settings_model_label">Model</string>
+    <string name="settings_target_lang_label">Target language</string>
 </resources>

@@ -2,6 +2,8 @@ package app.berilo.reader
 
 import android.app.Application
 import androidx.room.Room
+import app.berilo.reader.settings.EncryptedKeyValueStore
+import app.berilo.reader.settings.SettingsRepository
 import app.berilo.reader.store.db.AppDatabase
 import app.berilo.reader.store.importer.BookImporter
 import app.berilo.reader.store.importer.ReadiumMetadataExtractor
@@ -40,4 +42,6 @@ class AppContainer(app: Application) {
             booksDir = booksDir,
             coversDir = coversDir,
         )
+
+    val settingsRepository = SettingsRepository(EncryptedKeyValueStore(app))
 }
