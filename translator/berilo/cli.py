@@ -67,8 +67,13 @@ def eval_(ctx: click.Context, translated_epub: str, sample: int, seed: int) -> N
 @click.pass_context
 def doctor(ctx: click.Context) -> None:
     """Smoke-test the configured LLM provider with a one-sentence request."""
-    click.echo("doctor: not implemented")
-    ctx.exit(NOT_IMPLEMENTED_EXIT_CODE)
+    from dotenv import find_dotenv
+
+    from berilo.config import load_config
+    from berilo.providers.doctor import run_doctor
+
+    env_file = find_dotenv(usecwd=True) or None
+    ctx.exit(run_doctor(load_config(env_file=env_file)))
 
 
 def main() -> None:

@@ -47,7 +47,7 @@ def test_cli_help_via_subprocess_entry_point() -> None:
 def test_stub_subcommands_exit_nonzero() -> None:
     """Stub subcommands print 'not implemented' and exit 1."""
     runner = CliRunner()
-    for subcommand in ("translate", "inspect", "eval", "doctor"):
+    for subcommand in ("translate", "inspect", "eval"):
         args = [subcommand] + (
             ["dummy.epub"] if subcommand in ("translate", "inspect", "eval") else []
         )

@@ -43,8 +43,8 @@
 - [ ] MOBI/AZW3 via `ebook-convert` → EPUB → S1.1 path; clear error if Calibre missing
 - **Verify:** `make test` includes fixture test: `ebook-convert` the example EPUB → MOBI, then `berilo inspect` on it yields segment count within 2% of the EPUB's.
 
-### S1.4 — Provider layer + config (2 pt)
-- [ ] One `LLMClient` interface; OpenAI + Anthropic implementations; models/keys from `.env`/flags; retry with backoff; token+cost accounting per call
+### S1.4 — Provider layer + config ✅ (2 pt)
+- [x] One `LLMClient` interface; OpenAI + Anthropic implementations; models/keys from `.env`/flags; retry with backoff; token+cost accounting per call
 - **Verify:** `make test` unit tests pass with mocked HTTP (no live calls in CI); live smoke `berilo doctor` translates one hardcoded sentence via each configured provider and prints cost > €0.
 
 ### S1.5 — Translate engine (5 pt)

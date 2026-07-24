@@ -29,6 +29,21 @@
 - [2026-07-24] `epubcheck` 5.3.0 installed to `~/.local/bin/epubcheck`
   (wrapper over jar in `~/.local/share/epubcheck-5.3.0/`, Java 21 present);
   `ebook-convert` and `pdftotext` are on PATH.
+- [2026-07-24] **gpt-5-mini bills hidden reasoning tokens as output**: the
+  doctor one-sentence smoke used 479 output tokens for a ~15-token visible
+  translation (≈15–30× inflation on short outputs). S1.5 `--dry-run` cost
+  estimates must include a reasoning-token multiplier or they will
+  underestimate badly. claude-haiku-4-5 returned 25 output tokens for the
+  same sentence.
+- [2026-07-24] Synthetic API keys in tests must NOT use real prefixes
+  (`sk-proj`/`sk-ant`) or the §7 secret scan false-positives — use
+  `test-openai-key-...` style. Real vendor exception types for retry tests
+  are constructed with a fake `httpx.Response(429, request=...)`; OpenAI and
+  Anthropic SDK clients construct offline with dummy keys (no network at
+  init).
+- [2026-07-24] `data/` exists only in the main checkout, not in agent
+  worktrees (gitignored ⇒ not shared): `data/`-gated integration tests must
+  skip gracefully; run real-book Verify numbers from the main checkout.
 - [2026-07-24] `data/` is gitignored and holds copyrighted books — never
   commit, never upload contents anywhere except segment batches to the
   configured LLM API during translation.
