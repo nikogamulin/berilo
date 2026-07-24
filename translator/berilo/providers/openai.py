@@ -13,7 +13,7 @@ import logging
 import openai as openai_sdk
 
 from berilo.providers import retry_with_backoff
-from berilo.providers.base import CompletionResult, LLMClient
+from berilo.providers.base import CompletionResult, ContentPolicyError, LLMClient
 from berilo.providers.pricing import cost_eur
 
 logger = logging.getLogger(__name__)
@@ -111,10 +111,18 @@ class OpenAIClient(LLMClient):
                 kwargs["reasoning_effort"] = self.reasoning_effort
             return self._client.chat.completions.create(**kwargs)
 
-        response = retry_with_backoff(
-            _call,
-            is_retryable=lambda exc: isinstance(exc, _RETRYABLE_OPENAI_ERRORS),
-        )
+        try:
+            response = retry_with_backoff(
+                _call,
+                is_retryable=lambda exc: isinstance(exc, _RETRYABLE_OPENAI_ERRORS),
+            )
+        except openai_sdk.BadRequestError as exc:
+            if getattr(exc, "code", None) == "invalid_prompt" or "usage policy" in str(exc):
+                raise ContentPolicyError(
+                    f"OpenAI flagged the source text for model {self.model}; "
+                    "route this batch to a fallback provider."
+                ) from exc
+            raise
 
         text = response.choices[0].message.content or ""
         input_tokens = response.usage.prompt_tokens

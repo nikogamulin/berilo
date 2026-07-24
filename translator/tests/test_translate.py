@@ -236,6 +236,52 @@ def test_translate_book_preserves_segment_integrity() -> None:
     assert "<em>emphasis</em>" in result.segments[3].text
 
 
+class _PolicyRefusingClient(FakeLLMClient):
+    """Fake primary client that refuses every translation call on policy."""
+
+    def complete(self, prompt=None, messages=None, **kwargs):  # type: ignore[override]
+        from berilo.providers.base import ContentPolicyError
+
+        if prompt and _MARKER_RE.search(prompt):
+            raise ContentPolicyError("flagged")
+        return super().complete(prompt=prompt, messages=messages, **kwargs)
+
+
+def test_content_policy_refusal_routes_batch_to_fallback_client() -> None:
+    """A policy-refused batch is retried via the fallback with 1:1 integrity."""
+    book = _paragraph_book(4)
+    primary = _PolicyRefusingClient()
+    fallback = FakeLLMClient(model="claude-haiku-4-5")
+
+    result = translate_book(
+        book,
+        client=primary,
+        target_lang="sl",
+        cache=_memory_cache(),
+        glossary=None,
+        fallback_client=fallback,
+    )
+
+    assert len(result.segments) == len(book.segments)
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    assert fallback.translation_calls >= 1
+
+
+def test_content_policy_refusal_without_fallback_is_loud() -> None:
+    """No fallback configured -> TranslationError naming the cause."""
+    book = _paragraph_book(3)
+    primary = _PolicyRefusingClient()
+
+    with pytest.raises(TranslationError, match="content-policy"):
+        translate_book(
+            book,
+            client=primary,
+            target_lang="sl",
+            cache=_memory_cache(),
+            glossary=None,
+        )
+
+
 def test_translate_book_raises_if_segment_count_would_change() -> None:
     """The completeness invariant is a hard failure, not a silent drop."""
     # A malformed batch that is silently truncated would drop segments; the

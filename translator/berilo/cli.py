@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 NOT_IMPLEMENTED_EXIT_CODE = 1
 INPUT_ERROR_EXIT_CODE = 1
+#: Cheap Anthropic model used only for content-policy-refused batches.
+FALLBACK_TRANSLATION_MODEL = "claude-haiku-4-5"
 PREVIEW_SEGMENT_COUNT = 3
 PREVIEW_CHAR_LIMIT = 120
 
@@ -130,6 +132,12 @@ def translate(
         ctx.exit(INPUT_ERROR_EXIT_CODE)
         return
 
+    # Content-policy fallback: an OpenAI-moderated batch (e.g. a history book
+    # quoting propaganda) is retried once via Anthropic when a key exists.
+    fallback_client = None
+    if not model_name.startswith("claude") and config.anthropic_api_key:
+        fallback_client = create_client(FALLBACK_TRANSLATION_MODEL, config)
+
     estimate = estimate_cost(
         book,
         model=model_name,
@@ -173,6 +181,7 @@ def translate(
             glossary=glossary,
             skip_segment_ids=skip_ids,
             on_progress=_on_progress,
+            fallback_client=fallback_client,
         )
         _print_summary(
             latest.get("stats"),

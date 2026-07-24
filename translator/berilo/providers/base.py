@@ -61,3 +61,13 @@ class LLMClient(ABC):
             NotImplementedError: Always, in this stub.
         """
         raise NotImplementedError
+
+
+class ContentPolicyError(Exception):
+    """A provider refused the request on content-policy grounds.
+
+    Raised when a moderation layer flags the *source text* being translated
+    (e.g. a history book quoting extremist propaganda verbatim). Callers may
+    route the affected batch to a fallback provider; the error is not
+    transient and must never be blindly retried against the same provider.
+    """

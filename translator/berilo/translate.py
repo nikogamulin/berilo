@@ -43,7 +43,7 @@ from berilo.cache import (
 )
 from berilo.glossary import Glossary
 from berilo.models import Book, Segment
-from berilo.providers.base import CompletionResult, LLMClient
+from berilo.providers.base import CompletionResult, ContentPolicyError, LLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +347,7 @@ def _translate_batch(
     context_pairs: Sequence[tuple[str, str]],
     target_lang: str,
     book_title: str,
+    fallback_client: LLMClient | None = None,
 ) -> tuple[list[str], list[CompletionResult]]:
     """Translate one batch, retrying then falling back on a bad response.
 
@@ -355,10 +356,55 @@ def _translate_batch(
     translated on its own. A segment that still fails raises
     :class:`TranslationError`.
 
+    If the provider refuses the batch on content-policy grounds
+    (:class:`ContentPolicyError` — e.g. a history book quoting propaganda),
+    the whole batch is retried once against ``fallback_client`` when one is
+    configured; without a fallback the refusal is loud.
+
     Returns:
         A tuple of (translations aligned 1:1 with ``segments``, all completion
         results made — for token/cost accounting).
     """
+    try:
+        return _translate_batch_attempts(
+            segments,
+            client=client,
+            glossary=glossary,
+            context_pairs=context_pairs,
+            target_lang=target_lang,
+            book_title=book_title,
+        )
+    except ContentPolicyError as exc:
+        if fallback_client is None:
+            raise TranslationError(
+                f"Provider refused a batch of {len(segments)} segments in "
+                f"'{book_title}' on content-policy grounds and no fallback "
+                f"provider is configured (set ANTHROPIC_API_KEY): {exc}"
+            ) from exc
+        logger.warning(
+            "Content policy refusal for a batch of %d segments; retrying via fallback model.",
+            len(segments),
+        )
+        return _translate_batch_attempts(
+            segments,
+            client=fallback_client,
+            glossary=glossary,
+            context_pairs=context_pairs,
+            target_lang=target_lang,
+            book_title=book_title,
+        )
+
+
+def _translate_batch_attempts(
+    segments: Sequence[Segment],
+    *,
+    client: LLMClient,
+    glossary: Glossary | None,
+    context_pairs: Sequence[tuple[str, str]],
+    target_lang: str,
+    book_title: str,
+) -> tuple[list[str], list[CompletionResult]]:
+    """Run the batch → strict retry → per-segment ladder against one client."""
     results: list[CompletionResult] = []
 
     first = client.complete(
@@ -423,6 +469,7 @@ def translate_book(
     context_pairs: int = DEFAULT_CONTEXT_PAIRS,
     skip_segment_ids: Collection[str] = (),
     on_progress: ProgressCallback | None = None,
+    fallback_client: LLMClient | None = None,
 ) -> Book:
     """Translate every eligible segment of ``book`` into ``target_lang``.
 
@@ -443,6 +490,8 @@ def translate_book(
         skip_segment_ids: Segment IDs to pass through untranslated.
         on_progress: Optional callback invoked with the running
             :class:`TranslationStats` after each batch and once at the end.
+        fallback_client: Optional second-provider client used only for
+            batches the primary provider refuses on content-policy grounds.
 
     Returns:
         A new :class:`~berilo.models.Book` with the same segments (count, order,
@@ -516,6 +565,7 @@ def translate_book(
             context_pairs=list(recent_pairs),
             target_lang=target_lang,
             book_title=book.title,
+            fallback_client=fallback_client,
         )
 
         # Persist immediately (kill-safety) — one transaction per batch.
