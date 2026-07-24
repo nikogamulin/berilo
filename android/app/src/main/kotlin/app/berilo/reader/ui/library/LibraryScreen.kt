@@ -18,14 +18,17 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -54,12 +57,23 @@ fun LibraryScreen(
     onAddBook: () -> Unit,
     onOpenBook: (Book) -> Unit,
     onDeleteBook: (Book) -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var pendingDelete by remember { mutableStateOf<Book?>(null) }
 
     Scaffold(
         modifier = modifier,
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.library_title)) },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.library_settings_cd))
+                    }
+                },
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = onAddBook) {
                 Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.library_add_book_cd))

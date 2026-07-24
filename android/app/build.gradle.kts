@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
 }
 
@@ -89,6 +90,10 @@ dependencies {
     implementation(libs.readium.navigator)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 
+    implementation(libs.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.androidx.security.crypto)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
@@ -96,5 +101,6 @@ dependencies {
     testImplementation(libs.androidx.room.testing)
     testImplementation(libs.androidx.test.ext.junit)
     testImplementation(libs.robolectric)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(platform(libs.androidx.compose.bom))
 }
