@@ -94,6 +94,8 @@
 - **Verify:** R3 thresholds met (p50 ≤ 4 s over 10 logged lookups, cached ≤ 300 ms, 5/5 ambiguous words disambiguated — word list fixed in test doc).
 
 ### S2.5 — Paragraph interpretation (2 pt)
+- [x] Code landed 2026-07-24 (reviewer LAND, no fixes; 138 JVM tests incl. proven dismiss-cancellation)
+- [ ] Device residual: R4 thresholds on 5 dense *Active Measures* paragraphs on Boox
 - [ ] Long-press paragraph → interpretation sheet; cached; streaming render if provider supports
 - **Verify:** R4 thresholds met on 5 pre-selected dense paragraphs from *Active Measures*.
 
