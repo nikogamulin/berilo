@@ -2,6 +2,8 @@ package app.berilo.reader
 
 import android.app.Application
 import androidx.room.Room
+import app.berilo.reader.dictionary.DictionaryRepository
+import app.berilo.reader.dictionary.DictionaryService
 import app.berilo.reader.settings.EncryptedKeyValueStore
 import app.berilo.reader.settings.SettingsRepository
 import app.berilo.reader.store.db.AppDatabase
@@ -28,7 +30,12 @@ class BeriloApplication : Application() {
 
 class AppContainer(app: Application) {
     private val database: AppDatabase =
-        Room.databaseBuilder(app, AppDatabase::class.java, AppDatabase.DATABASE_NAME).build()
+        Room.databaseBuilder(app, AppDatabase::class.java, AppDatabase.DATABASE_NAME)
+            // Version 1 (books-only) never shipped in a release build, so a destructive
+            // fallback is safe — there is no user data to preserve across the S2.4 bump to
+            // version 2 (adds dictionary_entries).
+            .fallbackToDestructiveMigration()
+            .build()
 
     private val booksDir = File(app.filesDir, "books")
     private val coversDir = File(app.filesDir, "covers")
@@ -44,4 +51,6 @@ class AppContainer(app: Application) {
         )
 
     val settingsRepository = SettingsRepository(EncryptedKeyValueStore(app))
+
+    val dictionaryRepository = DictionaryRepository(database.dictionaryDao(), DictionaryService())
 }

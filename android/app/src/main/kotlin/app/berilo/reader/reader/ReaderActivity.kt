@@ -3,6 +3,7 @@ package app.berilo.reader.reader
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import app.berilo.reader.BeriloApplication
 import app.berilo.reader.R
+import app.berilo.reader.dictionary.DictionaryViewModel
+import app.berilo.reader.dictionary.SelectionContext
+import app.berilo.reader.dictionary.buildSelectionContext
 import app.berilo.reader.ui.theme.BeriloTheme
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,6 +78,11 @@ class ReaderActivity : FragmentActivity() {
         val repository = (application as BeriloApplication).container.bookRepository
         val settingsStore = SharedPrefsReaderSettingsStore(applicationContext)
         ReaderViewModel.Factory(repository, bookId, settingsStore)
+    }
+
+    private val dictionaryViewModel: DictionaryViewModel by viewModels {
+        val container = (application as BeriloApplication).container
+        DictionaryViewModel.Factory(container.settingsRepository, container.dictionaryRepository)
     }
 
     private var navigator: EpubNavigatorFragment? = null
@@ -186,6 +195,28 @@ class ReaderActivity : FragmentActivity() {
         }
     }
 
+    /**
+     * "Define" tap handler: captures the navigator's current text selection (device/WebView
+     * territory — the pure sentence-reconstruction logic in [buildSelectionContext] is unit
+     * tested separately) and starts a lookup, or tells the user to select a word first.
+     */
+    private fun onDefineSelectionClicked() {
+        lifecycleScope.launch {
+            val selection = captureSelection()
+            if (selection == null) {
+                Toast.makeText(this@ReaderActivity, R.string.reader_no_selection, Toast.LENGTH_SHORT).show()
+            } else {
+                dictionaryViewModel.lookup(selection)
+            }
+        }
+    }
+
+    /** Reads the current selection off the Readium navigator, if any. */
+    private suspend fun captureSelection(): SelectionContext? {
+        val text = navigator?.currentSelection()?.locator?.text ?: return null
+        return buildSelectionContext(text.before.orEmpty(), text.highlight.orEmpty(), text.after.orEmpty())
+    }
+
     private fun onChapterSelected(chapter: TocChapter) {
         val fragment = navigator ?: return
         tocLinksByHref[chapter.href]?.let { link ->
@@ -230,6 +261,7 @@ class ReaderActivity : FragmentActivity() {
         val title by chapterTitle.collectAsStateWithLifecycle()
         val progress by progressFraction.collectAsStateWithLifecycle()
         val failed by openFailed.collectAsStateWithLifecycle()
+        val dictionaryState by dictionaryViewModel.uiState.collectAsStateWithLifecycle()
 
         BeriloTheme(useDarkTheme = !preferences.einkMode && preferences.darkTheme) {
             if (failed) {
@@ -254,6 +286,7 @@ class ReaderActivity : FragmentActivity() {
                 progressFraction = progress,
                 preferences = preferences,
                 chapters = chapters,
+                dictionaryState = dictionaryState,
             )
             val actions = ReaderChromeActions(
                 onToggleChrome = { viewModel.toggleChrome() },
@@ -270,6 +303,8 @@ class ReaderActivity : FragmentActivity() {
                 onMarginsWider = viewModel::increaseMargins,
                 onEinkModeChange = viewModel::setEinkMode,
                 onDarkThemeChange = viewModel::setDarkTheme,
+                onDefineSelection = ::onDefineSelectionClicked,
+                onDismissDictionary = dictionaryViewModel::dismiss,
             )
             ReaderChromeOverlay(state = state, actions = actions)
         }
