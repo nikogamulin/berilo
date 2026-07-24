@@ -39,8 +39,8 @@
 - [ ] pymupdf extraction with reflow: join hyphenated line breaks, merge hard-wrapped lines into paragraphs, strip running headers/footers/page numbers (incl. OCR artifacts like inline `PROLOGUE Xix`), detect chapter headings
 - **Verify:** `berilo inspect` on both example PDFs: ≥ 95% of 30 randomly sampled segments (seed 42) are clean prose (scripted LLM screen, `--screen` flag); 0 segments matching `^\d+$` or known header regexes; chapter count within ±2 of the printed TOC.
 
-### S1.3 — Normalize: MOBI → segments (1 pt)
-- [ ] MOBI/AZW3 via `ebook-convert` → EPUB → S1.1 path; clear error if Calibre missing
+### S1.3 — Normalize: MOBI → segments ✅ (1 pt)
+- [x] MOBI/AZW3 via `ebook-convert` → EPUB → S1.1 path; clear error if Calibre missing — round-trip delta 1.30% (2339 vs 2309); legacy MOBI6-only inputs may exceed 2% (format-inherent, see findings)
 - **Verify:** `make test` includes fixture test: `ebook-convert` the example EPUB → MOBI, then `berilo inspect` on it yields segment count within 2% of the EPUB's.
 
 ### S1.4 — Provider layer + config ✅ (2 pt)

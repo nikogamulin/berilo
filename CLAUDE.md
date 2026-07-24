@@ -163,3 +163,7 @@ git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!docs/
 - Example brief said "pdf or mobi" but the examples are PDF+EPUB → **verify
   input assumptions against `data/examples/` before building format support;
   EPUB is first-class, MOBI goes through `ebook-convert`.**
+- Agent worktrees resolve installed packages and `data/` to the main
+  checkout (recurred 3×) → **run worktree tests with
+  `PYTHONPATH=<worktree>/translator`; keep `data/`-gated tests skippable;
+  never copy books into worktrees** (details in `docs/findings.md`).

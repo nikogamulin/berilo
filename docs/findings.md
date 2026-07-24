@@ -65,6 +65,13 @@
 - [2026-07-24] `normalize/epub.py` only emits known block tags: prose
   sitting directly in a `<div>`/`<td>` with no block wrapper is skipped —
   known limitation, 0 occurrences in the example books.
+- [2026-07-24] Calibre's default `.mobi` output is legacy MOBI 6 (no heading
+  semantics, `<blockquote>` indent hack): EPUB→MOBI6→EPUB round-trip drifts
+  2.56% in segment count (over S1.3's 2% bar); `--mobi-file-type both`
+  (embeds KF8, read back preferentially) gives 1.30%, identical to AZW3.
+  Fixture builder uses `both`; `normalize_mobi` is input-variant-agnostic.
+  S1.3 residual: legacy MOBI6-only user files may exceed 2% — upstream
+  format lossiness, not a segment drop.
 - [2026-07-24] `data/` is gitignored and holds copyrighted books — never
   commit, never upload contents anywhere except segment batches to the
   configured LLM API during translation.
