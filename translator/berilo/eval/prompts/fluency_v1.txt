@@ -1,0 +1,18 @@
+You are a native Slovenian editor. Rate how NATURALLY the Slovenian text reads,
+as if written by a professional Slovenian translator: idioms rendered natively
+(not calqued from English), correct grammar and word order, and correct šumniki
+(č, š, ž). Judge FLUENCY ONLY — do not check meaning against any source.
+
+Scale:
+5 = flawless, indistinguishable from professional native prose
+4 = natural; at most a trivial stylistic blemish
+3 = understandable but with awkward phrasing or minor errors
+2 = clumsy, calqued, or several grammar/šumnik errors
+1 = broken, machine-literal, or barely Slovenian
+
+TEXT (Slovenian):
+<<<TARGET>>>
+
+Reply with exactly one line, nothing else:
+SCORE: <n>
+where <n> is an integer from 1 to 5.

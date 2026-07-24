@@ -393,15 +393,144 @@ def inspect(
         click.echo(f"  [{segment.type.value}] {preview}")
 
 
+#: Exit code when source and translated structure cannot be aligned (scramble).
+ALIGNMENT_ERROR_EXIT_CODE = 2
+
+
 @cli.command(name="eval")
 @click.argument("translated_epub", type=click.Path())
-@click.option("--sample", default=40, type=int, help="Number of segments to sample.")
-@click.option("--seed", default=42, type=int, help="Random seed for sampling.")
+@click.option(
+    "--source",
+    "source_file",
+    default=None,
+    type=click.Path(),
+    help="Source file (default: auto-discovered next to the translated EPUB).",
+)
+@click.option("--sample", default=40, type=int, help="Number of prose pairs to judge.")
+@click.option("--seed", default=42, type=int, help="Random seed for sampling and bootstrap.")
+@click.option("--judge-model", default=None, help="Override the judge model (default from config).")
+@click.option(
+    "--to", "target_language", default=None, help="Target language code (default from config)."
+)
+@click.option(
+    "--scores-file",
+    default=None,
+    type=click.Path(),
+    help="Score-row destination (default: loops/build/rubric_scores.jsonl).",
+)
+@click.option(
+    "--cache-db", default=None, type=click.Path(), help="Override the translation cache path."
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option("--dry-run", is_flag=True, help="Describe the run without any judge calls or cost.")
+@click.option("--no-write", is_flag=True, help="Do not append a score row.")
 @click.pass_context
-def eval_(ctx: click.Context, translated_epub: str, sample: int, seed: int) -> None:
-    """Score TRANSLATED_EPUB against Rubric T."""
-    click.echo("eval: not implemented")
-    ctx.exit(NOT_IMPLEMENTED_EXIT_CODE)
+def eval_(
+    ctx: click.Context,
+    translated_epub: str,
+    source_file: str | None,
+    sample: int,
+    seed: int,
+    judge_model: str | None,
+    target_language: str | None,
+    scores_file: str | None,
+    cache_db: str | None,
+    as_json: bool,
+    dry_run: bool,
+    no_write: bool,
+) -> None:
+    """Score TRANSLATED_EPUB against Rubric T (seeded judge + bootstrap CI)."""
+    from dotenv import find_dotenv
+
+    from berilo.cache import DEFAULT_CACHE_PATH
+    from berilo.config import load_config
+    from berilo.eval import runner
+    from berilo.eval.judge import Judge, JudgeError
+    from berilo.eval.rubric_t import AlignmentError
+
+    env_file = find_dotenv(usecwd=True) or None
+    config = load_config(env_file=env_file, judge_model=judge_model, target_lang=target_language)
+    lang = config.target_lang
+
+    # Resolve and normalize the source book.
+    source_path = (
+        Path(source_file) if source_file else runner.discover_source(translated_epub, lang)
+    )
+    if source_path is None:
+        click.echo(
+            "eval: could not locate the source file — pass --source explicitly "
+            f"(looked next to {translated_epub}).",
+            err=True,
+        )
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    try:
+        source = normalize(source_path)
+        translated = normalize(translated_epub)
+    except _NORMALIZE_ERRORS as exc:
+        click.echo(f"eval: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    cache_path = cache_db or DEFAULT_CACHE_PATH
+    glossary, actual_cost = runner.read_cache_facts(
+        cache_path, source, config.translation_model, lang
+    )
+
+    if dry_run:
+        click.echo(
+            runner.describe_plan(
+                source,
+                translated,
+                sample_size=sample,
+                seed=seed,
+                glossary=glossary,
+                actual_cost_eur=actual_cost,
+            )
+        )
+        ctx.exit(0)
+        return
+
+    try:
+        from berilo.providers import create_client
+
+        client = create_client(config.judge_model, config)
+    except ValueError as exc:
+        click.echo(f"eval: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    try:
+        result = runner.run_eval(
+            source,
+            translated,
+            Judge(client),
+            sample_size=sample,
+            seed=seed,
+            glossary=glossary,
+            actual_cost_eur=actual_cost,
+        )
+    except AlignmentError as exc:
+        click.echo(f"eval: ALIGNMENT FAILURE — {exc}", err=True)
+        ctx.exit(ALIGNMENT_ERROR_EXIT_CODE)
+        return
+    except JudgeError as exc:
+        click.echo(f"eval: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    if as_json:
+        payload = runner.result_to_dict(result, seed=seed, sample=sample, title=source.title)
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        click.echo(runner.format_report(result, title=source.title))
+
+    if not no_write:
+        destination = scores_file or runner.DEFAULT_SCORES_FILE
+        runner.append_score_row(runner.score_row(result, seed=seed, sample=sample), destination)
+        if not as_json:
+            click.echo(f"Wrote score row to {destination}")
 
 
 @cli.command()
