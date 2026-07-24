@@ -1,8 +1,8 @@
-# Bookworm
+# Berilo
 
 Read books in your own language.
 
-Bookworm translates books (PDF / EPUB / MOBI) into your language using
+Berilo translates books (PDF / EPUB / MOBI) into your language using
 inexpensive LLMs — built to preserve meaning, not just words — and gives you a
 reading app made for people who actually read: an in-context LLM dictionary,
 interpretation of dense paragraphs, highlights and notes.
@@ -26,8 +26,8 @@ Quality rubrics the project optimizes: [`docs/rubric.md`](docs/rubric.md).
 ```bash
 cp .env.example .env      # add your OpenAI or Anthropic key
 cd translator && pip install -e .
-bookworm translate mybook.epub --to sl --dry-run   # cost estimate first
-bookworm translate mybook.epub --to sl
+berilo translate mybook.epub --to sl --dry-run   # cost estimate first
+berilo translate mybook.epub --to sl
 ```
 
 Requires Python 3.10+. MOBI input additionally requires Calibre

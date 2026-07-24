@@ -1,4 +1,4 @@
-# Bookworm — Product Specification
+# Berilo — Product Specification
 
 > Read books in your own language. Translation that keeps the meaning, a reader
 > built for people who actually read.
@@ -14,7 +14,7 @@ LLMs) but no tool does it well end-to-end: format handling is lossy, meaning
 drifts, terminology wanders, and there is no reading experience built around
 the result.
 
-**Bookworm** translates PDF/EPUB/MOBI books into the user's language with
+**Berilo** translates PDF/EPUB/MOBI books into the user's language with
 meaning-preserving LLM translation, and provides an Android reading app with an
 LLM dictionary, paragraph interpretation, and notes — later synced to a cloud
 review service.
@@ -79,8 +79,8 @@ ASSEMBLE ─── EPUB out (reader-ready), optional bilingual EPUB (source + ta
 - **Provider abstraction:** OpenAI and Anthropic behind one interface. Defaults:
   `gpt-5-mini` (translation and judge). User overrides via `.env` / `--model`.
   Expected cost, 100k-word book: ≈ €0.40–0.80 with mini-class models.
-- **CLI:** `bookworm translate <file> --to sl [--model ...] [--bilingual] [--dry-run]`
-  plus `bookworm inspect <file>` (segment stats, extraction quality preview).
+- **CLI:** `berilo translate <file> --to sl [--model ...] [--bilingual] [--dry-run]`
+  plus `berilo inspect <file>` (segment stats, extraction quality preview).
 - Python 3.10+, type hints, logging (no print), Black, pytest. External
   binaries: `ebook-convert` (Calibre) for MOBI only.
 
@@ -134,7 +134,7 @@ this app lives. **Recommendation: native Kotlin.** Target: Android 8.0+
   (spaced-repetition export).
 - Quote cards: typographically clean image export of a highlighted passage.
 
-## 6. Phase 3 — Cloud service (`bookworm-cloud`, separate private repo)
+## 6. Phase 3 — Cloud service (`berilo-cloud`, separate private repo)
 
 - **Stack:** Next.js (App Router) on Vercel; Supabase — auth, Postgres with RLS,
   1000-row pagination on every query.

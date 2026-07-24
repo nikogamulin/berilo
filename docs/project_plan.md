@@ -1,4 +1,4 @@
-# Bookworm — Project Plan
+# Berilo — Project Plan
 
 > Task list with **objective completion criteria**. A task is `[x]` only when
 > its **Verify** line has been executed and passed in the closing session.
@@ -19,12 +19,13 @@
 - **Verify:** `git log --oneline | wc -l` ≥ 1; `git check-ignore .env data/` lists both; `git grep -iE 'sk-(proj|ant)' $(git rev-parse HEAD)` empty.
 
 ### S0.2 — Translator package skeleton (1 pt)
-- [ ] `translator/` installable package: `pyproject.toml`, `bookworm/` with CLI entry point, pytest wired, Black + Ruff configured, Makefile (`make test`, `make lint`)
-- **Verify:** `cd translator && pip install -e . && bookworm --help` exits 0 and lists `translate|inspect|eval`; `make test` passes (≥1 placeholder test); `make lint` clean.
+- [ ] `translator/` installable package: `pyproject.toml`, `berilo/` with CLI entry point, pytest wired, Black + Ruff configured, Makefile (`make test`, `make lint`)
+- **Verify:** `cd translator && pip install -e . && berilo --help` exits 0 and lists `translate|inspect|eval`; `make test` passes (≥1 placeholder test); `make lint` clean.
 
-### S0.3 — GitHub repo (1 pt)
-- [ ] Public repo `nikogamulin/bookworm`, MIT license (author: Niko Gamulin, PhD), README, labels (`plan`,`story`,`bug`,`m0`–`m2`), milestones m0–m2, this plan mirrored to issues
-- **Verify:** `gh repo view nikogamulin/bookworm --json licenseInfo,visibility` shows MIT + public; `gh issue list --label story | wc -l` equals story count; secret-scan of full history empty.
+### S0.3 — GitHub repo wiring (1 pt)
+- [ ] Remote `git@github.com:nikogamulin/berilo.git` pushed (`main`) — done 2026-07-24
+- [ ] MIT `LICENSE` file (author: Niko Gamulin, PhD), labels (`plan`,`story`,`bug`,`m0`–`m2`), milestones m0–m2, this plan mirrored to issues
+- **Verify:** `gh repo view nikogamulin/berilo --json licenseInfo` shows MIT; `gh issue list --label story | wc -l` equals story count; secret-scan of full history empty.
 
 ---
 
@@ -32,19 +33,19 @@
 
 ### S1.1 — Normalize: EPUB → segments (3 pt)
 - [ ] Parse EPUB into ordered segment list (JSON): chapters, headings, paragraphs, inline emphasis retained; stable segment IDs (content hash)
-- **Verify:** `bookworm inspect "data/examples/The New Rules of War.epub" --json` reports ≥ 500 segments, ≥ 8 chapters, 0 empty segments; round-trip test in `make test` asserts segment order = document order.
+- **Verify:** `berilo inspect "data/examples/The New Rules of War.epub" --json` reports ≥ 500 segments, ≥ 8 chapters, 0 empty segments; round-trip test in `make test` asserts segment order = document order.
 
 ### S1.2 — Normalize: PDF → segments (5 pt)
 - [ ] pymupdf extraction with reflow: join hyphenated line breaks, merge hard-wrapped lines into paragraphs, strip running headers/footers/page numbers (incl. OCR artifacts like inline `PROLOGUE Xix`), detect chapter headings
-- **Verify:** `bookworm inspect` on both example PDFs: ≥ 95% of 30 randomly sampled segments (seed 42) are clean prose (scripted LLM screen, `--screen` flag); 0 segments matching `^\d+$` or known header regexes; chapter count within ±2 of the printed TOC.
+- **Verify:** `berilo inspect` on both example PDFs: ≥ 95% of 30 randomly sampled segments (seed 42) are clean prose (scripted LLM screen, `--screen` flag); 0 segments matching `^\d+$` or known header regexes; chapter count within ±2 of the printed TOC.
 
 ### S1.3 — Normalize: MOBI → segments (1 pt)
 - [ ] MOBI/AZW3 via `ebook-convert` → EPUB → S1.1 path; clear error if Calibre missing
-- **Verify:** `make test` includes fixture test: `ebook-convert` the example EPUB → MOBI, then `bookworm inspect` on it yields segment count within 2% of the EPUB's.
+- **Verify:** `make test` includes fixture test: `ebook-convert` the example EPUB → MOBI, then `berilo inspect` on it yields segment count within 2% of the EPUB's.
 
 ### S1.4 — Provider layer + config (2 pt)
 - [ ] One `LLMClient` interface; OpenAI + Anthropic implementations; models/keys from `.env`/flags; retry with backoff; token+cost accounting per call
-- **Verify:** `make test` unit tests pass with mocked HTTP (no live calls in CI); live smoke `bookworm doctor` translates one hardcoded sentence via each configured provider and prints cost > €0.
+- **Verify:** `make test` unit tests pass with mocked HTTP (no live calls in CI); live smoke `berilo doctor` translates one hardcoded sentence via each configured provider and prints cost > €0.
 
 ### S1.5 — Translate engine (5 pt)
 - [ ] Batched paragraph translation with rolling context; glossary pass (extract names/terms → fixed renderings, injected into every batch); SQLite cache keyed `(book_hash, segment_hash, model, lang)`; strict 1:1 mapping with loud failure + retry for bad segments; `--dry-run` cost estimate
@@ -55,8 +56,8 @@
 - **Verify:** `epubcheck` exits 0 on both variants; output opens in Calibre viewer; T5 structural-fidelity script ≥ 9/10.
 
 ### S1.7 — Eval harness (Rubric T) (3 pt)
-- [ ] `bookworm eval` implements Rubric T end-to-end: sampled LLM-judge scoring (seed, bootstrap CI), completeness, terminology, structure checks; appends to `loops/build/rubric_scores.jsonl`
-- **Verify:** `bookworm eval <translated epub> --sample 40 --seed 42` prints score + 95% CI and writes a ledger row; running twice with same seed gives identical sample selection.
+- [ ] `berilo eval` implements Rubric T end-to-end: sampled LLM-judge scoring (seed, bootstrap CI), completeness, terminology, structure checks; appends to `loops/build/rubric_scores.jsonl`
+- **Verify:** `berilo eval <translated epub> --sample 40 --seed 42` prints score + 95% CI and writes a ledger row; running twice with same seed gives identical sample selection.
 
 ### S1.8 — Full-book milestone run (2 pt)
 - [ ] Translate all 3 example books EN→SL at default models; record costs; fix top defects found by eval; iterate until gate
@@ -101,7 +102,7 @@
 ---
 
 ## Phase 3 — Cloud sync & web review (milestone `m3`) — target: Rubric S ≥ 85
-> Lives in **private repo `bookworm-cloud`**; this repo only gains the app-side
+> Lives in **private repo `berilo-cloud`**; this repo only gains the app-side
 > sync client + documented API contract. Detailed stories are drafted at m2
 > close; headline stories now:
 

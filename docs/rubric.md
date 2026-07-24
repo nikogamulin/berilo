@@ -1,4 +1,4 @@
-# Bookworm — Rubrics
+# Berilo — Rubrics
 
 > The development process optimizes these scores. Every score is produced by a
 > **defined, repeatable procedure** — never by feel. Scores are appended to
@@ -11,10 +11,10 @@
 
 ## Rubric T — Translation Quality (Phase 1) — 0–100
 
-Scoring procedure: `python -m bookworm.eval <book> --sample 40 --seed 42` runs
+Scoring procedure: `python -m berilo.eval <book> --sample 40 --seed 42` runs
 the full procedure below and prints the weighted score with a bootstrap 95% CI.
-Judge model defaults to `BOOKWORM_JUDGE_MODEL`; judge prompts live in
-`translator/bookworm/eval/prompts/` and are versioned — score rows record the
+Judge model defaults to `BERILO_JUDGE_MODEL`; judge prompts live in
+`translator/berilo/eval/prompts/` and are versioned — score rows record the
 prompt version.
 
 | Dim | What | Weight | Measurement |

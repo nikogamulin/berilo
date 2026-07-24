@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/reflect-on-session.sh",
+            "timeout": 30,
+            "statusMessage": "Reflecting on session for findings/ledger updates..."
+          }
+        ]
+      }
+    ]
+  }
+}

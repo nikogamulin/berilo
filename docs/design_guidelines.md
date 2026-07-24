@@ -1,4 +1,4 @@
-# Bookworm — Design Guidelines
+# Berilo — Design Guidelines
 
 > The text is the hero. Chrome recedes. The app should feel like a well-set
 > book, not an app.

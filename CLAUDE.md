@@ -1,4 +1,4 @@
-# CLAUDE.md — Bookworm
+# CLAUDE.md — Berilo
 
 > Context for Claude Code in this repository. **Keep this file updated** after
 > major changes, milestones, or new constraints. Details live in `docs/` —
@@ -8,7 +8,7 @@
 
 ## 1. Project Goals
 
-Bookworm lets readers translate books (PDF/EPUB/MOBI) into their own language
+Berilo lets readers translate books (PDF/EPUB/MOBI) into their own language
 with meaning-preserving LLM translation, and read them in a purpose-built
 Android app with an LLM dictionary, paragraph interpretation, and notes.
 First user: Niko, English → Slovenian, Boox e-ink tablet.
@@ -17,14 +17,14 @@ First user: Niko, English → Slovenian, Boox e-ink tablet.
 
 1. **Translator CLI** (`translator/`, Python) — file in, translated EPUB out. Open source.
 2. **Reader app** (`android/`, Kotlin/Compose/Readium) — offline reader with LLM features. Open source.
-3. **Cloud service** (separate **private** repo `bookworm-cloud`) — Vercel/Next.js + Supabase sync and web note review. Closed source; only the API contract lives here.
+3. **Cloud service** (separate **private** repo `berilo-cloud`) — Vercel/Next.js + Supabase sync and web note review. Closed source; only the API contract lives here.
 
 Full spec: [`docs/project_spec.md`](docs/project_spec.md).
 
 ## 2. Architecture Overview
 
 ```
-translator/ (Python CLI)        android/ (Kotlin app)         bookworm-cloud (private)
+translator/ (Python CLI)        android/ (Kotlin app)         berilo-cloud (private)
  pdf|epub|mobi → normalize →     Readium reader + Room  ⇄     Next.js/Vercel + Supabase
  translate → verify → EPUB       LLM dictionary/notes          notes/highlights sync
         └── user's own LLM API key; cheap models by default; every model user-overridable
@@ -52,12 +52,12 @@ no engagement mechanics, WCAG AA.
 - **Costs are visible:** every translation run reports estimated (dry-run) and actual cost. Never burn API budget silently; full-book runs need explicit go-ahead.
 - **Python:** 3.10+, type hints, Google docstrings, Black, logging not print, named constants. **Kotlin:** Compose, no blocking on main thread. **TS (Phase 3):** functional components, named exports, no bare `any`.
 - **Numbers with uncertainty:** sampled metrics report bootstrap CIs (rubric scoring, cost estimates).
-- **Open/closed boundary:** nothing service-private in this repo; nothing from `bookworm-cloud` copied here except the API contract.
+- **Open/closed boundary:** nothing service-private in this repo; nothing from `berilo-cloud` copied here except the API contract.
 - **Supabase (Phase 3):** always paginate (1000-row default); RLS on every table; test time logic across DST.
 
 ## 5. Repo / Git Etiquette
 
-- Feature branches → `master` via PR (after S0.3 creates the GitHub repo).
+- Remote: `git@github.com:nikogamulin/berilo.git`, default branch `main`. Feature branches → `main` via PR.
 - [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:` — imperative mood, reference issue numbers.
 - Small, focused PRs. Never force-push shared branches. MIT license, author: Niko Gamulin, PhD.
 
@@ -102,12 +102,17 @@ user-facing behavior and check regressions before committing.
 Single-story work runs RPIT directly in the main loop. **Assignments spanning
 more than one story** run supervisor-orchestrated:
 
-| Role | Agent | Lane |
-|------|-------|------|
-| **Supervisor** (main loop) | session model | plan authoring, issue creation, wave scheduling, PR merge, all shared-state writes (`docs/findings.md`, `loops/**`, plan checkboxes, §9), all serialized resources (Boox device installs, full-book paid translation runs, GitHub, Vercel/Supabase), talking to Niko |
-| Plan critic | `Plan` / `architect-review` | attacks a plan before issues: unverifiable acceptance criteria, contradictions with §9/findings, file-footprint collisions |
-| Task implementer | `general-purpose` (or `python-expert` / `mobile-developer` / `nextjs-app-router-developer` by phase) | ONE story per agent, isolated worktree, to the bar: tests written + green, Verify line satisfied or blocker reported; returns a structured report with `PROPOSED-FINDINGS` |
-| Impl reviewer | `code-reviewer` | adversarial pre-merge diff review: scope, §9 compliance, test honesty, secret scan |
+Pipeline and agent definitions live in [`.claude/`](.claude/) — invoke the
+**`/orchestrate` skill** (`.claude/skills/orchestrate/SKILL.md`) for multi-story
+work; use **`/verify-implementation`** before claiming any story done.
+
+| Role | Agent (`.claude/agents/`) | Model | Lane |
+|------|------|-------|------|
+| **Supervisor** (main loop) | — | session model | plan authoring, issue creation, wave scheduling, PR merge, all shared-state writes (`docs/findings.md`, `loops/**`, plan checkboxes, §9), all serialized resources (Boox device installs, full-book paid translation runs, GitHub pushes, Vercel/Supabase), talking to Niko |
+| Plan critic | `plan-critic` | opus | attacks a spec/plan before issues: unverifiable Verify lines, contradictions with §9/findings, footprint collisions, cost realism |
+| Task implementer | `task-implementer` | sonnet (opus for pipeline-core/reader-rendering/sync stories) | ONE story per agent, isolated worktree, to the bar: tests written + green (LLM calls mocked), offline part of the Verify line satisfied; structured report with `PROPOSED-FINDINGS` |
+| Impl reviewer | `impl-reviewer` | opus | adversarial pre-merge diff review: scope, §9 compliance, test honesty, secret/cost-safety scan |
+| Defect investigator | `defect-investigator` | opus | read-only forensics on ONE defect (rubric regression, bad translation batch, app bug): classifies and returns a routing verdict + draft task |
 
 **Invariants:** shared state is single-writer (Supervisor only); parallel
 implementers only on disjoint file footprints, ≤3 concurrent; paid API runs
@@ -123,17 +128,17 @@ cp .env.example .env                       # then fill keys (already done locall
 # Phase 1 (once S0.2 lands)
 cd translator && pip install -e ".[dev]"
 make test && make lint
-bookworm doctor                            # provider smoke test (1 sentence, ~€0)
-bookworm inspect data/examples/<file>      # extraction preview, no API cost
-bookworm translate <file> --to sl --dry-run  # cost estimate — ALWAYS before a full run
-bookworm eval <translated.epub> --sample 40 --seed 42   # Rubric T score + CI
+berilo doctor                            # provider smoke test (1 sentence, ~€0)
+berilo inspect data/examples/<file>      # extraction preview, no API cost
+berilo translate <file> --to sl --dry-run  # cost estimate — ALWAYS before a full run
+berilo eval <translated.epub> --sample 40 --seed 42   # Rubric T score + CI
 
 # Phase 2
 cd android && ./gradlew assembleDebug test
 adb install -r app/build/outputs/apk/debug/app-debug.apk   # Boox over USB
 
-# Secret scan — run before EVERY commit
-git grep -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' && echo LEAK || echo clean
+# Secret scan — run before EVERY commit (exclusions = docs that describe the scan itself)
+git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!docs/rubric.md' ':!.claude/' && echo LEAK || echo clean
 ```
 
 ## 8. References
@@ -147,6 +152,7 @@ git grep -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' && echo LEAK || e
 | Findings (Tier 2) | [`docs/findings.md`](docs/findings.md) | Session-discovered gotchas and working commands — scan first |
 | Ledger | [`loops/build/ledger.jsonl`](loops/build/ledger.jsonl) | One row per kept/discarded iteration |
 | Rubric scores | [`loops/build/rubric_scores.jsonl`](loops/build/rubric_scores.jsonl) | Score history with commit + dimensions |
+| Orchestration | [`.claude/skills/orchestrate/SKILL.md`](.claude/skills/orchestrate/SKILL.md) | Supervisor pipeline (intake → spec+critic → waves → review → land → score); agents in [`.claude/agents/`](.claude/agents/); verification bar in [`.claude/skills/verify-implementation/SKILL.md`](.claude/skills/verify-implementation/SKILL.md); session reflection hook in [`.claude/hooks/`](.claude/hooks/) |
 
 ## 9. Learned Rules — Tier 1 canonical (add as mistakes happen)
 
