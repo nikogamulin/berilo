@@ -100,6 +100,8 @@
 - **Verify:** R4 thresholds met on 5 pre-selected dense paragraphs from *Active Measures*.
 
 ### S2.6 — Highlights & notes (3 pt)
+- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES: e-ink luma-separated fills, folded; 173 JVM tests)
+- [ ] Device residual: R5 10-action sequence + Obsidian export render on Boox
 - [ ] Text selection → highlight (4 colors)/note; per-book notebook screen; Markdown export via share sheet
 - **Verify:** R5 scripted 10-action sequence 15/15; export file renders correctly in Obsidian.
 
