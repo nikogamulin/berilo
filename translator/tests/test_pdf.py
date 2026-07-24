@@ -21,10 +21,16 @@ from berilo.models import Book, Segment, SegmentType
 from berilo.normalize.pdf import (
     _dehyphenate,
     _is_caption,
+    _is_ocr_gibberish,
     normalize_pdf,
 )
 from berilo.providers.base import CompletionResult, LLMClient
-from berilo.screen import back_matter_chapter_indices, sample_segments, screen_segments
+from berilo.screen import (
+    back_matter_chapter_indices,
+    front_matter_chapter_indices,
+    sample_segments,
+    screen_segments,
+)
 
 # Font sizes used when laying out synthetic PDFs.
 _BODY_SIZE = 11.0
@@ -470,6 +476,104 @@ def test_back_matter_chapter_excluded_from_prose_sampling() -> None:
     assert sampled  # body paragraphs remain
     assert all(seg.chapter_index == 1 for seg in sampled)
     assert not any("Der Spiegel" in seg.text for seg in sampled)
+
+
+def test_front_matter_folds_drops_gibberish_and_excludes_from_sampling(tmp_path: Path) -> None:
+    """No-TOC front matter folds into a 'Front Matter' chapter: cover-art OCR
+    gibberish is dropped, real copyright text is kept, and none of it is sampled.
+    """
+    page0 = [  # front matter: cover-art gibberish, then (after a gap) copyright
+        (_LEFT_MARGIN, 120.0, "Pel OO ays por Umi", _BODY_SIZE),
+        (_LEFT_MARGIN, 136.0, "wa", _BODY_SIZE),  # merges with the gibberish above
+        # Large vertical gap => a new paragraph: the real copyright block.
+        (
+            _LEFT_MARGIN,
+            220.0,
+            "Bloomsbury Publishing Inc. and its logos are trademarks.",
+            _BODY_SIZE,
+        ),
+        (
+            _LEFT_MARGIN,
+            236.0,
+            "This paperback edition published 2023 by the publisher.",
+            _BODY_SIZE,
+        ),
+    ]
+    page1 = [  # body
+        (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+        (
+            _LEFT_MARGIN,
+            160.0,
+            "A clean body paragraph of real prose opens the first chapter here.",
+            _BODY_SIZE,
+        ),
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, [page0, page1], name="frontmatter.pdf"))
+
+    # Cover-art gibberish is dropped entirely.
+    assert not any("Pel OO" in seg.text for seg in book.segments)
+    assert not any("Umi" in seg.text for seg in book.segments)
+    # Real copyright text survives, folded under the Front Matter chapter.
+    copyright_seg = _find_segment(book, "Bloomsbury Publishing Inc.")
+    assert copyright_seg.chapter_title == "Front Matter"
+    assert "This paperback edition published 2023" in copyright_seg.text
+    assert front_matter_chapter_indices(book) == {copyright_seg.chapter_index}
+    # Front matter is never offered to the prose screen; the body chapter is.
+    sampled = sample_segments(book, n=30, seed=42)
+    assert sampled
+    assert all(seg.chapter_index not in front_matter_chapter_indices(book) for seg in sampled)
+    assert any("clean body paragraph" in seg.text for seg in sampled)
+
+
+def test_is_ocr_gibberish_keeps_real_short_sentences() -> None:
+    """The gibberish guard flags scan residue but never a real short sentence."""
+    assert _is_ocr_gibberish("Hf j")
+    assert _is_ocr_gibberish(": ~tg aie")
+    assert not _is_ocr_gibberish("To whom would they not?")
+    assert not _is_ocr_gibberish("How would those exploits be used?")
+
+
+def test_body_scan_residue_is_typed_other_not_dropped(tmp_path: Path) -> None:
+    """A zero-real-word body fragment ("Hf j") becomes OTHER and stays in the
+    Book (translated, not sampled); a real short sentence stays PARAGRAPH."""
+    # A long first paragraph fixes the median line gap small; blank-gap breaks
+    # then isolate the two short blocks that follow.
+    long_para = [
+        (_LEFT_MARGIN, 150.0 + 16.0 * i, line, _BODY_SIZE)
+        for i, line in enumerate(
+            [
+                "The investigators kept circling the same unanswered question",
+                "that had haunted them for months, unable to move past it or",
+                "to let it go, and every meeting returned to the same nagging",
+                "doubt about who was really pulling the strings behind all of",
+                "the events, and the room fell silent whenever it came up",
+                "again in this widening and increasingly dangerous affair.",
+            ]
+        )
+    ]
+    page0 = [
+        (_LEFT_MARGIN, 120.0, "CHAPTER 1", _HEADING_SIZE),
+        *long_para,
+        (_LEFT_MARGIN, 296.0, "To whom would they not?", _BODY_SIZE),  # real short sentence
+        (_LEFT_MARGIN, 346.0, "Hf j", _BODY_SIZE),  # zero-real-word scan residue
+        (
+            _LEFT_MARGIN,
+            396.0,
+            "A final grounding paragraph of clean body prose ends it.",
+            _BODY_SIZE,
+        ),
+    ]
+    book = normalize_pdf(_make_pdf(tmp_path, [page0], name="residue.pdf"))
+
+    question = _find_segment(book, "To whom would they not?")
+    assert question.type is SegmentType.PARAGRAPH
+    residue = _find_segment(book, "Hf j")
+    assert residue.type is SegmentType.OTHER  # reclassified, not dropped
+    assert residue in book.segments  # integrity: kept in the book
+    # OTHER residue is excluded from the prose sample; real prose is not.
+    sampled = sample_segments(book, n=30, seed=42)
+    assert not any(seg.text == "Hf j" for seg in sampled)
+    assert any("To whom would they not?" in seg.text for seg in sampled)
 
 
 # --------------------------------------------------------------------------- #

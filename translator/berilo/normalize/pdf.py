@@ -25,6 +25,12 @@ line-break hyphens. This module reconstructs the logical document:
 The result is a :class:`~berilo.models.Book` whose segments carry a 1:1
 mapping to the logical paragraphs and headings of the source — no segment is
 a bare page number, running header, or empty string.
+
+Segment typing marks non-prose so extraction-quality screening can skip it:
+``CAPTION`` for figure/source-credit lines and ``OTHER`` for scan residue —
+illustration/cover OCR gibberish that is not real text. ``OTHER`` segments are
+kept in the book and still translated (segment integrity holds); they are only
+excluded from the clean-prose sample.
 """
 
 from __future__ import annotations
@@ -105,9 +111,18 @@ SHORT_WORD_MAX_RATIO = 0.5
 CAPTION_MAX_WORDS = 12
 CAPTION_CREDIT_MAX_WORDS = 40
 
-# Canonical title given to a folded back-matter chapter so downstream code
-# (prose sampling, translation skip) can recognize it by title.
+# Canonical titles given to the folded back- and front-matter chapters so
+# downstream code (prose sampling, translation skip) can recognize them.
 BACK_MATTER_CHAPTER_TITLE = "Notes"
+FRONT_MATTER_CHAPTER_TITLE = "Front Matter"
+
+# Front-matter OCR-gibberish drop: a folded front-matter block is discarded when
+# fewer than this fraction of its tokens are real words (a >=4-letter token with
+# a vowel and no gibberish letter-runs). Scoped to front-matter pages only, so
+# body prose is never touched; real front-matter text (copyright/publisher
+# lines) is kept because it clears the bar.
+GIBBERISH_MIN_REAL_WORD_RATIO = 0.25
+GIBBERISH_REAL_WORD_MIN_LEN = 4
 
 # Chapter-heading text patterns (matched case-insensitively on the stripped
 # line). Numbered titles (``12. Dirty Business``) are matched separately.
@@ -639,7 +654,9 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
             return
         if _is_caption(text):
             kind = SegmentType.CAPTION
-        elif _is_scene_setter(text):
+        elif _is_scene_setter(text) or _is_ocr_gibberish(text):
+            # Scan residue (illustration OCR) is marked OTHER — kept in the book
+            # and translated, but never sampled as prose.
             kind = SegmentType.OTHER
         else:
             kind = SegmentType.PARAGRAPH
@@ -941,7 +958,10 @@ def _assign_toc_chapters(
         else:
             index = bisect.bisect_right(start_pages, block.page_index)
             if index == 0:
-                chapter_index, chapter_title = 0, None
+                # Front matter: fold under a canonical title and drop OCR debris.
+                if _is_ocr_gibberish(block.text):
+                    continue
+                chapter_index, chapter_title = 0, FRONT_MATTER_CHAPTER_TITLE
             else:
                 chapter_index, chapter_title = index, starts[index - 1][1]
         segments.append(
@@ -970,7 +990,7 @@ def _assign_heuristic_chapters(
     """
     segments: list[Segment] = []
     chapter_index = 0
-    chapter_title: str | None = None
+    chapter_title: str | None = FRONT_MATTER_CHAPTER_TITLE
     phase = "front"
     # A chapter number ("CHAPTER 2") and its title ("The Fucking Salmon") are
     # separate heading lines; ``just_minted`` (no paragraph seen since the last
@@ -997,12 +1017,45 @@ def _assign_heuristic_chapters(
                 chapter_index += 1
                 chapter_title = block.text
                 just_minted = True
+        # Drop cover-art OCR debris from the folded front-matter chapter (kept
+        # real front-matter text stays; body prose is never in this phase).
+        if phase == "front" and _is_ocr_gibberish(block.text):
+            continue
         segments.append(
             _segment_from_block(block, chapter_index, chapter_title, len(segments), body_size)
         )
         if block.kind is SegmentType.PARAGRAPH:
             just_minted = False
     return segments
+
+
+def _is_real_word(token: str) -> bool:
+    """Return True if ``token`` looks like a real word (not OCR debris).
+
+    A real word has at least :data:`GIBBERISH_REAL_WORD_MIN_LEN` letters, a
+    vowel, and no gibberish letter-runs (3+ vowels / 4+ consonants).
+    """
+    letters = "".join(char for char in token if char.isalpha()).lower()
+    if len(letters) < GIBBERISH_REAL_WORD_MIN_LEN:
+        return False
+    if not any(vowel in letters for vowel in "aeiouy"):
+        return False
+    return not (_VOWEL_RUN_RE.search(letters) or _CONSONANT_RUN_RE.search(letters))
+
+
+def _is_ocr_gibberish(text: str) -> bool:
+    """Return True if a block is OCR debris rather than real text.
+
+    Used ONLY to prune folded front-matter chapters (cover-art scan noise like
+    ``"Pel OO ays por Umi"``, ``"wa"``). Real front-matter lines
+    (``"Bloomsbury Publishing Inc."``) clear the real-word bar and are kept.
+    Never applied to body prose.
+    """
+    tokens = text.split()
+    if not tokens:
+        return True
+    real_words = sum(1 for token in tokens if _is_real_word(token))
+    return real_words < max(1, len(tokens) * GIBBERISH_MIN_REAL_WORD_RATIO)
 
 
 def _segment_from_block(
