@@ -16,6 +16,13 @@
 - [2026-07-24] Environment (TensorForgeX): Python 3.10.12, Node v22.13.1,
   PyMuPDF 1.27.2 installed system-wide, `pdftotext` and Calibre
   `ebook-convert` on PATH.
+- [2026-07-24] `~/.local/bin/gh` is a stray PyPI package (`gh` 0.0.4) shadowing
+  the real GitHub CLI — always call `/usr/bin/gh`. Installed gh is 2.4.0
+  (Ubuntu): no `gh label` command, `gh issue close` broken (git exit 128) —
+  use `gh api repos/nikogamulin/berilo/...` for labels, milestones, issue
+  state changes.
+- [2026-07-24] `epubcheck` is not installed (needed by S1.6 Verify);
+  `ebook-convert` and `pdftotext` are on PATH.
 - [2026-07-24] `data/` is gitignored and holds copyrighted books — never
   commit, never upload contents anywhere except segment batches to the
   configured LLM API during translation.

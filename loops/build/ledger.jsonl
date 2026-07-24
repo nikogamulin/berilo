@@ -1,1 +1,2 @@
 {"date":"2026-07-24","hypothesis":"scaffold repo with spec, measurable plan, rubrics, agentic CLAUDE.md (S0.1)","result":"S0.1 Verify passed: commit exists, .env+data/ ignored, HEAD secret-scan clean","kept":true,"rubric_delta":null,"cost_eur":0}
+{"date":"2026-07-24","hypothesis":"wire GitHub: push main, MIT LICENSE, labels+milestones m0-m3, mirror 24 stories to issues (S0.3)","result":"Verify passed: license MIT detected, 24 story issues, full-history secret scan clean","kept":true,"rubric_delta":null,"cost_eur":0}

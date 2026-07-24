@@ -22,9 +22,9 @@
 - [ ] `translator/` installable package: `pyproject.toml`, `berilo/` with CLI entry point, pytest wired, Black + Ruff configured, Makefile (`make test`, `make lint`)
 - **Verify:** `cd translator && pip install -e . && berilo --help` exits 0 and lists `translate|inspect|eval`; `make test` passes (≥1 placeholder test); `make lint` clean.
 
-### S0.3 — GitHub repo wiring (1 pt)
-- [ ] Remote `git@github.com:nikogamulin/berilo.git` pushed (`main`) — done 2026-07-24
-- [ ] MIT `LICENSE` file (author: Niko Gamulin, PhD), labels (`plan`,`story`,`bug`,`m0`–`m2`), milestones m0–m2, this plan mirrored to issues
+### S0.3 — GitHub repo wiring ✅ (1 pt)
+- [x] Remote `git@github.com:nikogamulin/berilo.git` pushed (`main`) — done 2026-07-24
+- [x] MIT `LICENSE` file (author: Niko Gamulin, PhD), labels (`plan`,`story`,`bug`,`m0`–`m3`), milestones m0–m3, this plan mirrored to issues #1–#24
 - **Verify:** `gh repo view nikogamulin/berilo --json licenseInfo` shows MIT; `gh issue list --label story | wc -l` equals story count; secret-scan of full history empty.
 
 ---
