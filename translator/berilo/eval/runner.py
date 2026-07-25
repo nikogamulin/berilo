@@ -170,6 +170,55 @@ def append_score_row(row: dict[str, object], scores_file: str | Path) -> None:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def write_dump(result: RubricTResult, dump_path: str | Path) -> int:
+    """Write one JSON row per judged sample to ``dump_path`` (S1.9).
+
+    Prose (T2/T3) rows and T6 screen rows have distinguishable shapes (a
+    ``kind`` field: ``"prose"`` or ``"screen"``). Every judge repeat is
+    recorded, not just the mean, so intra-sample judge noise is inspectable
+    after the fact. Nothing is written unless this function is called — the
+    CLI only calls it when ``--dump`` is passed.
+
+    Args:
+        result: A scored :class:`RubricTResult`.
+        dump_path: Destination JSONL path; parent directories are created.
+
+    Returns:
+        The number of rows written.
+    """
+    path = Path(dump_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows: list[dict[str, object]] = []
+    for sample in result.prose_samples:
+        rows.append(
+            {
+                "kind": "prose",
+                "segment_id": sample.segment_id,
+                "chapter_index": sample.chapter_index,
+                "chapter_title": sample.chapter_title,
+                "source": sample.source,
+                "target": sample.target,
+                "meaning": sample.meaning_scores,
+                "fluency": sample.fluency_scores,
+            }
+        )
+    for sample in result.screen_samples:
+        rows.append(
+            {
+                "kind": "screen",
+                "segment_id": sample.segment_id,
+                "chapter_index": sample.chapter_index,
+                "chapter_title": sample.chapter_title,
+                "target": sample.target,
+                "screen": sample.screen_scores,
+            }
+        )
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return len(rows)
+
+
 def format_report(result: RubricTResult, *, title: str) -> str:
     """Render the human-readable score table.
 
@@ -196,6 +245,13 @@ def format_report(result: RubricTResult, *, title: str) -> str:
     for note in result.notes:
         lines.append(f"  ! {note}")
     lines.append(f"  judge cost this run: €{result.cost_eur:.4f}")
+    if result.judge_repeats > 1:
+        m_noise = result.meaning_noise if result.meaning_noise is not None else 0.0
+        f_noise = result.fluency_noise if result.fluency_noise is not None else 0.0
+        lines.append(
+            f"  judge noise floor (judge-repeats={result.judge_repeats}): "
+            f"T2 mean intra-sample σ={m_noise:.2f}  T3 mean intra-sample σ={f_noise:.2f}"
+        )
     return "\n".join(lines)
 
 
@@ -207,6 +263,8 @@ def result_to_dict(
     payload["title"] = title
     payload["complete"] = result.complete
     payload["sample_ids"] = result.sample_ids
+    payload["judge_repeats"] = result.judge_repeats
+    payload["judge_noise"] = {"T2": result.meaning_noise, "T3": result.fluency_noise}
     payload["dimensions_detail"] = {
         dim.key: {
             "name": dim.name,
@@ -228,6 +286,7 @@ def describe_plan(
     seed: int,
     glossary: dict[str, str] | None,
     actual_cost_eur: float | None,
+    judge_repeats: int = 1,
 ) -> str:
     """Describe what a real (non-dry) run would do, making ZERO judge calls.
 
@@ -238,6 +297,8 @@ def describe_plan(
         seed: Sampling seed.
         glossary: Cache glossary (or ``None``).
         actual_cost_eur: Cache cost (or ``None``).
+        judge_repeats: How many times a real run would judge each sample
+            (S1.9); the reported call count is multiplied accordingly.
 
     Returns:
         A human-readable dry-run description.
@@ -256,9 +317,14 @@ def describe_plan(
     n_pairs = min(sample_size, len(pool))
     is_pdf = source.source_format == "pdf"
     n_screen = rubric_t.T6_SAMPLE if is_pdf else 0
-    judge_calls = 2 * n_pairs + n_screen  # meaning + fluency per pair, + screen
+    # meaning + fluency per pair, + screen, each repeated judge_repeats times.
+    judge_calls = (2 * n_pairs + n_screen) * judge_repeats
     t4_note = "glossary available" if glossary else "NO glossary in cache → dropped"
-    t6_note = f"PDF source → {n_screen} screen calls" if is_pdf else "non-PDF → automatic full"
+    t6_note = (
+        f"PDF source → {n_screen} screen calls (x{judge_repeats} repeats)"
+        if is_pdf
+        else "non-PDF → automatic full (no judge calls)"
+    )
     t7_note = "from cache" if actual_cost_eur is not None else "NO cost data → dropped"
     lines = [
         "DRY RUN — no judge calls, no cost, no score row written.",
@@ -266,11 +332,13 @@ def describe_plan(
         f"{alignment.source_count} segments).",
         f"Translated: {alignment.target_count} segments.",
         "T1 completeness: computed exactly over all segments.",
-        f"T2 meaning + T3 fluency: {n_pairs} pairs (seed {seed}) = {2 * n_pairs} judge calls.",
+        f"T2 meaning + T3 fluency: {n_pairs} pairs (seed {seed}) "
+        f"= {2 * n_pairs} judge calls (x{judge_repeats} repeats).",
         f"T4 terminology: {t4_note}.",
         "T5 structure: automated diff (no judge).",
         f"T6 extraction: {t6_note}.",
         f"T7 cost: {t7_note}.",
+        f"Judge repeats: {judge_repeats} (--judge-repeats; noise floor reported when > 1).",
         f"Total judge calls a real run would make: {judge_calls}.",
     ]
     return "\n".join(lines)
@@ -285,6 +353,7 @@ def run_eval(
     seed: int,
     glossary: dict[str, str] | None,
     actual_cost_eur: float | None,
+    judge_repeats: int = 1,
 ) -> RubricTResult:
     """Score a normalized source/translated pair (thin wrapper over score_book)."""
     return rubric_t.score_book(
@@ -295,4 +364,5 @@ def run_eval(
         seed=seed,
         glossary=glossary,
         actual_cost_eur=actual_cost_eur,
+        judge_repeats=judge_repeats,
     )
