@@ -19,6 +19,32 @@
   mean before** the bootstrap arrays (`rubric_t.py`). Flattening N repeats of M
   samples into one N×M array would fake an N-fold larger sample and shrink the
   CI without adding information — the tempting-but-wrong implementation.
+- [2026-07-25] **The fluency win comes from a SECOND PASS, not from a better
+  prompt.** E2 bake-off (Kaplan, 6 contiguous runs × 10 segments, cluster
+  bootstrap, seed 42): `sl_style_v1` — an explicit Slovenian style contract in
+  the system prompt (no calques, verbal over nominal, drop redundant pronouns,
+  dual, šumniki) — scored T3 **+0.05 [−0.10, +0.22]**, i.e. nothing, and T2
+  **−0.23 [−0.53, +0.08]**, a hint of meaning regression. `revise_v1`, the same
+  contract plus a native-editor revision pass over each batch, won BOTH: T3
+  **+0.48 [+0.17, +0.87]**, T2 **+0.23 [+0.07, +0.45]**. Generalizable: telling
+  a model to write better in the instruction is far weaker than giving it a
+  separate turn to edit what it just wrote — and the edit pass improved
+  *fidelity* too, so the expected style-vs-meaning tradeoff did not appear.
+- [2026-07-25] Retyping heading-like paragraphs and repairing chapter-title
+  resolution does **not** change `book_hash` or any `segment_hash` — both are
+  derived from segment IDs and stripped text, not from types or titles
+  (verified on Kaplan: same hash, same 1267 distinct segment hashes before and
+  after S1.13). So a normalize fix of this class costs **€0** to adopt: existing
+  translated EPUBs can be rebuilt from cache with no re-billing. Check
+  `book_hash` before assuming a normalize change forces a paid re-run.
+- [2026-07-25] Changing normalization on the SOURCE side alone breaks
+  `rubric_t.align` against already-assembled translated EPUBs (they were built
+  under the old segmentation). Symptom: `AlignmentError` even though segment
+  counts still match, because alignment fingerprints on
+  `(chapter, type, heading_level)`. Sequence such work as: measure the current
+  artifact FIRST, then land the normalize change, then rebuild from cache and
+  re-measure — otherwise a prompt effect and a normalization effect land in the
+  same number and neither is attributable.
 - [2026-07-25] **E1 calibration verdict (€0.145, Kaplan, sample 30, repeats 3):
   the fluency ceiling is REAL, not a judge artifact.** Judge intra-sample
   σ=0.18 (T3) / 0.22 (T2) — highly reproducible — and the verdict distribution

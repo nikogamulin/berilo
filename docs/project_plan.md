@@ -85,12 +85,13 @@
 - [x] Offline Verify run 2026-07-25 on merged `main`: 190 passed, lint clean. Supervisor-audited independently: byte-identity confirmed by diffing the registry against `main:translate.py` pre-refactor constants; migration run against a **copy of the real 10,936-row cache** — all rows preserved, text byte-identical, all tagged `baseline_v1`, idempotent across repeated opens, `glossaries`/`calls` intact; estimator honest (`revise_v1` = 2.09× baseline, style-only variants 1.00×); revise pass degrades to un-revised text on a mapping mismatch (segment integrity holds) and is counted in `TranslationStats.revision_failures`; cache commit happens after both passes
 - **Verify:** `cd translator && make test && make lint` green, including new tests proving (a) `baseline_v1` strings are byte-identical to the pre-refactor constants, (b) the same segment under two prompt versions stores two distinct cache rows and each reads back correctly, (c) a pre-migration cache DB opens and its rows read as `baseline_v1`, (d) a `baseline_v1` run against an existing cache makes zero API calls.
 
-### S1.11 — A/B prompt-variant harness (3 pt)
+### S1.11 — A/B prompt-variant harness (3 pt) ✅
 *Plan: §3 F3. Depends on S1.9 + S1.10. Opus-tier: measurement correctness is the whole point.*
 - [ ] `berilo/experiment.py` + `berilo ab <translated.epub> --variant <name>`: seeded selection of K *contiguous* body-prose runs, re-translated through the real `translate_book` path (production batch size, rolling context, the book's cached glossary) against a scratch cache
-- [ ] Judges control vs variant on T2 + T3, reports **paired** deltas with bootstrap CIs, plus actual € spent and €/1k words per variant
-- [ ] Resampling unit is the contiguous run (cluster), not the segment, so within-run correlation does not shrink the CI
-- [ ] `--dry-run` prints the plan, judge-call count and estimated cost without spending
+- [x] Judges control vs variant on T2 + T3, reports **paired** deltas with bootstrap CIs, plus actual € spent and €/1k words per variant
+- [x] Resampling unit is the contiguous run (cluster), not the segment, so within-run correlation does not shrink the CI
+- [x] `--dry-run` prints the plan, judge-call count and estimated cost without spending
+- [x] Verify run 2026-07-25 on merged `main`: 216 passed, lint clean; Supervisor-audited that `cluster_bootstrap_ci` resamples whole runs and that a test asserts production batch shapes (not just the function name). Used live for the E2 bake-off at €0.20–0.26 per hypothesis
 - **Verify:** offline — `python3 -m pytest tests/ -k experiment` green with mocked translate+judge, asserting the harness calls `translate_book` (not a bespoke path), that control and variant do not collide in the cache, and that the reported CI is cluster-bootstrapped. Live (Supervisor, ≤ €0.10): `berilo ab "data/examples/The Revenge of Geography.sl.epub" --variant sl_style_v1 --dry-run` then one real run inside budget.
 
 ### S1.13 — Fix chapter-title fallback when TOC/nav fails to parse (2 pt)
@@ -100,9 +101,10 @@
 - [ ] Emit a loud warning (not the current cosmetic one) when the title-fallback share exceeds a threshold — a silent 95% fallback is how this hid
 - **Verify:** title-fallback share for all five example books printed and **< 50% each** (Kaplan is 94.9% today); `berilo eval "…Revenge of Geography.sl.epub" --sample 30 --seed 42 --dump` contains **zero** samples whose target is byte-identical to its English source; `make test && make lint` green.
 
-### S1.12 — Promote the winning prompt (2 pt) — *blocked on S1.11 experiment results*
-- [ ] Winning variant becomes the default style; findings + ledger record the paired deltas
-- [ ] One full book re-translated and re-scored (**needs Niko's go-ahead, ~€0.8**)
+### S1.12 — Promote the winning prompt (2 pt)
+- [x] `revise_v1` is the default style (`prompts.DEFAULT`); `translate --style <name>` selects any registry style; the choice flows through the dry-run estimate, confirmation prompt, cache key and run summary, and `revision_failures` is surfaced loudly
+- [x] Verify run 2026-07-25: 227 passed, lint clean. E2 deltas recorded in `loops/build/ledger.jsonl` and `docs/findings.md`
+- [ ] One full book re-translated and re-scored (Niko approved 2026-07-25, ~€1.22 estimated; **run in flight**)
 - **Verify:** Rubric T on the re-translated book **≥ 89** with T3 ≥ 16/20, T2 not regressed beyond −0.5 pts, T1 = 100%, T7 = 5; score row in `rubric_scores.jsonl`.
 
 ---
