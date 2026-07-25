@@ -4,11 +4,17 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
+import androidx.test.core.app.ApplicationProvider
 import app.berilo.reader.store.repository.Book
 import app.berilo.reader.ui.library.LibraryScreen
 import app.berilo.reader.ui.library.LibraryUiState
 import app.berilo.reader.ui.theme.BeriloTheme
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.annotation.DelicateCoilApi
 import com.github.takahirom.roborazzi.captureRoboImage
+import kotlinx.coroutines.Dispatchers
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,8 +29,10 @@ private const val FIXED_TIMESTAMP = 1_735_689_600_000L
 /**
  * S2.10: renders [LibraryScreen] to PNG at both device widths and both themes. Covers with
  * `coverPath = null` fall back to the bundled title-matched drawables in
- * [app.berilo.reader.ui.library.fallbackCoverFor] — no network/Coil image load, so the
- * render is deterministic without any fake image server.
+ * [app.berilo.reader.ui.library.fallbackCoverFor] — resolved through a local drawable
+ * resource ID, so no network is involved, but [installSynchronousImageLoader] below explains
+ * why that alone doesn't make the render deterministic: Coil's `AsyncImage` still fetches and
+ * decodes asynchronously even for local resources.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -32,6 +40,35 @@ class LibraryScreenshotTest {
 
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
+
+    /**
+     * Bounce fix: `BookCard`'s covers load through Coil's `AsyncImage`, which by default
+     * dispatches fetch/decode onto `Dispatchers.IO` — a real background thread outside
+     * Robolectric's main looper, so `composeRule.waitForIdle()` can return before that decode
+     * (and the recomposition/draw it triggers) has landed. That race made `library_boox_dark`
+     * flap between two states across reruns: a card's cover region either painted the theme's
+     * PaperDark background (0xFF121212, i.e. RGB(18,18,18) — correct) or was still showing the
+     * raw, undrawn canvas (pure black, RGB(0,0,0) — a frame captured mid-flight). It only
+     * showed up on the Boox width (most covers in flight at once) and only on the very first
+     * Coil decode in a given test JVM (subsequent tests hit Coil's warm memory cache and settle
+     * fast enough to not race), which is why it looked like it was specific to boox/dark.
+     *
+     * The fix collapses Coil's pipeline onto the composing thread for these purely-local,
+     * no-real-I/O decodes: `Dispatchers.Unconfined` doesn't hop threads for work that has no
+     * real suspension point, so fetch+decode complete inline before `waitForIdle()` is ever
+     * called — deterministic by construction (no dispatcher hop to race), not by polling or
+     * sleeping around a race that's still there. Scoped to this test's JVM-wide Coil singleton
+     * via `setUnsafe` (not `setSafe`, which errors if any earlier test already touched Coil).
+     */
+    @OptIn(DelicateCoilApi::class)
+    @Before
+    fun installSynchronousImageLoader() {
+        SingletonImageLoader.setUnsafe(
+            ImageLoader.Builder(ApplicationProvider.getApplicationContext())
+                .coroutineContext(Dispatchers.Unconfined)
+                .build(),
+        )
+    }
 
     // Seven books: enough to show several grid rows/columns at the Boox width, mixing the
     // bundled title-matched covers (see fallbackCoverFor) with the generic ic_book fallback,
