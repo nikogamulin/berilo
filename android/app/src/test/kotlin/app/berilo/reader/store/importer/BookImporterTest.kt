@@ -1,6 +1,7 @@
 package app.berilo.reader.store.importer
 
 import java.io.File
+import java.io.InputStream
 import kotlin.io.path.createTempDirectory
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -97,5 +98,6 @@ class BookImporterTest {
             assertTrue(booksDir.listFiles()?.isEmpty() != false)
         }
 
-    private fun bytes(text: String) = text.toByteArray().inputStream()
+    /** A factory, not a stream: [BookImporter.import] owns opening and closing. */
+    private fun bytes(text: String): () -> InputStream = { text.toByteArray().inputStream() }
 }

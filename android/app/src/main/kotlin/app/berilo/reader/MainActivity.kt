@@ -73,9 +73,12 @@ class MainActivity : ComponentActivity() {
 
     private fun handlePickedEpub(uri: Uri) {
         val displayName = queryDisplayName(uri) ?: uri.lastPathSegment ?: "book.epub"
-        contentResolver.openInputStream(uri)?.use { input ->
-            viewModel.importBook(input, displayName)
-        }
+        // Hand over a factory, never an open stream: importBook returns as soon as
+        // it launches, so closing the stream here would close it before the import
+        // coroutine reads a byte. The application resolver (not this Activity's)
+        // keeps the lambda from capturing the Activity for the import's lifetime.
+        val resolver = applicationContext.contentResolver
+        viewModel.importBook({ resolver.openInputStream(uri) }, displayName)
     }
 
     private fun queryDisplayName(uri: Uri): String? =

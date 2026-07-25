@@ -38,9 +38,13 @@ sealed interface LibraryEvent {
 /**
  * Library screen view model: streams the book list from Room and orchestrates
  * SAF imports through [BookImporter]. Deliberately holds no [android.net.Uri]
- * or [android.content.ContentResolver] — the caller resolves the picked
- * document to an [InputStream] first, which keeps this class host-JVM
- * testable without Robolectric.
+ * or [android.content.ContentResolver] — the caller supplies a factory that
+ * opens the picked document, which keeps this class host-JVM testable without
+ * Robolectric.
+ *
+ * The factory is deliberately not an already-open [InputStream]: imports run in
+ * [viewModelScope] and outlive the picker callback, so a caller that opened the
+ * stream itself would close it before the first read (see [importBook]).
  */
 class LibraryViewModel(
     private val repository: BookRepository,
@@ -60,9 +64,9 @@ class LibraryViewModel(
     private val _events = MutableSharedFlow<LibraryEvent>(extraBufferCapacity = 1)
     val events: SharedFlow<LibraryEvent> = _events
 
-    fun importBook(input: InputStream, suggestedFileName: String) {
+    fun importBook(openStream: () -> InputStream?, suggestedFileName: String) {
         viewModelScope.launch {
-            when (val outcome = importer.import(input, suggestedFileName)) {
+            when (val outcome = importer.import(openStream, suggestedFileName)) {
                 is ImportOutcome.Imported -> _events.emit(LibraryEvent.Imported)
                 is ImportOutcome.Duplicate -> _events.emit(LibraryEvent.AlreadyInLibrary)
                 is ImportOutcome.Failed -> _events.emit(LibraryEvent.ImportFailed(outcome.reason))

@@ -18,6 +18,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -59,11 +61,52 @@ class LibraryViewModelTest {
             val events = mutableListOf<LibraryEvent>()
             backgroundScope.launch { viewModel.events.collect { events.add(it) } }
 
-            viewModel.importBook("hello".toByteArray().inputStream(), "a.epub")
+            viewModel.importBook({ "hello".toByteArray().inputStream() },"a.epub")
             advanceUntilIdle()
 
             assertEquals(listOf(LibraryEvent.Imported), events)
             assertEquals(1, dao.count())
+        }
+
+    /**
+     * Regression: imports used to take an already-open [java.io.InputStream], so
+     * MainActivity's `openInputStream(uri).use { importBook(it, name) }` closed it
+     * the instant importBook launched — every real import died with
+     * `ImportFailed(reason=Stream Closed)`. Only a *lazily opened* real file stream
+     * catches this; ByteArrayInputStream.close() is a no-op and hides it.
+     */
+    @Test
+    fun `import opens its own stream, after the picker callback has returned`() =
+        runTest(testDispatcher) {
+            val dao = FakeBookDao()
+            val viewModel = viewModel(dao)
+            val source = File(tempDir, "picked.epub").apply { writeBytes("hello".toByteArray()) }
+            var opened = false
+            val events = mutableListOf<LibraryEvent>()
+            backgroundScope.launch { viewModel.events.collect { events.add(it) } }
+
+            viewModel.importBook({ opened = true; source.inputStream() }, "picked.epub")
+            assertFalse("the stream must not be opened in the picker callback", opened)
+
+            advanceUntilIdle()
+
+            assertTrue("the import coroutine must open the stream itself", opened)
+            assertEquals(listOf(LibraryEvent.Imported), events)
+        }
+
+    @Test
+    fun `import reports a failure when the picked document cannot be opened`() =
+        runTest(testDispatcher) {
+            val dao = FakeBookDao()
+            val viewModel = viewModel(dao)
+            val events = mutableListOf<LibraryEvent>()
+            backgroundScope.launch { viewModel.events.collect { events.add(it) } }
+
+            viewModel.importBook({ null }, "gone.epub")
+            advanceUntilIdle()
+
+            assertTrue(events.single() is LibraryEvent.ImportFailed)
+            assertEquals("a failed open must not create a row", 0, dao.count())
         }
 
     @Test
@@ -72,12 +115,12 @@ class LibraryViewModelTest {
             val dao = FakeBookDao()
             // Seed the library directly through BookImporter so the content-hash id
             // matches exactly what the ViewModel's own import call will compute.
-            importer(dao).import("hello".toByteArray().inputStream(), "seed.epub")
+            importer(dao).import({ "hello".toByteArray().inputStream() },"seed.epub")
             val viewModel = viewModel(dao)
             val events = mutableListOf<LibraryEvent>()
             backgroundScope.launch { viewModel.events.collect { events.add(it) } }
 
-            viewModel.importBook("hello".toByteArray().inputStream(), "a-different-filename.epub")
+            viewModel.importBook({ "hello".toByteArray().inputStream() },"a-different-filename.epub")
             advanceUntilIdle()
 
             assertEquals(listOf(LibraryEvent.AlreadyInLibrary), events)

@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 private const val SHA_256 = "SHA-256"
 private const val EPUB_EXTENSION = ".epub"
 private const val JPEG_EXTENSION = ".jpg"
+private const val COULD_NOT_OPEN_MESSAGE = "Could not open the selected file"
 
 /** Outcome of a single [BookImporter.import] call. */
 sealed interface ImportOutcome {
@@ -45,13 +46,20 @@ class BookImporter(
     private val clock: () -> Long = System::currentTimeMillis,
     private val ioDispatcher: CoroutineContext = Dispatchers.IO,
 ) {
-    suspend fun import(input: InputStream, suggestedFileName: String): ImportOutcome =
+    suspend fun import(openStream: () -> InputStream?, suggestedFileName: String): ImportOutcome =
         withContext(ioDispatcher) {
             booksDir.mkdirs()
             val tempFile = File.createTempFile("import-", EPUB_EXTENSION, booksDir)
             var finalFile: File? = null
             try {
-                val hash = copyAndHash(input, tempFile)
+                // The stream is opened AND closed here, on the IO dispatcher.
+                // Callers must hand over a factory rather than an open stream:
+                // this import outlives the SAF picker callback, so a caller-side
+                // `use` block would close the stream before the first read.
+                val hash =
+                    (openStream() ?: throw IOException(COULD_NOT_OPEN_MESSAGE)).use { input ->
+                        copyAndHash(input, tempFile)
+                    }
                 if (bookDao.exists(hash)) {
                     tempFile.delete()
                     return@withContext ImportOutcome.Duplicate(hash)
