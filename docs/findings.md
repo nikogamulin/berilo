@@ -1,5 +1,72 @@
 # Findings register (Tier 2)
 
+- [2026-07-25] **Rubric R cannot be scored on this box at all**: no Boox
+  attached (`~/Android/Sdk/platform-tools/adb devices` lists none) and no
+  emulator installed (`~/Android/Sdk/emulator/` and `~/.android/avd/` do not
+  exist — the headless SDK install brought only cmdline-tools, platform-tools,
+  platforms;android-35 and build-tools). All 7 R dimensions are device-measured
+  (`docs/rubric.md:44-59`), so every Phase 2 story's residual is gated on
+  physically connecting the tablet. The offline ceiling is
+  `./gradlew screenshots test` = 416 JVM tests + 26 screenshots.
+- [2026-07-25] **The Material3 baseline-purple leak recurred, and the recorded
+  advice was why.** The 2026-07-24 bullet said to "grep `colorScheme.` before
+  using a new role" — but every role referenced that way IS pinned. The leak
+  comes from Material3 **component defaults** reaching for roles nobody pinned,
+  which no grep of app code can see: `FloatingActionButton` →
+  `primaryContainer`/`onPrimaryContainer` (`#EADDFF` on `#210050`, the
+  library's primary action), `LinearProgressIndicator` track →
+  `secondaryContainer` (`#E8DEF8`), `HorizontalDivider` → `outlineVariant`
+  (`#CAC4D0`). `Theme.kt` pins 11 roles; M3 defines ~30. **Pin every role in
+  both schemes.** Detector, €0 and repo-wide: convert each pixel of every
+  screenshot to HSV and flag hue 0.63–0.85 with s>0.05, v>0.15 — caught the
+  leak on 5 surfaces at once (fix by CLASS, per §9). Filed as S2.11.
+- [2026-07-25] **Two samples cannot distinguish "stable" from "alternating".**
+  A screenshot compared across 2 runs looked deterministic; across 5 runs it
+  proved bistable. `library_boox_dark.png` alternated between two
+  pixel-distinct states (23,008 px differing, 0.88%, max channel delta 18) —
+  regions painting raw `(0,0,0)` canvas in one run and `#121212` `PaperDark`
+  in the next. Comparing run N to run N+1 passes half the time by construction.
+  **To claim determinism, run ≥5 and compare all pairs.**
+- [2026-07-25] **Compose screenshot capture is not deterministic by default:
+  Coil is the culprit.** `AsyncImage` dispatches fetch/decode onto
+  `Dispatchers.IO`, a real thread Robolectric's main looper does not control,
+  so `composeRule.waitForIdle()` can return before the decode and its
+  recomposition have painted. Only the Boox-width dark library flapped (more
+  covers on screen ⇒ more decodes in flight) and only on the first Coil decode
+  in a JVM (later tests hit the warm memory cache). Fix that is deterministic
+  *by construction* rather than a poll: install a JVM-scoped
+  `SingletonImageLoader.setUnsafe(ImageLoader.Builder(ctx)
+  .coroutineContext(Dispatchers.Unconfined).build())` — `Unconfined` does not
+  hop threads for work with no real suspension point, and decoding a local
+  drawable is exactly that, so fetch+decode complete inline before capture.
+- [2026-07-25] Roborazzi ≥1.50.0 is unusable here: its kotlin_module metadata
+  (2.3.0) exceeds this repo's pinned Kotlin 2.1.0 and `kspDebugKotlin` fails
+  with "Module was compiled with an incompatible version of Kotlin". **1.45.1**
+  works, library-only, no Gradle plugin (so no compileSdk pressure on the
+  platform-35 ceiling). Generalization: the dependency ceiling already recorded
+  for AGP/compileSdk **also binds via Kotlin metadata version** — pin new
+  libraries to Kotlin-2.1.0-era releases, never "latest".
+- [2026-07-25] Roborazzi's `captureRoboImage` is a **silent no-op that still
+  passes** unless `roborazzi.test.record=true` is set (normally set by its
+  Gradle plugin, which we deliberately do not apply). A missing system property
+  looks identical to "nothing changed" rather than "nothing ran". The harness
+  therefore reports **SKIPPED** (JUnit `Assume`) when the property is absent
+  and asserts the PNG exists and is non-empty when it is present — "passed"
+  must never mean "wrote nothing". **Grepping a new test suite for assertions
+  is a cheap way to detect a gate that cannot fail.**
+- [2026-07-25] Reader top bar collapses at phone width: `ReaderChrome.kt`'s
+  chapter-title `Text` at `weight(1f)` loses all space to a sibling
+  `horizontalScroll` Row of 6 action buttons, which measures at its
+  unconstrained preferred width. The title **disappears rather than
+  ellipsising** despite `TextOverflow.Ellipsis`, and the action row is clipped
+  mid-word. Correct at Boox width (990 dp). The S2.9 Compose tests could never
+  catch it — they assert node existence, never layout. Filed as S2.11.
+- [2026-07-25] Never run a verification inside a worktree an agent still owns.
+  A determinism check showed 1 of 26 PNGs differing and read as
+  non-determinism; the worktree was in fact dirty (`git -C <wt> status
+  --short` listed all 7 files) because the implementer was mid-edit. Check
+  `git status` in the worktree, or copy the tree, before measuring anything an
+  agent produced. Same family as the "measure the artifact FIRST" rule below.
 - [2026-07-25] **The translation cache was not keyed on the prompt** — PK was
   `(book_hash, segment_hash, model, lang)`. Any prompt change would therefore
   serve the OLD translation at €0 on a re-run: a prompt A/B or a full re-run

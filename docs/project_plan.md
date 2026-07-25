@@ -109,6 +109,40 @@
 - [ ] Residual: T3 lands at 13.9/20, short of the plan's G3 target of 16 — the revision pass is a real, replicated gain but does not close the fluency gap alone. Next hypotheses in `docs/plans/2026-07-25-fluency-uplift.md`
 - **Verify:** Rubric T on the re-translated book **≥ 89** with T3 ≥ 16/20, T2 not regressed beyond −0.5 pts, T1 = 100%, T7 = 5; score row in `rubric_scores.jsonl`.
 
+### S1.14 — Carry images through the pipeline (3 pt)
+*Defect reported by Niko 2026-07-25: source books have images, every translated
+EPUB has none. Verified universal, not book-specific — source vs output image
+files: New Rules of War 4→**0**, Sandworm 3→**0**, Revenge of Geography 17→**0**,
+Active Measures (PDF) →**0**. Opus-tier: touches the segment model, both
+normalizers and the assembler.*
+- [ ] **Images are book-level resources, never segments.** `book_hash` is sha1
+      over ordered segment IDs (`cache.py:95`) and `make_segment_id` includes
+      document position (`models.py:30`), so inserting IMAGE segments would
+      change every ID, miss every cache row and force a **paid re-translation of
+      all five books (~€7 at the `revise_v1` default)**. Adding a `Book.images`
+      field leaves `book_hash` byte-identical ⇒ rebuild from cache at **€0**.
+      It also keeps `rubric_t.align`'s `(chapter, type, heading_level)`
+      fingerprints unchanged, avoiding the AlignmentError class in findings
+- [ ] `models.py`: `ImageResource` (id, media_type, bytes, source_href, alt) +
+      `Book.images`, anchored to the segment it follows; `to_json`/`from_json`
+      round-trip
+- [ ] `normalize/epub.py`: collect manifest image items and `<img>` anchor
+      positions (today `_iter_blocks`/`_read_manifest` discard both)
+- [ ] `normalize/pdf.py`: pymupdf image extraction with page anchors — required,
+      since the reported book (*Active Measures*) is PDF-sourced. Existing
+      CAPTION segments are already translated, so today captions survive while
+      their image is dropped; captions must re-attach to their image
+- [ ] `assemble.py`: image entries into the zip with fixed `ZipInfo`
+      `date_time=(1980,1,1,...)` (byte-identical-output invariant), manifest
+      entries in `_content_opf`, `<img>` emitted in `_render_chapter_body`
+- **Verify:** offline — `cd translator && make test && make lint` green, with a
+  test asserting `book_hash` is unchanged by adding images to a `Book`, and a
+  round-trip test that a source EPUB's image count survives normalize→assemble.
+  Measured — rebuild all five books from cache and assert **0 API calls / €0.00**
+  in the run log, then re-run the image census: each output's image-file count
+  equals its source's (4/3/17 for the EPUB books, > 0 for Active Measures) and
+  `epubcheck` still exits 0 on every output.
+
 ---
 
 ## Phase 2 — Android reader (milestone `m2`) — target: Rubric R ≥ 85 on Boox
@@ -161,9 +195,79 @@
 
 ### S2.9 — Curated book icons + library polish (2 pt)
 - [x] Generate cohesive, text-free 2:3 cover icons for the five translated example books and use them as title-matched fallbacks when an imported EPUB has no usable embedded cover
-- [ ] Prettify the Android library: add restrained card surfaces, consistent cover corner treatment, author hierarchy, improved empty/loading states, and responsive spacing while preserving the e-ink-first palette and ≥ 48 dp touch targets
-- [ ] Review the reader, notebook, dictionary, interpretation, and settings screens for the same spacing, typography, icon, and state-treatment consistency; fix visible regressions without adding decorative animation
+- [x] Library polish landed `429017f` (`LibraryScreen.kt` +187) — audited on `main` 2026-07-25: `CardShape`/border `:60-63,197-199`, `RoundedCornerShape(12.dp)`+`clip` cover treatment, author hierarchy one weight down on the pinned `onSurfaceVariant` role `:226,235-237`, distinct LOADING/EMPTY states `:94-95,141,330`, `GridCells.Adaptive(minSize=140.dp)` `:172`; `IconButton` supplies the ≥48 dp target
+- [x] Cross-screen consistency landed `c04b573` — annotation editor, notebook, dictionary, interpretation and settings all touched, with ~591 lines of Compose tests
+- [ ] Verify residual: screenshots at both widths now exist via S2.10 and surfaced **3 defects → S2.11** (baseline-purple FAB, purple progress track, reader-chrome title collapse at phone width); TalkBack labels and the R6 checklist remain device-gated
 - **Verify:** `./gradlew test assembleDebug` green; all five translated books show either their embedded cover or the correct curated fallback; screenshot comparison at phone and Boox widths has no clipping, uneven grid rhythm, or low-contrast controls; TalkBack labels and R6 checklist remain passing.
+
+### S2.10 — JVM screenshot harness at phone + Boox widths (2 pt) ✅
+*Enabling work for S2.9's Verify line, which demands "screenshot comparison at
+phone and Boox widths" — impossible today: no Boox attached and no emulator
+installed on this box (`~/Android/Sdk/emulator/` and `~/.android/avd/` absent).
+Compose UI tests already run JVM-side under Robolectric
+(`gradle/libs.versions.toml:17,35-36`; no `androidTest` source set), so
+screenshots are reachable offline.*
+- [x] Renders 6 surfaces (library, reader chrome ×2, notebook, dictionary
+      sheet, interpretation sheet, settings) to 26 PNGs at two qualifiers —
+      phone 411×914dp@420dpi → 1078×2399px, Boox `w990dp-h1319dp…227dpi` →
+      1404×1871px (1871 not 1872 is dp round-tripping, verified) — light + dark
+- [x] Screenshots written to gitignored `app/build/outputs/roborazzi/s2.10/`;
+      no binaries committed (diff is 9 files, all source)
+- [x] **Deterministic — verified over 5 consecutive runs, all 10 pairwise
+      comparisons identical across all 26 PNGs.** First cut was NOT: Coil's
+      `AsyncImage` decodes on `Dispatchers.IO`, outside Robolectric's looper, so
+      `waitForIdle()` could return before covers painted and `library_boox_dark`
+      flapped between two states (23,008 px, `(0,0,0)` raw canvas vs `#121212`
+      `PaperDark`). Fixed by a JVM-scoped Coil `ImageLoader` on
+      `Dispatchers.Unconfined` — deterministic by construction, not a poll
+- [x] Capture cannot silently no-op: tests report **SKIPPED** (JUnit `Assume`)
+      when `roborazzi.test.record` is unset and assert the PNG exists and is
+      non-empty when it is set. "Passed" can no longer mean "wrote nothing"
+- [x] **Scope honesty:** this does NOT substitute for Rubric R6. R6 is a
+      12-item human visual checklist scored on real e-ink hardware (contrast,
+      ghosting, full-refresh behaviour) — `docs/rubric.md:58`. This harness
+      closes S2.9's screenshot clause only
+- **Verify:** `cd android && JAVA_HOME=… ANDROID_HOME=… ./gradlew <task>` emits
+  a PNG per surface per width with zero test failures; each PNG opens and is
+  visually reviewed for clipping, grid rhythm and control contrast; existing
+  JVM test count does not regress (390 green today).
+- **Verify run 2026-07-25 on merged `main`:** `./gradlew screenshots test` →
+  `screenshots` 26/26 pass, `testDebugUnitTest` 232 (26 skipped, 0 failures),
+  `testReleaseUnitTest` 184 — 416 unique vs the 390 baseline, no regression.
+  26 PNGs: 13 at 1078×2399, 13 at 1404×1871. All 26 programmatically confirmed
+  non-blank (484–28,897 distinct colours, 2.9–65.2% ink); library, reader chrome
+  and settings reviewed visually in depth. Found 3 real defects → **S2.11**.
+
+### S2.11 — Fix defects caught by the screenshot harness (2 pt)
+*Found by S2.10 on its first run, 2026-07-25 — measured from the PNGs, not
+eyeballed. Both classes would cost R6 points on the device (`docs/rubric.md:58`
+scores contrast on e-ink and OLED).*
+- [ ] **Baseline-purple leak via component defaults.** `Theme.kt` pins only
+      `background, error, onBackground, onError, onPrimary, onSurface,
+      onSurfaceVariant, outline, primary, surface, surfaceVariant`. Every role
+      referenced explicitly through `colorScheme.` in app code is pinned — the
+      leak is entirely from **Material3 component defaults** referencing
+      unpinned roles: `FloatingActionButton` → `primaryContainer`/
+      `onPrimaryContainer` (`#EADDFF` on `#210050`, the library's primary
+      action), `LinearProgressIndicator` track → `secondaryContainer`
+      (`#E8DEF8`, reader chrome), `HorizontalDivider` → `outlineVariant`
+      (`#CAC4D0`, settings + reader settings panel). Fix by CLASS: pin every
+      role of both schemes, not just the ones currently referenced
+- [ ] **Reader top bar collapses at phone width.** In `reader/ReaderChrome.kt`
+      the chapter-title `Text` at `weight(1f)` competes with a
+      `horizontalScroll` Row of 6 action buttons; the scrollable sibling
+      measures at its unconstrained preferred width and starves the title,
+      which **disappears entirely rather than ellipsising** despite
+      `overflow = TextOverflow.Ellipsis`. The action row is also clipped
+      mid-word. Renders correctly at Boox width (990 dp) — phone-width only
+- [ ] Regression cover: assert no unpinned-role colour reaches a rendered
+      surface, so this class cannot silently return
+- **Verify:** regenerate via S2.10's `./gradlew screenshots test` and re-run the
+  violet-pixel scan over all 26 PNGs — **zero** pixels matching the M3 baseline
+  violet family (`#EADDFF`, `#210050`, `#E8DEF8`, `#CAC4D0`, `#4F378B`,
+  `#4A4458`); `reader_chrome_phone_light.png` shows the chapter title present
+  and the action row not clipped; JVM test count does not regress (416 with
+  S2.10 landed).
 
 ---
 
