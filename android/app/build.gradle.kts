@@ -156,4 +156,37 @@ dependencies {
     // test API and the ComponentActivity manifest (`ui-test-manifest`) those tests need.
     debugImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+    // S2.10: screenshot harness (JVM/Robolectric only — no Roborazzi Gradle plugin, so no
+    // additional compileSdk requirement on top of the platform-35 ceiling). Pulled in as a
+    // debugImplementation testing library, same as the ui-test artifacts above.
+    debugImplementation(libs.roborazzi)
+    debugImplementation(libs.roborazzi.compose)
+}
+
+// S2.10: JVM screenshot harness. `screenshots` clones testDebugUnitTest's fully-configured
+// classpath/resources (merged Android resources, Robolectric jars — see testOptions.unitTests
+// above) so string/drawable resources resolve, but runs only the screenshot package and always
+// re-executes (no UP-TO-DATE skip) so a rerun always regenerates every PNG. Configured in
+// afterEvaluate: testDebugUnitTest's classpath/systemProperties aren't populated by AGP until
+// its own afterEvaluate wiring has run.
+afterEvaluate {
+    val debugUnitTest = tasks.named<Test>("testDebugUnitTest").get()
+    tasks.register<Test>("screenshots") {
+        group = "verification"
+        description = "Regenerates the S2.10 JVM screenshot harness PNGs (phone + Boox " +
+            "widths, light + dark theme) under build/outputs/roborazzi/."
+        testClassesDirs = debugUnitTest.testClassesDirs
+        classpath = debugUnitTest.classpath
+        systemProperties = debugUnitTest.systemProperties.toMutableMap()
+        jvmArgs = debugUnitTest.jvmArgs
+        filter {
+            includeTestsMatching("app.berilo.reader.screenshot.*")
+            isFailOnNoMatchingTests = true
+        }
+        // Roborazzi is disabled (a silent no-op) unless this system property is set — it's
+        // normally set by Roborazzi's own Gradle plugin, which this project doesn't apply.
+        systemProperty("roborazzi.test.record", "true")
+        outputs.upToDateWhen { false }
+        testLogging { events("passed", "skipped", "failed") }
+    }
 }
