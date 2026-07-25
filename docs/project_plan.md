@@ -254,11 +254,11 @@ screenshots are reachable offline.*
   non-blank (484–28,897 distinct colours, 2.9–65.2% ink); library, reader chrome
   and settings reviewed visually in depth. Found 3 real defects → **S2.11**.
 
-### S2.11 — Fix defects caught by the screenshot harness (2 pt)
+### S2.11 — Fix defects caught by the screenshot harness (2 pt) ✅
 *Found by S2.10 on its first run, 2026-07-25 — measured from the PNGs, not
 eyeballed. Both classes would cost R6 points on the device (`docs/rubric.md:58`
 scores contrast on e-ink and OLED).*
-- [ ] **Baseline-purple leak via component defaults.** `Theme.kt` pins only
+- [x] **Baseline-purple leak via component defaults.** `Theme.kt` pins only
       `background, error, onBackground, onError, onPrimary, onSurface,
       onSurfaceVariant, outline, primary, surface, surfaceVariant`. Every role
       referenced explicitly through `colorScheme.` in app code is pinned — the
@@ -269,14 +269,14 @@ scores contrast on e-ink and OLED).*
       (`#E8DEF8`, reader chrome), `HorizontalDivider` → `outlineVariant`
       (`#CAC4D0`, settings + reader settings panel). Fix by CLASS: pin every
       role of both schemes, not just the ones currently referenced
-- [ ] **Reader top bar collapses at phone width.** In `reader/ReaderChrome.kt`
+- [x] **Reader top bar collapses at phone width.** In `reader/ReaderChrome.kt`
       the chapter-title `Text` at `weight(1f)` competes with a
       `horizontalScroll` Row of 6 action buttons; the scrollable sibling
       measures at its unconstrained preferred width and starves the title,
       which **disappears entirely rather than ellipsising** despite
       `overflow = TextOverflow.Ellipsis`. The action row is also clipped
       mid-word. Renders correctly at Boox width (990 dp) — phone-width only
-- [ ] Regression cover: assert no unpinned-role colour reaches a rendered
+- [x] Regression cover: assert no unpinned-role colour reaches a rendered
       surface, so this class cannot silently return
 - **Verify:** regenerate via S2.10's `./gradlew screenshots test` and re-run the
   violet-pixel scan over all 26 PNGs — **zero** pixels matching the M3 baseline
@@ -286,6 +286,17 @@ scores contrast on e-ink and OLED).*
   S2.10 landed).
 
 ---
+- **Verify run 2026-07-25 on merged `main`** (merge `299014b`): `./gradlew
+  screenshots test` → `screenshots` 26/26, `testDebugUnitTest` 235 (26 skipped),
+  `testReleaseUnitTest` 187 = **422 unique**, 0 failures (390 at session start,
+  416 after S2.10). Violet scan over all 26 PNGs: **0 exact M3-baseline pixels**,
+  down from hits on 5 surfaces. The 364 residual "violet-band" pixels are
+  bundled cover artwork, not palette — they appear at identical counts in light
+  AND dark (34/34 boox, 148/148 phone), which theme colours never would, and the
+  agent independently traced them to the `cover_*.webp` drawables. Determinism
+  re-verified: 5 runs, all 10 pairwise comparisons identical.
+  `ThemeContrastTest` now enumerates all 48 roles as a permanent guard and was
+  proven to fail without the fix (catching `#EADDFF` and `#4F378B` by name).
 
 ## Phase 3 — Cloud sync & web review (milestone `m3`) — target: Rubric S ≥ 85
 > Lives in **private repo `berilo-cloud`**; this repo only gains the app-side
