@@ -37,6 +37,7 @@ class SettingsScreenshotTest {
         )
 
     private fun render(width: String, useDarkTheme: Boolean, theme: String) {
+        ScreenshotOutput.assumeRecording()
         composeRule.setContent {
             BeriloTheme(useDarkTheme = useDarkTheme) {
                 Surface {
@@ -54,7 +55,9 @@ class SettingsScreenshotTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onRoot().captureRoboImage(ScreenshotOutput.file("settings", width, theme))
+        val file = ScreenshotOutput.file("settings", width, theme)
+        composeRule.onRoot().captureRoboImage(file)
+        ScreenshotOutput.assertCaptured(file)
     }
 
     @Config(sdk = [35], qualifiers = ScreenshotQualifiers.PHONE)

@@ -69,6 +69,7 @@ class LibraryScreenshotTest {
         )
 
     private fun render(width: String, qualifiers: String, useDarkTheme: Boolean, theme: String) {
+        ScreenshotOutput.assumeRecording()
         composeRule.setContent {
             BeriloTheme(useDarkTheme = useDarkTheme) {
                 Surface {
@@ -83,8 +84,9 @@ class LibraryScreenshotTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onRoot()
-            .captureRoboImage(ScreenshotOutput.file("library", width, theme))
+        val file = ScreenshotOutput.file("library", width, theme)
+        composeRule.onRoot().captureRoboImage(file)
+        ScreenshotOutput.assertCaptured(file)
     }
 
     @Config(sdk = [35], qualifiers = ScreenshotQualifiers.PHONE)

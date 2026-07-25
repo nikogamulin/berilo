@@ -37,6 +37,7 @@ class InterpretationSheetScreenshotTest {
         )
 
     private fun render(width: String, useDarkTheme: Boolean, theme: String) {
+        ScreenshotOutput.assumeRecording()
         composeRule.setContent {
             BeriloTheme(useDarkTheme = useDarkTheme) {
                 Surface {
@@ -45,7 +46,9 @@ class InterpretationSheetScreenshotTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onRoot().captureRoboImage(ScreenshotOutput.file("interpretation", width, theme))
+        val file = ScreenshotOutput.file("interpretation", width, theme)
+        composeRule.onRoot().captureRoboImage(file)
+        ScreenshotOutput.assertCaptured(file)
     }
 
     @Config(sdk = [35], qualifiers = ScreenshotQualifiers.PHONE)

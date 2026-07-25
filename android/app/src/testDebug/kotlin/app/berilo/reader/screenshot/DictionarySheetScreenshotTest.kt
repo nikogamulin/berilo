@@ -44,6 +44,7 @@ class DictionarySheetScreenshotTest {
         )
 
     private fun render(width: String, useDarkTheme: Boolean, theme: String) {
+        ScreenshotOutput.assumeRecording()
         composeRule.setContent {
             BeriloTheme(useDarkTheme = useDarkTheme) {
                 Surface {
@@ -52,7 +53,9 @@ class DictionarySheetScreenshotTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onRoot().captureRoboImage(ScreenshotOutput.file("dictionary", width, theme))
+        val file = ScreenshotOutput.file("dictionary", width, theme)
+        composeRule.onRoot().captureRoboImage(file)
+        ScreenshotOutput.assertCaptured(file)
     }
 
     @Config(sdk = [35], qualifiers = ScreenshotQualifiers.PHONE)

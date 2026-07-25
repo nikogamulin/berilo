@@ -70,6 +70,7 @@ class ReaderChromeScreenshotTest {
         )
 
     private fun render(surface: String, width: String, panel: ReaderPanel, useDarkTheme: Boolean, theme: String) {
+        ScreenshotOutput.assumeRecording()
         composeRule.setContent {
             BeriloTheme(useDarkTheme = useDarkTheme) {
                 Surface {
@@ -78,7 +79,9 @@ class ReaderChromeScreenshotTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onRoot().captureRoboImage(ScreenshotOutput.file(surface, width, theme))
+        val file = ScreenshotOutput.file(surface, width, theme)
+        composeRule.onRoot().captureRoboImage(file)
+        ScreenshotOutput.assertCaptured(file)
     }
 
     @Config(sdk = [35], qualifiers = ScreenshotQualifiers.PHONE)

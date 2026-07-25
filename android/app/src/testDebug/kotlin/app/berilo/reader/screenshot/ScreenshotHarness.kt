@@ -1,6 +1,7 @@
 package app.berilo.reader.screenshot
 
 import java.io.File
+import org.junit.Assume
 
 /**
  * S2.10: two device qualifiers all screenshot tests render at, standing in for the two
@@ -38,5 +39,44 @@ internal object ScreenshotOutput {
     fun file(surface: String, width: String, theme: String): File {
         ROOT_DIR.mkdirs()
         return File(ROOT_DIR, "${surface}_${width}_${theme}.png")
+    }
+
+    /**
+     * Roborazzi's `captureRoboImage` is a silent no-op — the call returns normally, writing
+     * nothing — unless this system property is `"true"` (normally set by Roborazzi's own
+     * Gradle plugin, which this project doesn't apply; the `screenshots` task in
+     * app/build.gradle.kts sets it explicitly instead). Without a guard, every render() would
+     * report "passed" on a plain `./gradlew test` run while writing zero PNGs — exactly the
+     * silent-gate failure mode CLAUDE.md §9 warns about for caches/gates that can't see the
+     * thing they certify.
+     */
+    private const val RECORD_PROPERTY = "roborazzi.test.record"
+
+    /**
+     * Skips the test (JUnit `Assume` — reported as "skipped", never "passed") when Roborazzi
+     * isn't in record mode, so a plain `./gradlew test` (no [RECORD_PROPERTY]) stays green
+     * without ever claiming a screenshot was written and reviewed. Call this before composing
+     * any content, so the skip is cheap and unambiguous.
+     */
+    fun assumeRecording() {
+        Assume.assumeTrue(
+            "Skipping: -D$RECORD_PROPERTY=true not set (run the `screenshots` Gradle task, " +
+                "not plain `test`/`testDebugUnitTest` — captureRoboImage() would otherwise " +
+                "silently write nothing and this test would misreport PASSED).",
+            System.getProperty(RECORD_PROPERTY) == "true",
+        )
+    }
+
+    /**
+     * Fails loudly, naming the file and the property, if a capture that should have run (see
+     * [assumeRecording]) didn't actually produce a non-empty PNG. Every `render()` helper
+     * calls this right after `captureRoboImage` — "passed" must never mean "wrote nothing".
+     */
+    fun assertCaptured(file: File) {
+        assert(file.exists() && file.length() > 0L) {
+            "captureRoboImage did not write ${file.path} (missing or empty) even though " +
+                "-D$RECORD_PROPERTY=true was set, so this is a real capture failure, not a " +
+                "skip — check the Roborazzi/Robolectric setup, not this assertion."
+        }
     }
 }
