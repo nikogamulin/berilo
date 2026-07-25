@@ -93,6 +93,13 @@
 - [ ] `--dry-run` prints the plan, judge-call count and estimated cost without spending
 - **Verify:** offline — `python3 -m pytest tests/ -k experiment` green with mocked translate+judge, asserting the harness calls `translate_book` (not a bespoke path), that control and variant do not collide in the cache, and that the reported CI is cluster-bootstrapped. Live (Supervisor, ≤ €0.10): `berilo ab "data/examples/The Revenge of Geography.sl.epub" --variant sl_style_v1 --dry-run` then one real run inside budget.
 
+### S1.13 — Fix chapter-title fallback when TOC/nav fails to parse (2 pt)
+*Defect found by the E1 calibration run, 2026-07-25. Gates a clean E3 measurement because Kaplan is the chosen book.*
+- [ ] When both `toc.ncx` and the nav document fail to resolve (manifest names absent from the archive), fall back to per-spine-item headings rather than to the book title. Today 94.9% of Kaplan's segments inherit the book title, which makes rubric v1.1's front/back-matter fold inert and lets untranslated TOC headings into the body-prose pool
+- [ ] Heading-like segments that are byte-identical to their source after translation must be typed out of the PARAGRAPH prose pool (they are headings, not prose) — fix by CLASS per §9, never per instance
+- [ ] Emit a loud warning (not the current cosmetic one) when the title-fallback share exceeds a threshold — a silent 95% fallback is how this hid
+- **Verify:** title-fallback share for all five example books printed and **< 50% each** (Kaplan is 94.9% today); `berilo eval "…Revenge of Geography.sl.epub" --sample 30 --seed 42 --dump` contains **zero** samples whose target is byte-identical to its English source; `make test && make lint` green.
+
 ### S1.12 — Promote the winning prompt (2 pt) — *blocked on S1.11 experiment results*
 - [ ] Winning variant becomes the default style; findings + ledger record the paired deltas
 - [ ] One full book re-translated and re-scored (**needs Niko's go-ahead, ~€0.8**)

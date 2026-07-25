@@ -19,6 +19,29 @@
   mean before** the bootstrap arrays (`rubric_t.py`). Flattening N repeats of M
   samples into one N×M array would fake an N-fold larger sample and shrink the
   CI without adding information — the tempting-but-wrong implementation.
+- [2026-07-25] **E1 calibration verdict (€0.145, Kaplan, sample 30, repeats 3):
+  the fluency ceiling is REAL, not a judge artifact.** Judge intra-sample
+  σ=0.18 (T3) / 0.22 (T2) — highly reproducible — and the verdict distribution
+  is a full spread (1:2, 2:5, 3:10, 4:8, **5:5**). The judge awards 5/5
+  ("indistinguishable from professional native prose") to 5 of 30 samples, so it
+  is not floored at 3 by prompt design. **The score distribution is a cheaper
+  discriminator than a human-prose control** — if a judge already gives top
+  marks to some of your own output, its ceiling is not what is limiting you.
+- [2026-07-25] **Kaplan (Revenge of Geography) has a book-specific normalize
+  defect: its `toc.ncx` AND nav document both fail to parse (names in the
+  manifest do not match the archive), so 94.9% of segments (1228/1294) fall back
+  to the BOOK TITLE as `chapter_title`.** Rubric v1.1's front/back-matter fold
+  keys on chapter titles, so on this book the fold is inert — it excludes 6 of
+  47 chapters while the real front matter and TOC heading lines sit inside the
+  1228-segment fallback bucket and pollute the "body prose" pool. Visible
+  symptom: 2/30 sampled "body prose" segments were untranslated English headings
+  ("THE REVENGE OF GEOGRAPHY", "Chapter III: Herodotus and His Successors")
+  scored fluency 1.0. Removing just those two moves mean fluency 3.21→3.37
+  (T3 12.8→~13.5). Also the likely cause of this book's T4 outlier (7.57 vs
+  9.08–9.87 elsewhere). **Book-specific, verified by scanning all five:** title
+  fallback share is 32.8% / 17.3% / **94.9%** / 40.4% / 32.3%. A "could not parse
+  nav/ncx" warning is therefore NOT always cosmetic — check the title-fallback
+  share before dismissing it.
 - [2026-07-25] **T3 fluency is flat at 12.4–13.5/20 across all 5 books**, every
   source format and genre (mean judge ≈ 3.1–3.4/5), while T2 sits at 4.2/5 and
   T1/T5 are perfect. A dimension invariant across 5 different books is systemic
