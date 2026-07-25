@@ -17,7 +17,7 @@ import pytest
 _CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
-    <rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>
+    <rootfile full-path="{opf_path}" media-type="application/oebps-package+xml"/>
   </rootfiles>
 </container>
 """
@@ -30,6 +30,7 @@ def _content_opf(
     items: list[dict[str, Any]],
     include_ncx: bool,
     nav_href: str | None,
+    ncx_href: str = "toc.ncx",
 ) -> str:
     creators = "".join(f"<dc:creator>{author}</dc:creator>" for author in authors)
     manifest_entries = "\n".join(
@@ -38,7 +39,7 @@ def _content_opf(
     )
     spine_entries = "\n".join(f'    <itemref idref="{item["id"]}"/>' for item in items)
     ncx_entry = (
-        '    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n'
+        f'    <item id="ncx" href="{ncx_href}" media-type="application/x-dtbncx+xml"/>\n'
         if include_ncx
         else ""
     )
@@ -134,6 +135,8 @@ def write_epub(
     language: str = "en",
     include_ncx: bool = True,
     nav_toc: list[tuple[str, str]] | None = None,
+    opf_dir: str = "",
+    declared_ncx_href: str | None = None,
 ) -> Path:
     """Write a minimal synthetic EPUB at *destination*.
 
@@ -153,26 +156,43 @@ def write_epub(
         nav_toc: ``(href, title)`` pairs to write into an EPUB3 nav
             document (``nav.xhtml``, ``properties="nav"``) used as the TOC
             source when *include_ncx* is False.
+        opf_dir: Zip-internal directory holding the OPF and every document it
+            names (``""`` puts them at the archive root). Manifest hrefs stay
+            relative to the OPF, so this exercises href resolution.
+        declared_ncx_href: NCX href written into the manifest when it must
+            differ from the archive entry (``toc.ncx``) — repackaged books
+            name a TOC document that is not there under that name.
 
     Returns:
         *destination*, for convenient chaining.
     """
     authors = authors if authors is not None else ["Test Author"]
     nav_href = "nav.xhtml" if nav_toc else None
+    prefix = f"{opf_dir}/" if opf_dir else ""
     with zipfile.ZipFile(destination, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip")
-        archive.writestr("META-INF/container.xml", _CONTAINER_XML)
         archive.writestr(
-            "content.opf",
-            _content_opf(title, authors, language, items, include_ncx, nav_href),
+            "META-INF/container.xml", _CONTAINER_XML.format(opf_path=f"{prefix}content.opf")
+        )
+        archive.writestr(
+            f"{prefix}content.opf",
+            _content_opf(
+                title,
+                authors,
+                language,
+                items,
+                include_ncx,
+                nav_href,
+                ncx_href=declared_ncx_href or "toc.ncx",
+            ),
         )
         if include_ncx:
-            archive.writestr("toc.ncx", _toc_ncx(items))
+            archive.writestr(f"{prefix}toc.ncx", _toc_ncx(items))
         if nav_href:
-            archive.writestr(nav_href, _nav_toc_doc(nav_toc or []))
+            archive.writestr(f"{prefix}{nav_href}", _nav_toc_doc(nav_toc or []))
         for item in items:
             archive.writestr(
-                item["href"],
+                f"{prefix}{item['href']}",
                 _xhtml_doc(item.get("doc_title", item["href"]), item["body"]),
             )
     return destination

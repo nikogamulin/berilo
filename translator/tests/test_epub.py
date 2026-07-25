@@ -9,6 +9,8 @@ is absent, e.g. in CI.
 from __future__ import annotations
 
 import json
+import logging
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -19,10 +21,19 @@ from berilo.models import SegmentType
 from berilo.normalize import normalize
 from berilo.normalize.epub import normalize_epub
 
-EXAMPLE_EPUB = Path(__file__).parents[2] / "data" / "examples" / "The New Rules of War.epub"
+_EXAMPLES = Path(__file__).parents[2] / "data" / "examples"
+EXAMPLE_EPUB = _EXAMPLES / "The New Rules of War.epub"
+KAPLAN_EPUB = _EXAMPLES / (
+    "The Revenge of Geography What the Map Tells Us About Coming Conflicts "
+    "and the Battle Against Fate (Robert D. Kaplan) (z-library.sk, 1lib.sk, z-lib.sk).epub"
+)
 
 MIN_EXAMPLE_SEGMENTS = 500
 MIN_EXAMPLE_CHAPTERS = 8
+
+#: S1.13: no example book may concentrate this share of its segments on one
+#: chapter title — above it, rubric T's front/back-matter fold goes inert.
+MAX_TITLE_CONCENTRATION = 0.5
 
 
 def test_segment_order_matches_document_order(epub_builder) -> None:
@@ -312,6 +323,224 @@ def test_inspect_missing_file_exits_nonzero() -> None:
 
     assert result.exit_code == 1
     assert "inspect:" in result.output
+
+
+def test_toc_ncx_resolved_when_manifest_names_a_missing_file(epub_builder) -> None:
+    """S1.13: a manifest NCX href absent from the archive still resolves.
+
+    Repackaged books declare a TOC document under a name the archive does not
+    contain. Before the fix both TOC parses failed and every chapter title
+    collapsed onto the book title.
+    """
+    path = epub_builder(
+        items=[
+            {
+                "id": "c1",
+                "href": "c1.xhtml",
+                "nav_title": "The Real Title",
+                "doc_title": "Test Book",
+                "body": "<p>Body text.</p>",
+            }
+        ],
+        declared_ncx_href="9780000000000_ncx.ncx",
+    )
+
+    book = normalize_epub(path)
+
+    assert book.segments[0].chapter_title == "The Real Title"
+
+
+def test_toc_ncx_href_is_resolved_against_the_opf_directory(epub_builder) -> None:
+    """S1.13: manifest hrefs are relative to the OPF, not to the archive root."""
+    path = epub_builder(
+        items=[
+            {
+                "id": "c1",
+                "href": "c1.xhtml",
+                "nav_title": "The Real Title",
+                "doc_title": "Test Book",
+                "body": "<p>Body text.</p>",
+            }
+        ],
+        opf_dir="OEBPS",
+    )
+
+    book = normalize_epub(path)
+
+    assert book.segments[0].chapter_title == "The Real Title"
+
+
+def test_spine_document_without_toc_entry_continues_previous_chapter(epub_builder) -> None:
+    """S1.13: TOC entries mark chapter starts; an entry-less document continues one.
+
+    The chapter-opening stub ("Chapter II") is the only document in the TOC;
+    the body document that follows it must inherit that title rather than the
+    book title.
+    """
+    path = epub_builder(
+        items=[
+            {
+                "id": "c1",
+                "href": "c1.xhtml",
+                "nav_title": "Chapter II: The Real Title",
+                "doc_title": "Test Book",
+                "body": "<p>Chapter II</p>",
+            },
+            {
+                "id": "c2",
+                "href": "c2.xhtml",
+                "nav_title": None,
+                "doc_title": "Test Book",
+                "body": "<p>Body text of chapter two.</p>",
+            },
+        ]
+    )
+
+    book = normalize_epub(path)
+
+    assert [segment.chapter_title for segment in book.segments] == [
+        "Chapter II: The Real Title",
+        "Chapter II: The Real Title",
+    ]
+
+
+def test_chapter_title_prefers_document_heading_over_book_title(epub_builder) -> None:
+    """S1.13: with no TOC at all, an in-document heading outranks the book title."""
+    path = epub_builder(
+        items=[
+            {
+                "id": "c1",
+                "href": "c1.xhtml",
+                "nav_title": None,
+                "doc_title": "Test Book",
+                "body": "<h1>A Real Heading</h1><p>Body text.</p>",
+            }
+        ],
+        include_ncx=False,
+    )
+
+    book = normalize_epub(path)
+
+    assert {segment.chapter_title for segment in book.segments} == {"A Real Heading"}
+
+
+def test_chapter_title_falls_back_to_book_title_without_any_heading(epub_builder) -> None:
+    """S1.13: the book title stays the last resort when a document has no heading."""
+    path = epub_builder(
+        items=[
+            {
+                "id": "c1",
+                "href": "c1.xhtml",
+                "nav_title": None,
+                "doc_title": "Test Book",
+                "body": "<p>Body text.</p>",
+            }
+        ],
+        include_ncx=False,
+    )
+
+    book = normalize_epub(path)
+
+    assert book.segments[0].chapter_title == "Test Book"
+
+
+def test_wholly_bold_short_paragraph_is_typed_as_heading(epub_builder) -> None:
+    """S1.13: a <p> whose whole text is bold is a heading, not prose.
+
+    Calibre MOBI→EPUB conversions emit no <h1>-<h6>; every heading is a
+    bold-classed <p>. Retyping (never dropping) keeps the 1:1 mapping while
+    taking the heading out of the PARAGRAPH prose pool.
+    """
+    path = epub_builder(
+        items=[
+            {
+                "id": "c1",
+                "href": "c1.xhtml",
+                "nav_title": "Chapter One",
+                "body": (
+                    '<p class="calibre5"><span class="calibre13">'
+                    '<span class="bold">THE REVENGE OF GEOGRAPHY</span></span></p>'
+                    "<p><b>Chapter II</b></p>"
+                    "<p>Ordinary prose with a <b>bold phrase</b> inside it.</p>"
+                    f"<p><b>{'Bold but far too long to be a heading. ' * 5}</b></p>"
+                ),
+            }
+        ]
+    )
+
+    book = normalize_epub(path)
+
+    types = [(segment.type, segment.text[:24]) for segment in book.segments]
+    assert types[0] == (SegmentType.HEADING, "THE REVENGE OF GEOGRAPHY")
+    assert types[1] == (SegmentType.HEADING, "<b>Chapter II</b>")
+    assert types[2][0] == SegmentType.PARAGRAPH
+    assert types[3][0] == SegmentType.PARAGRAPH
+    # Retyped, never dropped: every block still yields exactly one segment.
+    assert len(book.segments) == 4
+    assert {segment.heading_level for segment in book.segments[:2]} == {2}
+
+
+def test_collapsed_chapter_titles_are_logged_loudly(epub_builder, caplog) -> None:
+    """S1.13: a title collapse is reported at ERROR level, not silently."""
+    path = epub_builder(
+        items=[
+            {
+                "id": f"c{index}",
+                "href": f"c{index}.xhtml",
+                "nav_title": None,
+                "doc_title": "Test Book",
+                "body": f"<p>Body text {index}.</p>",
+            }
+            for index in range(3)
+        ],
+        include_ncx=False,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="berilo.normalize.epub"):
+        normalize_epub(path)
+
+    assert any(
+        record.levelno == logging.ERROR and "Chapter titles did not resolve" in record.getMessage()
+        for record in caplog.records
+    ), caplog.text
+    assert "(the book title)" in caplog.text
+
+
+def test_resolved_chapter_titles_log_no_error(epub_builder, caplog) -> None:
+    """S1.13: the loud warning stays quiet when chapter titles resolve normally."""
+    path = epub_builder(
+        items=[
+            {
+                "id": f"c{index}",
+                "href": f"c{index}.xhtml",
+                "nav_title": f"Chapter {index}",
+                "body": f"<p>Body text {index}.</p>",
+            }
+            for index in range(3)
+        ]
+    )
+
+    with caplog.at_level(logging.ERROR, logger="berilo.normalize.epub"):
+        normalize_epub(path)
+
+    assert caplog.records == []
+
+
+@pytest.mark.skipif(
+    not KAPLAN_EPUB.exists(), reason="data/examples Kaplan EPUB not present (worktree/CI)"
+)
+def test_kaplan_chapter_titles_do_not_collapse() -> None:
+    """S1.13 Verify line: no example book concentrates titles on one bucket.
+
+    Kaplan sat at 94.9% before the fix, which made rubric T v1.1's
+    front/back-matter fold inert.
+    """
+    book = normalize_epub(KAPLAN_EPUB)
+
+    _, top_count = Counter(s.chapter_title for s in book.segments).most_common(1)[0]
+    assert top_count / len(book.segments) < MAX_TITLE_CONCENTRATION
+    # The book has no <h1>-<h6> at all: its headings are bold-classed <p>.
+    assert any(segment.type == SegmentType.HEADING for segment in book.segments)
 
 
 @pytest.mark.skipif(not EXAMPLE_EPUB.exists(), reason="data/examples example EPUB not present")
