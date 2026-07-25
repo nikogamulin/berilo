@@ -21,6 +21,9 @@ line-break hyphens. This module reconstructs the logical document:
    Notes/Index running header — and only high-confidence headings inside that
    bracket open a chapter, so OCR debris on scanned notes/index pages and
    cover/praise front matter cannot inflate the chapter count.
+6. **Carry images.** Figure-sized embedded images are extracted with their
+   page geometry and attached as book-level resources anchored to the segment
+   they follow — never as segments, which would shift every later segment id.
 
 The result is a :class:`~berilo.models.Book` whose segments carry a 1:1
 mapping to the logical paragraphs and headings of the source — no segment is
@@ -36,6 +39,7 @@ excluded from the clean-prose sample.
 from __future__ import annotations
 
 import bisect
+import hashlib
 import logging
 import re
 from collections import Counter
@@ -45,7 +49,7 @@ from statistics import median
 
 import fitz
 
-from berilo.models import Book, Segment, SegmentType, make_segment_id
+from berilo.models import Book, ImageResource, Segment, SegmentType, make_segment_id
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +250,56 @@ _TRAILING_CLOSERS = "”’\"')]»"
 _VOWEL_RUN_RE = re.compile(r"[aeiou]{3,}")
 _CONSONANT_RUN_RE = re.compile(r"[bcdfghjklmnpqrstvwxz]{4,}")
 
+# --- Image extraction constants ---------------------------------------------
+
+# An embedded image smaller than this on either axis is decoration (a rule, a
+# drop-cap ornament, a bullet glyph), not a figure worth carrying.
+MIN_IMAGE_DIMENSION_PX = 64
+
+# An image covering at least this share of the page area is a full-page SCAN,
+# not a figure: OCR-sourced PDFs place the whole page bitmap behind the text
+# layer, and carrying those would embed a photographic copy of the whole book
+# (untranslated English) alongside the translated text.
+#
+# Measured on the two example PDFs, which look alike (both ~530 pages, both
+# with a text layer — a text layer does NOT discriminate) and are opposites:
+#   Active Measures  109 placements, coverage p50=0.21 p90=0.32, ONE at >=0.9
+#   World Ends      1064 placements, coverage min=max=1.000, ALL at >=0.9
+# The two populations do not overlap, so any cut in (0.32, 1.0) separates
+# them; 0.9 keeps a genuine near-full-page plate on the figure side.
+FULL_PAGE_IMAGE_AREA_RATIO = 0.9
+
+# Book-level scan detector, applied before any image is decoded. A book where
+# this share of pages carries a page-sized image is a scan front to back, so
+# image extraction is skipped wholesale rather than per instance (CLAUDE.md §9:
+# fix quality gates by CLASS). Deliberately uses a LOWER per-image bar than
+# FULL_PAGE_IMAGE_AREA_RATIO so a scanned book whose rasters sit inside a
+# margin — and would individually slip under the full-page test — is still
+# caught as a book.
+# Measured: World Ends 532/532 pages (100%); Active Measures 1/522 (0.2%).
+SCANNED_PAGE_IMAGE_AREA_RATIO = 0.5
+SCANNED_BOOK_PAGE_SHARE = 0.5
+
+# The same image appearing on at least this many pages is furniture (a logo,
+# a watermark, a chapter ornament) — mirrors RUNNING_HEAD_MIN_PAGES.
+RECURRING_IMAGE_MIN_PAGES = 3
+
+# A caption belongs to an image when it starts within this many body lines of
+# the image's vertical extent — below the plate (the common case) or above it
+# (older illustrated books print the figure line first).
+CAPTION_PROXIMITY_LINES = 4
+
+# EPUB 3 core image media types: anything else needs a manifest fallback to
+# validate, so non-core formats are re-encoded to PNG instead of passed through.
+_PDF_IMAGE_MEDIA_TYPES = {
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "gif": "image/gif",
+    "webp": "image/webp",
+}
+_PNG_MEDIA_TYPE = "image/png"
+
 
 @dataclass(frozen=True)
 class _Line:
@@ -268,6 +322,27 @@ class _Line:
     in_band: bool
 
 
+@dataclass(frozen=True)
+class _PdfImage:
+    """One embedded image with the geometry anchoring needs.
+
+    Attributes:
+        data: Encoded image bytes, as stored in the PDF (or re-encoded PNG).
+        media_type: IANA media type of ``data``.
+        page_index: Zero-based source page index.
+        y0: Top edge of the image's bounding box on the page.
+        y1: Bottom edge of the image's bounding box on the page.
+        digest: sha1 of ``data``, used to de-duplicate repeated artwork.
+    """
+
+    data: bytes
+    media_type: str
+    page_index: int
+    y0: float
+    y1: float
+    digest: str
+
+
 def normalize_pdf(path: Path) -> Book:
     """Parse a PDF file into a :class:`~berilo.models.Book`.
 
@@ -284,6 +359,11 @@ def normalize_pdf(path: Path) -> Book:
     path = Path(path)
     with fitz.open(path) as doc:
         pages = [_extract_page_lines(doc[i], i) for i in range(doc.page_count)]
+        page_images = (
+            []
+            if _is_scanned_book(doc)
+            else [_extract_page_images(doc[i], i) for i in range(doc.page_count)]
+        )
         toc = doc.get_toc(simple=True) or []
         metadata = doc.metadata or {}
     title = metadata.get("title") or path.stem
@@ -297,18 +377,21 @@ def normalize_pdf(path: Path) -> Book:
     toc_starts = _toc_content_starts(toc)
     if toc_starts:
         back_start_page = _toc_back_matter_start(toc, toc_starts)
-        segments = _assign_toc_chapters(blocks, toc_starts, back_start_page, body_size)
+        segments, kept_blocks = _assign_toc_chapters(blocks, toc_starts, back_start_page, body_size)
     else:
         front_end = _front_matter_end_page(pages)
         back_start = _back_matter_start_page(pages)
-        segments = _assign_heuristic_chapters(blocks, body_size, front_end, back_start)
+        segments, kept_blocks = _assign_heuristic_chapters(blocks, body_size, front_end, back_start)
+
+    images = _anchor_images(_select_images(page_images), kept_blocks, segments, body_size)
 
     authors = [author] if author else []
     logger.info(
-        "normalized PDF %s: %d segments across %d chapters",
+        "normalized PDF %s: %d segments across %d chapters, %d images",
         path.name,
         len(segments),
         len({seg.chapter_index for seg in segments}),
+        len(images),
     )
     return Book(
         title=title,
@@ -317,6 +400,7 @@ def normalize_pdf(path: Path) -> Book:
         source_path=str(path),
         source_format="pdf",
         segments=segments,
+        images=images,
     )
 
 
@@ -359,6 +443,229 @@ def _extract_page_lines(page: fitz.Page, page_index: int) -> list[_Line]:
             )
     lines.sort(key=lambda ln: (round(ln.y0, 1), ln.x0))
     return lines
+
+
+def _image_media_type(data: bytes, ext: str) -> tuple[bytes, str] | None:
+    """Return ``(bytes, media type)`` for an extracted image, or ``None``.
+
+    Formats outside the EPUB 3 core set (JPEG 2000, TIFF, ...) would need a
+    manifest fallback to validate, so they are re-encoded to PNG instead.
+
+    Args:
+        data: Encoded image bytes as stored in the PDF.
+        ext: PyMuPDF's format name for those bytes (``"png"``, ``"jpeg"``...).
+
+    Returns:
+        The (possibly re-encoded) bytes and their media type, or ``None`` if
+        the image could not be decoded.
+    """
+    media_type = _PDF_IMAGE_MEDIA_TYPES.get(ext.lower())
+    if media_type:
+        return data, media_type
+    try:
+        pixmap = fitz.Pixmap(data)
+        if pixmap.colorspace is not None and pixmap.n - pixmap.alpha > 3:
+            pixmap = fitz.Pixmap(fitz.csRGB, pixmap)
+        return pixmap.tobytes("png"), _PNG_MEDIA_TYPE
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("Could not re-encode a %s image to PNG: %s", ext, exc)
+        return None
+
+
+def _is_scanned_book(doc: fitz.Document) -> bool:
+    """True if *doc* is a page-by-page scan rather than a text PDF with figures.
+
+    Surveys geometry only (``page.get_image_info()`` returns bounding boxes
+    without materializing pixel data), so a 532-page scan costs ~0.3s to
+    reject instead of decoding a thousand full-page rasters. A text layer does
+    NOT discriminate — both example PDFs have one; page coverage does.
+
+    Args:
+        doc: The open PyMuPDF document.
+
+    Returns:
+        True if at least :data:`SCANNED_BOOK_PAGE_SHARE` of pages carry a
+        page-sized image, in which case no image is worth extracting.
+    """
+    if not doc.page_count:
+        return False
+    scanned_pages = 0
+    for index in range(doc.page_count):
+        page = doc[index]
+        page_area = abs(page.rect.get_area()) or 1.0
+        if any(
+            abs(fitz.Rect(info["bbox"]).get_area()) / page_area >= SCANNED_PAGE_IMAGE_AREA_RATIO
+            for info in page.get_image_info()
+        ):
+            scanned_pages += 1
+    share = scanned_pages / doc.page_count
+    if share < SCANNED_BOOK_PAGE_SHARE:
+        return False
+    logger.info(
+        "skipping image extraction: %.0f%% of pages (%d/%d) carry a page-sized "
+        "image, so this PDF is a scan, not an illustrated text",
+        share * 100,
+        scanned_pages,
+        doc.page_count,
+    )
+    return True
+
+
+def _extract_page_images(page: fitz.Page, page_index: int) -> list[_PdfImage]:
+    """Extract the figure-sized images embedded on one page.
+
+    Decorative sub-:data:`MIN_IMAGE_DIMENSION_PX` artwork and full-page scans
+    (see :data:`FULL_PAGE_IMAGE_AREA_RATIO`) are dropped here; cross-page
+    de-duplication happens later in :func:`_select_images`.
+
+    Args:
+        page: The PyMuPDF page.
+        page_index: Zero-based index of this page in the document.
+
+    Returns:
+        Kept images in reading order (top-to-bottom).
+    """
+    page_area = abs(page.rect.get_area()) or 1.0
+    images: list[_PdfImage] = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 1:
+            continue
+        data = block.get("image")
+        if not data:
+            continue
+        if min(block.get("width", 0), block.get("height", 0)) < MIN_IMAGE_DIMENSION_PX:
+            continue
+        bbox = fitz.Rect(block["bbox"])
+        if abs(bbox.get_area()) / page_area >= FULL_PAGE_IMAGE_AREA_RATIO:
+            continue
+        encoded = _image_media_type(data, block.get("ext", ""))
+        if encoded is None:
+            continue
+        payload, media_type = encoded
+        images.append(
+            _PdfImage(
+                data=payload,
+                media_type=media_type,
+                page_index=page_index,
+                y0=bbox.y0,
+                y1=bbox.y1,
+                digest=hashlib.sha1(payload).hexdigest(),
+            )
+        )
+    images.sort(key=lambda image: (round(image.y0, 1), image.digest))
+    return images
+
+
+def _select_images(pages: list[list[_PdfImage]]) -> list[_PdfImage]:
+    """Drop recurring furniture and repeats, keeping one copy of each image.
+
+    An image whose bytes recur on :data:`RECURRING_IMAGE_MIN_PAGES` or more
+    distinct pages is a logo/watermark and is dropped entirely; every other
+    image is kept once, at its first occurrence.
+
+    Args:
+        pages: Per-page extracted images, in page order.
+
+    Returns:
+        The kept images in document order.
+    """
+    page_counts: Counter[str] = Counter()
+    for page in pages:
+        page_counts.update({image.digest for image in page})
+    furniture = {
+        digest for digest, count in page_counts.items() if count >= RECURRING_IMAGE_MIN_PAGES
+    }
+
+    kept: list[_PdfImage] = []
+    seen: set[str] = set()
+    for page in pages:
+        for image in page:
+            if image.digest in furniture or image.digest in seen:
+                continue
+            seen.add(image.digest)
+            kept.append(image)
+    if furniture:
+        logger.info("dropped %d recurring image(s) as page furniture", len(furniture))
+    return kept
+
+
+def _caption_block_below(image: _PdfImage, blocks: list[_Block], body_size: float) -> int | None:
+    """Index of the one caption block that unambiguously belongs to *image*.
+
+    A caption belongs to an image when it is the ONLY caption on that page
+    starting within :data:`CAPTION_PROXIMITY_LINES` body lines of the image's
+    vertical extent. With zero or several candidates the geometry is
+    ambiguous and nothing is re-attached.
+
+    Captions are segments and are never moved (moving one would change its
+    position and therefore its id); it is the image that moves to sit in
+    front of its caption.
+
+    Args:
+        image: The image to attach a caption to.
+        blocks: Kept blocks, parallel to the book's segments.
+        body_size: Estimated body font size (the line-height unit).
+
+    Returns:
+        The index into *blocks* of the matching caption, or ``None``.
+    """
+    slack = body_size * CAPTION_PROXIMITY_LINES
+    candidates = [
+        index
+        for index, block in enumerate(blocks)
+        if block.kind is SegmentType.CAPTION
+        and block.page_index == image.page_index
+        and image.y0 - slack <= block.y0 <= image.y1 + slack
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _anchor_images(
+    images: list[_PdfImage],
+    blocks: list[_Block],
+    segments: list[Segment],
+    body_size: float,
+) -> list[ImageResource]:
+    """Bind each extracted image to the segment it follows.
+
+    The default anchor is the last block starting at or above the image. When
+    a caption sits just below the image (see :func:`_caption_block_below`) the
+    anchor moves to the block BEFORE that caption, so the rendered caption
+    once again follows its own figure.
+
+    Args:
+        images: Kept images in document order.
+        blocks: Kept blocks, index-parallel to *segments*.
+        segments: The book's segments in document order.
+        body_size: Estimated body font size.
+
+    Returns:
+        Book-level image resources in document order.
+    """
+    if not segments:
+        return []
+    keys = [(block.page_index, block.y0) for block in blocks]
+    resources: list[ImageResource] = []
+    for image in images:
+        anchor = bisect.bisect_right(keys, (image.page_index, image.y0)) - 1
+        caption = _caption_block_below(image, blocks, body_size)
+        if caption is not None:
+            anchor = caption - 1
+        leading = anchor < 0
+        # A leading image belongs to the chapter of the segment it precedes.
+        chapter_owner = segments[0] if leading else segments[anchor]
+        resources.append(
+            ImageResource(
+                id=f"img{len(resources) + 1:04d}",
+                media_type=image.media_type,
+                data=image.data,
+                source_href=f"page{image.page_index + 1}-{image.digest[:8]}",
+                chapter_index=chapter_owner.chapter_index,
+                anchor_segment_id=None if leading else chapter_owner.id,
+                alt=None,
+            )
+        )
+    return resources
 
 
 def _normalize_head_key(text: str) -> str:
@@ -609,12 +916,14 @@ class _Block:
         text: Cleaned block text.
         page_index: Source page where the block starts.
         size: Font size (largest span) for headings; body size for paragraphs.
+        y0: Top edge of the block's first line, for image anchoring.
     """
 
     kind: SegmentType
     text: str
     page_index: int
     size: float
+    y0: float = 0.0
 
 
 def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
@@ -643,6 +952,7 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
     blocks: list[_Block] = []
     buffer: list[str] = []
     buffer_page = 0
+    buffer_y0 = 0.0
 
     def flush() -> None:
         nonlocal buffer
@@ -660,7 +970,7 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
             kind = SegmentType.OTHER
         else:
             kind = SegmentType.PARAGRAPH
-        blocks.append(_Block(kind, text, buffer_page, body_size))
+        blocks.append(_Block(kind, text, buffer_page, body_size, buffer_y0))
 
     for page in pages:
         page_gap = _median_line_gap(page)
@@ -673,7 +983,9 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
                 flush()
                 title = _clean_segment_text(line.text)
                 if not _is_droppable(title):
-                    blocks.append(_Block(SegmentType.HEADING, title, line.page_index, line.size))
+                    blocks.append(
+                        _Block(SegmentType.HEADING, title, line.page_index, line.size, line.y0)
+                    )
                 continue
 
             indent_threshold = indent_thresholds[line.page_index % 2]
@@ -695,6 +1007,7 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
 
             if not buffer:
                 buffer_page = line.page_index
+                buffer_y0 = line.y0
             elif (joined := _dehyphenate(buffer[-1], line.text)) is not None:
                 buffer[-1] = joined
                 continue
@@ -932,7 +1245,7 @@ def _assign_toc_chapters(
     starts: list[tuple[int, str]],
     back_start: int | None,
     body_size: float,
-) -> list[Segment]:
+) -> tuple[list[Segment], list[_Block]]:
     """Assign chapters from an embedded TOC: each block inherits its page's start.
 
     Blocks before the first content start are chapter 0 (front matter); a block
@@ -947,11 +1260,13 @@ def _assign_toc_chapters(
         body_size: Estimated body font size (for heading levels).
 
     Returns:
-        Ordered segments with TOC-driven chapter indices and titles.
+        Ordered segments with TOC-driven chapter indices and titles, plus the
+        blocks that produced them (index-parallel, for image anchoring).
     """
     start_pages = [page for page, _ in starts]
     back_chapter_index = len(starts) + 1
     segments: list[Segment] = []
+    kept_blocks: list[_Block] = []
     for block in blocks:
         if back_start is not None and block.page_index >= back_start:
             chapter_index, chapter_title = back_chapter_index, BACK_MATTER_CHAPTER_TITLE
@@ -967,12 +1282,13 @@ def _assign_toc_chapters(
         segments.append(
             _segment_from_block(block, chapter_index, chapter_title, len(segments), body_size)
         )
-    return segments
+        kept_blocks.append(block)
+    return segments, kept_blocks
 
 
 def _assign_heuristic_chapters(
     blocks: list[_Block], body_size: float, front_end: int, back_start: int
-) -> list[Segment]:
+) -> tuple[list[Segment], list[_Block]]:
     """Assign chapters without a TOC, minting only inside the body bracket.
 
     Front matter (before ``front_end``) is chapter 0; back matter (from
@@ -986,9 +1302,11 @@ def _assign_heuristic_chapters(
         back_start: Page index where back matter begins.
 
     Returns:
-        Ordered segments with bracketed chapter indices and titles.
+        Ordered segments with bracketed chapter indices and titles, plus the
+        blocks that produced them (index-parallel, for image anchoring).
     """
     segments: list[Segment] = []
+    kept_blocks: list[_Block] = []
     chapter_index = 0
     chapter_title: str | None = FRONT_MATTER_CHAPTER_TITLE
     phase = "front"
@@ -1024,9 +1342,10 @@ def _assign_heuristic_chapters(
         segments.append(
             _segment_from_block(block, chapter_index, chapter_title, len(segments), body_size)
         )
+        kept_blocks.append(block)
         if block.kind is SegmentType.PARAGRAPH:
             just_minted = False
-    return segments
+    return segments, kept_blocks
 
 
 def _is_real_word(token: str) -> bool:

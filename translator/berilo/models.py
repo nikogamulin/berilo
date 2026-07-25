@@ -9,6 +9,7 @@ segments across runs without relying on list position alone.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
@@ -72,6 +73,41 @@ class Segment:
     heading_level: int | None = None
 
 
+@dataclass(frozen=True)
+class ImageResource:
+    """A book-level image carried from source to output, with its anchor.
+
+    Images are **resources, not segments**: they are never translated and
+    never occupy a document position. Inserting them into
+    :attr:`Book.segments` would shift every later segment's ``position``,
+    change every later segment id (see :func:`make_segment_id`) and therefore
+    change the book's cache identity, invalidating every cached translation.
+    Anchoring them separately keeps segment ids — and the translation cache —
+    untouched.
+
+    Attributes:
+        id: Stable per-book resource id (``"img0001"``), assigned in
+            document order by the normalizer.
+        media_type: IANA media type of ``data`` (``"image/jpeg"``, ...).
+        data: The raw, unmodified image bytes.
+        source_href: Where the image came from in the source (zip-internal
+            path for EPUB, ``"page<N>-<M>"`` for PDF) — for diagnostics only.
+        chapter_index: Zero-based index of the chapter the image belongs to,
+            matching :attr:`Segment.chapter_index`.
+        anchor_segment_id: Id of the segment this image FOLLOWS, or ``None``
+            when the image leads its chapter (nothing precedes it).
+        alt: Alternative text, if the source supplied any.
+    """
+
+    id: str
+    media_type: str
+    data: bytes
+    source_href: str
+    chapter_index: int
+    anchor_segment_id: str | None = None
+    alt: str | None = None
+
+
 @dataclass
 class Book:
     """An ordered collection of segments plus book-level metadata.
@@ -83,6 +119,8 @@ class Book:
         source_path: Path to the original source file.
         source_format: Source file format (``"epub"``, ``"pdf"``, ``"mobi"``).
         segments: Ordered list of segments in document order.
+        images: Book-level image resources, in document order. Deliberately
+            NOT part of ``segments`` — see :class:`ImageResource`.
     """
 
     title: str
@@ -91,6 +129,7 @@ class Book:
     source_path: str
     source_format: str
     segments: list[Segment] = field(default_factory=list)
+    images: list[ImageResource] = field(default_factory=list)
 
     @property
     def chapter_count(self) -> int:
@@ -107,6 +146,10 @@ class Book:
             "source_format": self.source_format,
             "segments": [
                 {**asdict(segment), "type": segment.type.value} for segment in self.segments
+            ],
+            "images": [
+                {**asdict(image), "data": base64.b64encode(image.data).decode("ascii")}
+                for image in self.images
             ],
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -134,6 +177,20 @@ class Book:
             )
             for segment in payload["segments"]
         ]
+        # ``images`` post-dates the original payload shape: books serialized
+        # before S1.14 simply have no image resources.
+        images = [
+            ImageResource(
+                id=image["id"],
+                media_type=image["media_type"],
+                data=base64.b64decode(image["data"]),
+                source_href=image["source_href"],
+                chapter_index=image["chapter_index"],
+                anchor_segment_id=image.get("anchor_segment_id"),
+                alt=image.get("alt"),
+            )
+            for image in payload.get("images", [])
+        ]
         return cls(
             title=payload["title"],
             authors=payload["authors"],
@@ -141,4 +198,5 @@ class Book:
             source_path=payload["source_path"],
             source_format=payload["source_format"],
             segments=segments,
+            images=images,
         )

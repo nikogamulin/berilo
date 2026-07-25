@@ -19,10 +19,11 @@ import re
 import zipfile
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from berilo.models import Book, Segment, SegmentType, make_segment_id
+from berilo.models import Book, ImageResource, Segment, SegmentType, make_segment_id
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,28 @@ _BLOCK_TAG_TYPES: dict[str, SegmentType] = {
 # Elements never walked for content: EPUB navigation documents (table of
 # contents / landmarks) are structural, not book prose.
 _SKIP_TAGS = {"nav"}
+
+# Image references: XHTML ``<img src>`` and the SVG ``<image xlink:href>``
+# wrapper that most EPUB cover pages use.
+_IMAGE_TAGS = {"img", "image"}
+
+# Fallback media types when the OPF manifest does not declare one for a
+# referenced file (repackaged books sometimes omit the item).
+_IMAGE_MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".bmp": "image/bmp",
+}
+_DEFAULT_IMAGE_MEDIA_TYPE = "application/octet-stream"
+
+# Anchor index meaning "nothing precedes this image in its chapter".
+_LEADING_ANCHOR = -1
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
@@ -138,6 +161,32 @@ def _read_manifest(opf_root: ET.Element, opf_dir: str) -> dict[str, str]:
         if item_id and href:
             manifest[item_id] = _resolve(opf_dir, href)
     return manifest
+
+
+def _read_manifest_media_types(opf_root: ET.Element, opf_dir: str) -> dict[str, str]:
+    """Map every manifest item's zip-internal path to its declared media type.
+
+    The spine keeps only XHTML documents, so image items would otherwise be
+    parsed and thrown away; this retains the manifest's own media-type
+    declaration, which is more reliable than guessing from a file extension.
+
+    Args:
+        opf_root: Parsed OPF package document.
+        opf_dir: Directory holding the OPF, for href resolution.
+
+    Returns:
+        ``{zip-internal path: media type}`` for every manifest item that
+        declares both.
+    """
+    media_types: dict[str, str] = {}
+    for element in opf_root.iter():
+        if _local(element.tag) != "item":
+            continue
+        href = element.get("href")
+        media_type = element.get("media-type")
+        if href and media_type:
+            media_types[_resolve(opf_dir, href)] = media_type
+    return media_types
 
 
 def _read_spine(opf_root: ET.Element, manifest: dict[str, str]) -> list[str]:
@@ -360,17 +409,49 @@ def _is_heading_like(element: ET.Element) -> bool:
     return 0 < len(_block_text(element)) <= _HEADING_LIKE_MAX_CHARS
 
 
-def _iter_blocks(element: ET.Element):
-    """Yield ``(SegmentType, heading_level, element)`` for each block-level
-    descendant of *element*, in document order.
+def _image_href(element: ET.Element) -> str | None:
+    """Return an image element's source href (``src``, or SVG ``xlink:href``)."""
+    src = element.get("src")
+    if src:
+        return src
+    return next(
+        (value for key, value in element.attrib.items() if _local(key) == "href" and value),
+        None,
+    )
 
-    Does not descend into a matched block's own children (its text is fully
-    captured by :func:`_block_text`) nor into ``_SKIP_TAGS`` elements (EPUB
-    navigation documents).
+
+@dataclass(frozen=True)
+class _Node:
+    """One document-order item yielded by :func:`_iter_blocks`.
+
+    Attributes:
+        element: The source XHTML element.
+        block_type: Segment type for a block-level element, or ``None`` when
+            *element* is an image reference rather than translatable text.
+        heading_level: Heading level (1-6) for headings, else ``None``.
+    """
+
+    element: ET.Element
+    block_type: SegmentType | None
+    heading_level: int | None = None
+
+
+def _iter_blocks(element: ET.Element):
+    """Yield a :class:`_Node` per block-level element or image reference.
+
+    Emits, in document order, one node per block-level descendant of
+    *element* and one per ``<img>``/SVG ``<image>``. Does not descend into a
+    matched block's own children for further BLOCKS (its text is fully
+    captured by :func:`_block_text`) but does scan them for images, which
+    commonly sit inside a wrapper ``<p>``; nor does it descend into
+    ``_SKIP_TAGS`` elements (EPUB navigation documents).
     """
     for child in element:
         tag = _local(child.tag)
         if tag in _SKIP_TAGS:
+            continue
+        if tag in _IMAGE_TAGS:
+            yield _Node(child, None)
             continue
         if tag in _BLOCK_TAG_TYPES:
             block_type = _BLOCK_TAG_TYPES[tag]
@@ -386,7 +467,10 @@ def _iter_blocks(element: ET.Element):
                 elif _is_heading_like(child):
                     block_type = SegmentType.HEADING
                     heading_level = _RETYPED_HEADING_LEVEL
-            yield block_type, heading_level, child
+            yield _Node(child, block_type, heading_level)
+            for descendant in child.iter():
+                if descendant is not child and _local(descendant.tag) in _IMAGE_TAGS:
+                    yield _Node(descendant, None)
             continue
         yield from _iter_blocks(child)
 
@@ -458,6 +542,51 @@ def _warn_on_title_collapse(segments: list[Segment], book_title: str) -> None:
     )
 
 
+def _load_image(
+    archive: zipfile.ZipFile,
+    resolved: str,
+    media_types: dict[str, str],
+    image_id: str,
+    chapter_index: int,
+    anchor_segment_id: str | None,
+    alt: str | None,
+) -> ImageResource | None:
+    """Read one referenced image out of the archive as an :class:`ImageResource`.
+
+    Args:
+        archive: The open EPUB zip archive.
+        resolved: Zip-internal path the reference resolved to.
+        media_types: ``{path: media type}`` from the OPF manifest.
+        image_id: Stable per-book resource id to assign.
+        chapter_index: Chapter the image belongs to.
+        anchor_segment_id: Segment the image follows, or ``None`` if leading.
+        alt: Alternative text from the source, if any.
+
+    Returns:
+        The loaded resource, or ``None`` when the file cannot be read.
+    """
+    try:
+        data = archive.read(resolved)
+    except KeyError:
+        logger.warning("Image %s is absent from the archive; skipping", resolved)
+        return None
+    if not data:
+        logger.warning("Image %s is empty; skipping", resolved)
+        return None
+    media_type = media_types.get(resolved) or _IMAGE_MEDIA_TYPES.get(
+        posixpath.splitext(resolved)[1].lower(), _DEFAULT_IMAGE_MEDIA_TYPE
+    )
+    return ImageResource(
+        id=image_id,
+        media_type=media_type,
+        data=data,
+        source_href=resolved,
+        chapter_index=chapter_index,
+        anchor_segment_id=anchor_segment_id,
+        alt=alt,
+    )
+
+
 def normalize_epub(path: Path) -> Book:
     """Parse an EPUB file into a :class:`~berilo.models.Book`.
 
@@ -466,6 +595,11 @@ def normalize_epub(path: Path) -> Book:
     each spine document for block-level content. A spine document that
     yields no non-empty segments (a cover page, an image-only ad page, the
     nav/TOC document itself) is skipped and consumes no chapter slot.
+
+    Images referenced by ``<img>`` (or an SVG ``<image>`` cover wrapper) are
+    carried as book-level :class:`~berilo.models.ImageResource` entries, one
+    per unique source file, each anchored to the segment it follows — never
+    as segments, which would shift every later segment id.
 
     Chapter titles resolve in this order: the document's own TOC entry; the
     title of the preceding document (TOC entries mark chapter starts, so an
@@ -494,10 +628,17 @@ def normalize_epub(path: Path) -> Book:
 
         title, authors, language = _read_metadata(opf_root)
         manifest = _read_manifest(opf_root, opf_dir)
+        media_types = _read_manifest_media_types(opf_root, opf_dir)
         spine_hrefs = _read_spine(opf_root, manifest)
         chapter_titles = _read_toc_titles(archive, opf_root, opf_dir)
 
         segments: list[Segment] = []
+        images: list[ImageResource] = []
+        # Images referenced by a document that yields no segments (a cover
+        # page) have no chapter of their own; they lead the next chapter that
+        # does get one.
+        pending_images: list[tuple[str, str | None]] = []
+        seen_image_paths: set[str] = set()
         chapter_index = 0
         position = 0
         toc_resolved = bool(chapter_titles)
@@ -518,12 +659,36 @@ def normalize_epub(path: Path) -> Book:
             if body is None:
                 continue
 
+            doc_dir = posixpath.dirname(href)
             block_texts: list[tuple[SegmentType, int | None, str]] = []
-            for segment_type, heading_level, element in _iter_blocks(body):
-                text = _block_text(element)
+            # (index of the block this image follows, resolved path, alt text);
+            # _LEADING_ANCHOR means nothing precedes it in this document.
+            doc_images: list[tuple[int, str, str | None]] = []
+            for node in _iter_blocks(body):
+                if node.block_type is None:
+                    image_href = _image_href(node.element)
+                    if not image_href or image_href.startswith("data:"):
+                        continue
+                    resolved = _locate_archive_member(
+                        archive, _resolve(doc_dir, _strip_fragment(image_href))
+                    )
+                    if resolved is None:
+                        logger.warning("Image %s referenced by %s not found", image_href, href)
+                        continue
+                    if resolved in seen_image_paths:
+                        # One resource per source file: a logo repeated on
+                        # every chapter must not be packaged N times.
+                        continue
+                    seen_image_paths.add(resolved)
+                    doc_images.append(
+                        (len(block_texts) - 1, resolved, node.element.get("alt") or None)
+                    )
+                    continue
+                text = _block_text(node.element)
                 if text:
-                    block_texts.append((segment_type, heading_level, text))
+                    block_texts.append((node.block_type, node.heading_level, text))
             if not block_texts:
+                pending_images.extend((resolved, alt) for _, resolved, alt in doc_images)
                 continue
 
             toc_title = chapter_titles.get(href)
@@ -553,8 +718,9 @@ def normalize_epub(path: Path) -> Book:
                 )
             previous_title = chapter_title
 
+            chapter_segments: list[Segment] = []
             for segment_type, heading_level, text in block_texts:
-                segments.append(
+                chapter_segments.append(
                     Segment(
                         id=make_segment_id(text, chapter_index, position),
                         type=segment_type,
@@ -566,7 +732,44 @@ def normalize_epub(path: Path) -> Book:
                     )
                 )
                 position += 1
+            segments.extend(chapter_segments)
+
+            # Images from earlier segment-less documents lead this chapter.
+            anchored = [(_LEADING_ANCHOR, resolved, alt) for resolved, alt in pending_images]
+            pending_images = []
+            for anchor_index, resolved, alt in anchored + doc_images:
+                anchor_segment_id = (
+                    None if anchor_index == _LEADING_ANCHOR else chapter_segments[anchor_index].id
+                )
+                image = _load_image(
+                    archive,
+                    resolved,
+                    media_types,
+                    f"img{len(images) + 1:04d}",
+                    chapter_index,
+                    anchor_segment_id,
+                    alt,
+                )
+                if image is not None:
+                    images.append(image)
             chapter_index += 1
+
+        # Trailing segment-less documents (a back-cover plate) have no chapter
+        # of their own: hang their images off the last segment of the book.
+        if pending_images and segments:
+            last = segments[-1]
+            for resolved, alt in pending_images:
+                image = _load_image(
+                    archive,
+                    resolved,
+                    media_types,
+                    f"img{len(images) + 1:04d}",
+                    last.chapter_index,
+                    last.id,
+                    alt,
+                )
+                if image is not None:
+                    images.append(image)
 
     _warn_on_title_collapse(segments, title)
 
@@ -577,4 +780,5 @@ def normalize_epub(path: Path) -> Book:
         source_path=str(path),
         source_format="epub",
         segments=segments,
+        images=images,
     )

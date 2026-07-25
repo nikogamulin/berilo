@@ -19,7 +19,7 @@ from click.testing import CliRunner
 from berilo.cache import CallRecord, SegmentTranslation, TranslationCache, book_hash, segment_hash
 from berilo.cli import cli
 from berilo.glossary import Glossary, build_glossary
-from berilo.models import Book, Segment, SegmentType, make_segment_id
+from berilo.models import Book, ImageResource, Segment, SegmentType, make_segment_id
 from berilo.prompts import BASELINE, get_style, style_names
 from berilo.providers.base import CompletionResult, LLMClient
 from berilo.providers.pricing import cost_eur
@@ -281,6 +281,28 @@ def test_translate_book_preserves_segment_integrity() -> None:
     assert result.segments[1].text == f"{_PREFIX}First paragraph."
     # Inline tags survive the round trip.
     assert "<em>emphasis</em>" in result.segments[3].text
+
+
+def test_translate_book_carries_images_through_untouched() -> None:
+    """Images are resources: never translated, never dropped, never re-keyed."""
+    book = _paragraph_book(3)
+    book.images = [
+        ImageResource(
+            id="img0001",
+            media_type="image/png",
+            data=b"\x89PNG not-a-real-image",
+            source_href="OEBPS/img/figure1.png",
+            chapter_index=0,
+            anchor_segment_id=book.segments[1].id,
+            alt="A figure",
+        )
+    ]
+    before = book_hash(book)
+
+    result = translate_book(book, client=FakeLLMClient(), target_lang="sl", cache=_memory_cache())
+
+    assert result.images == book.images
+    assert book_hash(result) == before
 
 
 class _PolicyRefusingClient(FakeLLMClient):
