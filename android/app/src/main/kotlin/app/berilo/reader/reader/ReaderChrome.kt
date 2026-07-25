@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -40,6 +41,10 @@ import app.berilo.reader.dictionary.DictionaryUiState
 import app.berilo.reader.interpretation.InterpretationSheet
 import app.berilo.reader.interpretation.InterpretationUiState
 import app.berilo.reader.store.db.HighlightColor
+
+// S2.11: the chapter title keeps at least this much width before ellipsising, so it can
+// never be squeezed out of existence by the action row at narrow widths.
+private val ChapterTitleMinWidth = 72.dp
 
 /**
  * The reader's chrome overlay: a top bar (current chapter + entry points to
@@ -161,12 +166,22 @@ private fun ReaderTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .weight(1f)
+                    .widthIn(min = ChapterTitleMinWidth)
                     .padding(horizontal = 8.dp),
             )
             // Horizontally scrollable so the growing action set (S2.6 adds Highlight/Note/
             // Notebook to Define/Interpret/Settings) never clips the chapter title above.
+            //
+            // S2.11: the action row MUST carry a weight. Without one it is measured at its
+            // unconstrained preferred width before the weighted title gets any space, so at
+            // phone width (411 dp) the six buttons consumed the row and the title collapsed
+            // to zero width — it vanished outright rather than ellipsising, despite
+            // TextOverflow.Ellipsis. `fill = false` lets the row take less than its share
+            // when the buttons already fit (unchanged at Boox's 990 dp).
             Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = onDefineClick) {
