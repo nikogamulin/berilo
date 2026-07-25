@@ -2,7 +2,7 @@
 
 Subcommands (all implemented): ``translate`` (S1.5), ``inspect`` (S1.1, with
 ``--screen`` from S1.2), ``eval`` (S1.7, Rubric T; ``--dump``/``--judge-repeats``
-from S1.9), ``doctor`` (S1.4).
+from S1.9), ``ab`` (S1.11, paired prompt-variant experiments), ``doctor`` (S1.4).
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from berilo.cache import BASELINE_PROMPT_VERSION
 from berilo.models import Book
 from berilo.normalize import normalize
 from berilo.providers.base import CompletionResult, LLMClient
@@ -562,6 +563,209 @@ def eval_(
         runner.append_score_row(runner.score_row(result, seed=seed, sample=sample), destination)
         if not as_json:
             click.echo(f"Wrote score row to {destination}")
+
+
+@cli.command(name="ab")
+@click.argument("translated_epub", type=click.Path())
+@click.option("--variant", required=True, help="Translation style to test (see berilo.prompts).")
+@click.option(
+    "--control",
+    default=BASELINE_PROMPT_VERSION,
+    help="Prompt version attributed to the existing translation.",
+)
+@click.option(
+    "--source",
+    "source_file",
+    default=None,
+    type=click.Path(),
+    help="Source file (default: auto-discovered next to the translated EPUB).",
+)
+@click.option("--runs", default=None, type=int, help="Contiguous runs (clusters) to sample.")
+@click.option("--run-length", default=None, type=int, help="Body-prose segments per run.")
+@click.option("--seed", default=None, type=int, help="Seed for run selection and the bootstrap.")
+@click.option("--model", default=None, help="Override the translation model.")
+@click.option("--judge-model", default=None, help="Override the judge model.")
+@click.option(
+    "--to", "target_language", default=None, help="Target language code (default from config)."
+)
+@click.option(
+    "--cache-db",
+    default=None,
+    type=click.Path(),
+    help="Production cache read for the book's glossary (never written).",
+)
+@click.option(
+    "--scratch-cache",
+    default=None,
+    type=click.Path(),
+    help="Scratch cache the variant is written to (never the production cache).",
+)
+@click.option(
+    "--dump",
+    "dump_path",
+    default=None,
+    type=click.Path(),
+    help="Write one JSON row per judged pair (source, both arms, all four verdicts).",
+)
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+@click.option("--dry-run", is_flag=True, help="Print the plan and estimate without spending.")
+@click.option("--yes", "-y", "assume_yes", is_flag=True, help="Skip the cost confirmation prompt.")
+@click.pass_context
+def ab(
+    ctx: click.Context,
+    translated_epub: str,
+    variant: str,
+    control: str,
+    source_file: str | None,
+    runs: int | None,
+    run_length: int | None,
+    seed: int | None,
+    model: str | None,
+    judge_model: str | None,
+    target_language: str | None,
+    cache_db: str | None,
+    scratch_cache: str | None,
+    dump_path: str | None,
+    as_json: bool,
+    dry_run: bool,
+    assume_yes: bool,
+) -> None:
+    """A/B a prompt variant against TRANSLATED_EPUB's existing translation.
+
+    Re-translates a few seeded, contiguous runs of body prose through the real
+    ``translate_book`` path (production batch size, rolling context, the book's
+    cached glossary) under ``--variant``, then judges control and variant paired
+    on T2 (meaning) and T3 (fluency). Deltas carry 95 % bootstrap CIs whose
+    resampling unit is the contiguous RUN, not the segment.
+    """
+    from dotenv import find_dotenv
+
+    from berilo import experiment
+    from berilo.cache import DEFAULT_CACHE_PATH, TranslationCache
+    from berilo.config import load_config
+    from berilo.eval import runner
+    from berilo.eval.judge import Judge, JudgeError
+    from berilo.eval.rubric_t import AlignmentError
+    from berilo.glossary import Glossary
+    from berilo.prompts import get_style
+    from berilo.translate import TranslationError
+
+    env_file = find_dotenv(usecwd=True) or None
+    config = load_config(
+        env_file=env_file,
+        translation_model=model,
+        judge_model=judge_model,
+        target_lang=target_language,
+    )
+    lang = config.target_lang
+
+    try:
+        style = get_style(variant)
+    except KeyError as exc:
+        click.echo(f"ab: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    source_path = (
+        Path(source_file) if source_file else runner.discover_source(translated_epub, lang)
+    )
+    if source_path is None:
+        click.echo(
+            "ab: could not locate the source file — pass --source explicitly "
+            f"(looked next to {translated_epub}).",
+            err=True,
+        )
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    try:
+        source = normalize(source_path)
+        translated = normalize(translated_epub)
+    except _NORMALIZE_ERRORS as exc:
+        click.echo(f"ab: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    # The production cache is read READ-ONLY, for the book's glossary only.
+    cached_glossary, _ = runner.read_cache_facts(
+        cache_db or DEFAULT_CACHE_PATH, source, config.translation_model, lang
+    )
+    glossary = Glossary(terms=dict(cached_glossary)) if cached_glossary else None
+
+    try:
+        plan = experiment.build_plan(
+            source,
+            translated,
+            style=style,
+            control_version=control,
+            model=config.translation_model,
+            judge_model=config.judge_model,
+            target_lang=lang,
+            glossary=glossary,
+            runs=runs if runs is not None else experiment.DEFAULT_RUNS,
+            run_length=run_length if run_length is not None else experiment.DEFAULT_RUN_LENGTH,
+            seed=seed if seed is not None else experiment.DEFAULT_SEED,
+        )
+    except experiment.ExperimentError as exc:
+        click.echo(f"ab: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+    except AlignmentError as exc:
+        click.echo(f"ab: ALIGNMENT FAILURE — {exc}", err=True)
+        ctx.exit(ALIGNMENT_ERROR_EXIT_CODE)
+        return
+
+    if dry_run:
+        click.echo(experiment.format_plan(plan))
+        ctx.exit(0)
+        return
+
+    click.echo(
+        f"Estimated cost: €{plan.estimated_cost_eur:.4f} "
+        f"({plan.judged_segments} segments re-translated under '{plan.variant_name}', "
+        f"{plan.judge_calls} judge calls)."
+    )
+    if not assume_yes and not click.confirm(f"Proceed with the A/B run for '{variant}'?"):
+        ctx.exit(0)
+        return
+
+    try:
+        from berilo.providers import create_client
+
+        client = create_client(config.translation_model, config)
+        judge_client = create_client(config.judge_model, config)
+    except ValueError as exc:
+        click.echo(f"ab: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
+    cache = TranslationCache(scratch_cache or experiment.DEFAULT_EXPERIMENT_CACHE_PATH)
+    try:
+        result = experiment.run_experiment(
+            source,
+            plan=plan,
+            style=style,
+            client=client,
+            judge=Judge(judge_client),
+            scratch_cache=cache,
+            glossary=glossary,
+        )
+    except (experiment.ExperimentError, JudgeError, TranslationError) as exc:
+        click.echo(f"ab: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+    finally:
+        cache.close()
+
+    if dump_path is not None:
+        n_rows = experiment.write_pairs_dump(result, dump_path)
+        if not as_json:
+            click.echo(f"Wrote {n_rows} judged-pair row(s) to {dump_path}")
+
+    if as_json:
+        click.echo(json.dumps(experiment.result_to_dict(result), ensure_ascii=False, indent=2))
+    else:
+        click.echo(experiment.format_result(result))
 
 
 @cli.command()
