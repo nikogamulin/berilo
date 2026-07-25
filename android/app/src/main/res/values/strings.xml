@@ -9,6 +9,7 @@
     <string name="library_book_cover_cd">Cover of %1$s</string>
     <string name="library_progress_cd">%1$d%% read</string>
     <string name="library_settings_cd">Settings</string>
+    <string name="library_loading">Loading your library…</string>
 
     <string name="library_import_success">Added to your library</string>
     <string name="library_import_duplicate">Already in your library</string>
