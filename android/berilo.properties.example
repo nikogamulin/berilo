@@ -1,0 +1,23 @@
+# S3.2 — cloud sync build configuration. Copy to `berilo.properties` (gitignored)
+# and fill in. Absent or blank, the app still builds and runs; the account/sync
+# surface is disabled behind a stated message instead.
+#
+# Both values are PUBLIC client configuration, not secrets:
+#   - the Clerk publishable key is the same string the web app ships in its JS
+#     bundle; it identifies the Clerk instance and authorizes nothing on its own,
+#   - the base URL is the published API host.
+# They are kept out of git so this repository stays free of environment-specific
+# values. The secret half of the pair — CLERK_SECRET_KEY, SUPABASE_SECRET_KEY —
+# belongs only to `berilo-cloud` and must never reach the app: the client holds a
+# short-lived Clerk session JWT, and Postgres RLS is what actually enforces
+# isolation (docs/sync_api.md §1.1).
+#
+# CI/release builds may instead export BERILO_CLERK_PUBLISHABLE_KEY and
+# BERILO_API_BASE_URL; berilo.properties wins when both are present.
+
+# From https://dashboard.clerk.com -> API keys (pk_test_... in dev, pk_live_... in prod).
+clerkPublishableKey=pk_test_...
+
+# Defaults to https://berilo.app/api/v1 when unset. Point at a local Next.js dev
+# server (e.g. http://10.0.2.2:3000/api/v1 from the emulator) to sync against it.
+apiBaseUrl=https://berilo.app/api/v1

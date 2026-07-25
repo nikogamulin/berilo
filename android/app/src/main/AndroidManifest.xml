@@ -42,6 +42,12 @@
             android:exported="false"
             android:theme="@style/Theme.Berilo" />
 
+        <!-- S3.2: Clerk sign-in and cloud-sync status. -->
+        <activity
+            android:name=".sync.ui.AccountActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Berilo" />
+
         <!-- S2.6: streams the notebook's Markdown export file to the share-sheet target
              (e.g. Obsidian) without granting a world-readable file:// Uri. -->
         <provider

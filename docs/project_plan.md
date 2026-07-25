@@ -310,8 +310,11 @@ scores contrast on e-ink and OLED).*
 - **Verify:** contract committed in **this** repo (`docs/sync_api.md`); RLS audit script: user A gets 0 rows of user B across all tables; S6 synthetic 2500-row test returns complete data.
 
 ### S3.2 — App sync client (5 pt)
+- [x] Offline half landed 2026-07-25: Clerk auth (email-code primary, password fallback) behind an `AuthGateway` seam; Room schema v5 (`updatedAt`/`deletedAt` tombstones, `vocabulary.sentence`, `sync_state`) with a real `MIGRATION_4_5`; pull/push client against `sync_api.md` v1.3 (keyset drain, LWW, delete-wins, conflict adoption); WorkManager background sync + sync-on-launch; account screen. 270 JVM tests green (was 236), debug **and** release APKs build.
 - [ ] Auth (Clerk JWTs against Supabase RLS), background sync of notes/highlights/vocabulary/progress, last-write-wins with `updated_at` UTC, offline queue
 - **Verify:** Rubric S1 scenario matrix 100%; S3 chaos test 0 data loss; DST-boundary test green.
+- **Verify status (2026-07-25):** DST-boundary test **green** (`SyncTimeTest`, Europe/Ljubljana March gap + the repeated October hour). Chaos/data-loss **green at unit level** (`SyncEngineTest`: a rejected push never advances the watermark, offline mid-round keeps the queue, 401 touches nothing). S1 scenario matrix **not run** — it needs the live Supabase/Vercel deployment and two real devices, so **this story stays open**; nothing here has been exercised against the deployed API or on the Boox.
+- **Open before close:** the build is wired to a Clerk **`pk_test_`** (development instance); production needs the `pk_live_` key and `berilo.app` added to the Clerk production instance. `[OPEN-5]` (client-clock LWW) is still unresolved — the client sends its own UTC clock as the contract specifies.
 
 ### S3.3 — Web review app (5 pt)
 - [ ] Next.js on Vercel: Clerk login, notes/highlights browser (search, filter by book/color/date), vocabulary review, Markdown export
@@ -324,6 +327,11 @@ scores contrast on e-ink and OLED).*
 ### S3.5 — Launch gate (2 pt)
 - [ ] Privacy policy (only user-created data syncs, books never leave device), free-tier limits, error monitoring
 - **Verify:** Rubric **S ≥ 85**; S2 and S3 gates at max; policy page live.
+
+### S3.6 — Growth surface (16 pt) *(implemented as Phase C6 in `berilo-cloud`; evidence in its `docs/research/2026-07-25-virality/`)*
+- [ ] The social object is a passage, not a number: passage permalinks with typographic OG cards and a bilingual variant (source sentence above, translation below — needs `source_excerpt`, contract v1.2); book/author pages as Slovenian SEO surface with sitemap and thin-content `noindex`; four-slot favourites block on public profiles; send-to-one-person recommendation with private gift pages; qualitative year in review; Goodreads/StoryGraph import landing all-private
+- [ ] Binding rules (violations are defects): no reading pace or reading time on any public surface · aggregate rating hidden below n ≥ 3 · a rating counts only with reading evidence · LLM output may describe a text, never the reader · no referral rewards · no numeric counters on public pages
+- **Verify:** each C6.x Verify line in `berilo-cloud/docs/project_plan.md` executed and green in its closing session; the [OPEN-4] edition→translation-revision decision recorded in `sync_api.md` §2 before anything social ships (interim: `content_hash` keying).
 
 ---
 

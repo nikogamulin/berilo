@@ -366,3 +366,41 @@
 - [2026-07-24] `data/` is gitignored and holds copyrighted books — never
   commit, never upload contents anywhere except segment batches to the
   configured LLM API during translation.
+- [2026-07-25] Clerk Android SDK version ceiling (S3.2). `com.clerk:clerk-android-api`
+  **1.0.x is unusable** on this repo's pinned set: it needs kotlin-stdlib 2.4.0
+  metadata and drags `androidx.browser` 1.10 + `okhttp-android` 5.4, whose
+  aar-metadata demands compileSdk 36 + AGP 8.9.1. **0.1.31 is the last
+  Kotlin-2.1.x-era release** (kotlin-stdlib 2.1.20, okhttp 4.12.0 — exactly
+  this project's versions). Its API differs from 1.0's: no `Clerk.auth` builder
+  facade, use `SignIn.create(SignIn.CreateParams.Strategy.EmailCode(...))` +
+  `signIn.attemptFirstFactor(...)`, `Clerk.signOut()`, and
+  `Clerk.session?.fetchToken()` for the bearer JWT. Even on 0.1.31,
+  `androidx.browser` still resolves to 1.9.0 transitively and must be held with
+  `version { strictly("1.8.0") }` — safe because androidx.browser is Custom Tabs,
+  used only by Clerk's OAuth/SSO redirect paths, which this app never invokes.
+  Confirms the existing generalization: **pin new libraries to Kotlin-2.1.0-era
+  releases and verify each AAR's `aar-metadata.properties` minCompileSdk first.**
+- [2026-07-25] Excluding Clerk's Play-Services deps (`com.google.android.gms`,
+  `com.google.android.play`, `googleid`, `credentials-play-services-auth` — Boox
+  tablets often lack Play Services) compiles fine but **fails `minifyReleaseWithR8`**
+  with ~15 "Missing class" errors from Clerk's One-Tap/Integrity code. Fix is
+  `-dontwarn` for those three package roots in `proguard-rules.pro`; no keep rules
+  needed, since the Clerk AAR ships consumer rules covering its own serializers.
+  `assembleDebug` passing is NOT evidence the release build works — R8 runs only
+  on release.
+- [2026-07-25] **Never call `WorkManager.getInstance()` from
+  `Application.onCreate`**: Robolectric constructs the real Application for every
+  test, WorkManager has no initialized instance there, and this turned 1 change
+  into **81 unrelated test failures** (`IllegalStateException at
+  WorkManagerImpl.java:179`) across DAO/ViewModel suites that never touch sync.
+  Schedule from the launcher Activity instead — `ExistingPeriodicWorkPolicy.KEEP`
+  makes re-registration a no-op, so nothing is lost.
+- [2026-07-25] Kotlin block comments **nest**, so a KDoc containing a path like
+  `/api/v1/sync/*` opens a nested comment and the file dies with "Unclosed
+  comment" pointing at the LAST line of the file, not the offending line.
+- [2026-07-25] Verifying an Android build: `./gradlew` reports `BUILD SUCCESSFUL`
+  when every task is `UP-TO-DATE`, which looks identical to "compiled and passed".
+  Check `--console=plain` task lines, and read
+  `app/build/test-results/testDebugUnitTest/TEST-*.xml` for real
+  tests/failures/errors counts — same "passed must never mean nothing ran" rule
+  already recorded for Roborazzi.

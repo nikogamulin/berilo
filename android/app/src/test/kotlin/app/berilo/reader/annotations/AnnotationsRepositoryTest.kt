@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -101,7 +102,7 @@ class AnnotationsRepositoryTest {
         }
 
     @Test
-    fun `delete removes the row`() =
+    fun `delete hides the highlight but keeps a tombstone so the delete syncs`() =
         runTest {
             val dao = FakeHighlightDao()
             val repo = repository(dao)
@@ -109,8 +110,18 @@ class AnnotationsRepositoryTest {
 
             repo.delete(id)
 
-            assertNull(dao.getById(id))
-            assertEquals(0, dao.count())
+            assertNull("a deleted highlight must not be readable", dao.getById(id))
+            assertEquals(
+                "and must not appear in the notebook",
+                0,
+                dao.observeForBook("book-1").first().size,
+            )
+            // S3.2: the row itself survives with deletedAt set. A hard delete would be
+            // invisible to the server, and the next pull would faithfully restore the
+            // highlight the user just removed.
+            val tombstone = dao.getAnyById(id)
+            assertNotNull("the row must survive as a tombstone", tombstone)
+            assertNotNull("deletedAt must be set", tombstone!!.deletedAt)
         }
 
     @Test

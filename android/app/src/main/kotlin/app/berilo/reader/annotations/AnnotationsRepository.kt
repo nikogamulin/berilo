@@ -70,8 +70,16 @@ class AnnotationsRepository(
     suspend fun updateNote(id: String, noteText: String?) =
         updateExisting(id) { it.copy(note = noteText?.trim()?.ifBlank { null }) }
 
-    /** Deletes [id]. */
-    suspend fun delete(id: String) = withContext(ioDispatcher) { dao.deleteById(id) }
+    /**
+     * Deletes [id].
+     *
+     * S3.2 made this a tombstone rather than a row removal: the row stays with `deletedAt`
+     * set so the delete propagates to the user's other devices on the next push. Without it, a
+     * delete here would be invisible to the server and the next pull would faithfully restore
+     * the highlight the user just removed. Every app-facing query filters tombstones, so this
+     * is indistinguishable from a real delete in the UI.
+     */
+    suspend fun delete(id: String) = withContext(ioDispatcher) { dao.softDelete(id, clock()) }
 
     private suspend fun updateExisting(id: String, transform: (HighlightEntity) -> HighlightEntity) =
         withContext(ioDispatcher) {

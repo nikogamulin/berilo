@@ -47,6 +47,7 @@ class DictionaryRepository(
             }
 
             val result = service.define(settings, normalizedWord, sentence)
+            val now = clock()
             dao.upsert(
                 DictionaryEntryEntity(
                     word = normalizedWord,
@@ -58,7 +59,12 @@ class DictionaryRepository(
                     baseForm = result.definition.baseForm,
                     usageNote = result.definition.usageNote,
                     costEur = result.costEur,
-                    createdAt = clock(),
+                    createdAt = now,
+                    // S3.2 ([OPEN-1]): the raw sentence is stored alongside its hash so the web
+                    // vocabulary review can show the word in context. The hash stays the cache
+                    // key; this column is carried, never matched on.
+                    sentence = sentence,
+                    updatedAt = now,
                 ),
             )
             DictionaryLookup(result.definition, result.costEur, fromCache = false)

@@ -23,6 +23,15 @@ import androidx.room.Entity
  *   never billed, which cannot happen for a freshly-fetched entry but keeps the column
  *   non-null for cache rows written defensively).
  * @property createdAt Epoch-millis timestamp this entry was written.
+ * @property sentence The raw surrounding sentence [sentenceHash] was computed from (S3.2,
+ *   `sync_api.md` [OPEN-1]): the web vocabulary review shows the word in context, and a hash
+ *   cannot be read back. Empty for rows written before this column existed — the migration has
+ *   no way to invert the hash — and the sync client skips pushing those rather than sending a
+ *   value the server would reject.
+ * @property updatedAt Epoch-millis timestamp of the last write, driving last-write-wins on
+ *   push (`sync_api.md` §1.3). Cache rows are effectively immutable, so this normally equals
+ *   [createdAt]; the migration backfills it from [createdAt] for that reason.
+ * @property deletedAt Epoch-millis tombstone, or null for a live row.
  */
 @Entity(tableName = "dictionary_entries", primaryKeys = ["word", "sentenceHash", "lang", "model"])
 data class DictionaryEntryEntity(
@@ -36,4 +45,7 @@ data class DictionaryEntryEntity(
     val usageNote: String,
     val costEur: Double,
     val createdAt: Long,
+    val sentence: String = "",
+    val updatedAt: Long = createdAt,
+    val deletedAt: Long? = null,
 )

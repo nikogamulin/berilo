@@ -60,7 +60,12 @@ class BookImporter(
                     (openStream() ?: throw IOException(COULD_NOT_OPEN_MESSAGE)).use { input ->
                         copyAndHash(input, tempFile)
                     }
-                if (bookDao.exists(hash)) {
+                // S3.2: a row may exist and still be a tombstone (the user deleted this book,
+                // which keeps the metadata row so the delete can propagate). Only a *live* row
+                // is a duplicate; a tombstoned one is revived below, because the file it
+                // pointed at was destroyed on delete and has just been supplied again.
+                val existing = bookDao.getAnyById(hash)
+                if (existing != null && existing.deletedAt == null) {
                     tempFile.delete()
                     return@withContext ImportOutcome.Duplicate(hash)
                 }
@@ -72,18 +77,27 @@ class BookImporter(
                 val metadata = metadataExtractor.extract(finalFile, fallbackTitle)
                 val coverPath = metadata.coverBytes?.let { writeCover(hash, it) }
 
-                bookDao.insert(
+                val now = clock()
+                val entity =
                     BookEntity(
                         id = hash,
                         title = metadata.title,
                         authors = metadata.authors.joinToString(", "),
                         filePath = finalFile.absolutePath,
                         coverPath = coverPath,
-                        addedAt = clock(),
+                        addedAt = existing?.addedAt ?: now,
                         lastOpenedAt = null,
                         progressionJson = null,
-                    ),
-                )
+                        // The EPUB declares the language it is written in, which for translator
+                        // output is the target. Source language stays null rather than guessed
+                        // (see ExtractedMetadata.language); a re-import picks up whatever the
+                        // file actually declares.
+                        sourceLang = existing?.sourceLang,
+                        targetLang = metadata.language ?: existing?.targetLang,
+                        updatedAt = now,
+                        deletedAt = null,
+                    )
+                if (existing == null) bookDao.insert(entity) else bookDao.update(entity)
                 ImportOutcome.Imported(hash)
             } catch (e: IOException) {
                 // Nothing half-imported survives a failure: no orphan file

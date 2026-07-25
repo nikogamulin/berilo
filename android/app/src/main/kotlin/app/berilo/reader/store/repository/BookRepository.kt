@@ -17,6 +17,7 @@ import kotlinx.coroutines.withContext
 class BookRepository(
     private val bookDao: BookDao,
     private val ioDispatcher: CoroutineContext = Dispatchers.IO,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
 
     fun observeBooks(): Flow<List<Book>> =
@@ -39,10 +40,18 @@ class BookRepository(
     suspend fun saveProgression(id: String, progressionJson: String, openedAt: Long) =
         bookDao.updateProgression(id, progressionJson, openedAt)
 
-    /** Deletes the book row and its on-disk copy (EPUB + cover, if present). */
+    /**
+     * Deletes the book: the EPUB and cover leave the disk immediately, while the metadata row
+     * is kept as a tombstone (S3.2) so the delete reaches the user's other devices.
+     *
+     * The asymmetry is the point. Files are the thing worth reclaiming space from and the
+     * thing that must never leave the device; the row that survives holds only title, authors
+     * and language — the same metadata-only surface the sync contract allows
+     * (`docs/sync_api.md` §1.1).
+     */
     suspend fun deleteBook(book: Book) =
         withContext(ioDispatcher) {
-            bookDao.deleteById(book.id)
+            bookDao.softDelete(book.id, clock())
             File(book.filePath).delete()
             book.coverPath?.let { File(it).delete() }
         }
