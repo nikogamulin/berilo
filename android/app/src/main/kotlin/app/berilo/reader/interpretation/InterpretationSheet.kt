@@ -5,17 +5,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
@@ -51,6 +56,7 @@ fun InterpretationSheet(uiState: InterpretationUiState, onDismiss: () -> Unit, m
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 8.dp),
         ) {
+            InterpretationHeader(onDismiss = onDismiss)
             when (uiState) {
                 InterpretationUiState.Idle -> Unit
                 InterpretationUiState.Loading -> InterpretationLoadingContent()
@@ -63,8 +69,7 @@ fun InterpretationSheet(uiState: InterpretationUiState, onDismiss: () -> Unit, m
 
 @Composable
 private fun InterpretationLoadingContent() {
-    InterpretationTitle()
-    Row(modifier = Modifier.padding(top = 16.dp, bottom = 24.dp)) {
+    Row(modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)) {
         CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
         Text(text = stringResource(R.string.interpretation_loading), style = MaterialTheme.typography.bodyMedium)
     }
@@ -72,7 +77,6 @@ private fun InterpretationLoadingContent() {
 
 @Composable
 private fun InterpretationErrorContent(state: InterpretationUiState.Error) {
-    InterpretationTitle()
     val message =
         when (state.kind) {
             InterpretationErrorKind.NETWORK -> stringResource(R.string.interpretation_error_network)
@@ -88,8 +92,6 @@ private fun InterpretationErrorContent(state: InterpretationUiState.Error) {
 
 @Composable
 private fun InterpretationSuccessContent(state: InterpretationUiState.Success) {
-    InterpretationTitle()
-
     Text(
         text = state.passage,
         style = MaterialTheme.typography.bodyMedium,
@@ -106,13 +108,27 @@ private fun InterpretationSuccessContent(state: InterpretationUiState.Success) {
     InterpretationFooter(costEur = state.costEur, fromCache = state.fromCache)
 }
 
+/** Sheet header: the `ic_interpret` glyph identifies this as a paragraph interpretation at a
+ * glance (distinct from [app.berilo.reader.dictionary.DictionarySheet]'s header), and an
+ * explicit close affordance replaces the previous swipe-or-tap-scrim-only dismiss — the sheet
+ * had no visible way to leave it. */
 @Composable
-private fun InterpretationTitle() {
-    Text(
-        text = stringResource(R.string.interpretation_title),
-        style = MaterialTheme.typography.titleLarge,
-        modifier = Modifier.padding(top = 16.dp),
-    )
+private fun InterpretationHeader(onDismiss: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            painter = painterResource(R.drawable.ic_interpret),
+            contentDescription = null,
+            modifier = Modifier.padding(end = 8.dp).size(20.dp),
+        )
+        Text(
+            text = stringResource(R.string.interpretation_title),
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onDismiss) {
+            Icon(painter = painterResource(R.drawable.ic_close), contentDescription = stringResource(R.string.interpretation_dismiss_cd))
+        }
+    }
 }
 
 /** Cost + cached badge, shown small per design_guidelines.md restraint (matches

@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.annotation.DrawableRes
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -18,6 +20,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -31,6 +34,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
@@ -154,9 +159,21 @@ private fun HighlightRow(
                 )
             }
             Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { editingNote = true }) { Text(stringResource(R.string.notebook_edit_note)) }
-                TextButton(onClick = { pickingColor = true }) { Text(stringResource(R.string.notebook_change_color)) }
-                TextButton(onClick = { pendingDelete = true }) { Text(stringResource(R.string.notebook_delete)) }
+                TextButton(onClick = { editingNote = true }) {
+                    RowActionIcon(R.drawable.ic_note)
+                    Text(stringResource(R.string.notebook_edit_note))
+                }
+                TextButton(onClick = { pickingColor = true }) {
+                    RowActionIcon(R.drawable.ic_highlight)
+                    Text(stringResource(R.string.notebook_change_color))
+                }
+                // Destructive action — tinted with the error role (matches
+                // SettingsScreen's key-test-failure treatment) so it reads as
+                // distinct from the two reversible actions beside it.
+                TextButton(onClick = { pendingDelete = true }) {
+                    RowActionIcon(R.drawable.ic_delete, tint = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.notebook_delete), color = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }
@@ -190,6 +207,19 @@ private fun HighlightRow(
             onDismiss = { pendingDelete = false },
         )
     }
+}
+
+/** Small leading glyph for a [TextButton]'s action row — decorative (the button's own text
+ * already labels the action), sized down from the 24dp default so it doesn't outweigh the
+ * label text, with a fixed gap before the label. */
+@Composable
+private fun RowActionIcon(@DrawableRes iconRes: Int, tint: Color = LocalContentColor.current) {
+    Icon(
+        painter = painterResource(iconRes),
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(18.dp).padding(end = 4.dp),
+    )
 }
 
 @Composable

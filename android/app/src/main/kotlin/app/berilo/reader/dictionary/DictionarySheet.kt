@@ -5,17 +5,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
@@ -50,9 +55,17 @@ fun DictionarySheet(uiState: DictionaryUiState, onDismiss: () -> Unit, modifier:
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 8.dp),
         ) {
+            val headword =
+                when (uiState) {
+                    DictionaryUiState.Idle -> ""
+                    is DictionaryUiState.Loading -> uiState.word
+                    is DictionaryUiState.Error -> uiState.word
+                    is DictionaryUiState.Success -> uiState.definition.word
+                }
+            DictionaryHeader(word = headword, onDismiss = onDismiss)
             when (uiState) {
                 DictionaryUiState.Idle -> Unit
-                is DictionaryUiState.Loading -> DictionaryLoadingContent(uiState.word)
+                is DictionaryUiState.Loading -> DictionaryLoadingContent()
                 is DictionaryUiState.Error -> DictionaryErrorContent(uiState)
                 is DictionaryUiState.Success -> DictionarySuccessContent(uiState)
             }
@@ -61,9 +74,8 @@ fun DictionarySheet(uiState: DictionaryUiState, onDismiss: () -> Unit, modifier:
 }
 
 @Composable
-private fun DictionaryLoadingContent(word: String) {
-    DictionaryHeadword(word)
-    Row(modifier = Modifier.padding(top = 16.dp, bottom = 24.dp)) {
+private fun DictionaryLoadingContent() {
+    Row(modifier = Modifier.padding(top = 8.dp, bottom = 24.dp)) {
         CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
         Text(text = stringResource(R.string.dictionary_loading), style = MaterialTheme.typography.bodyMedium)
     }
@@ -71,7 +83,6 @@ private fun DictionaryLoadingContent(word: String) {
 
 @Composable
 private fun DictionaryErrorContent(state: DictionaryUiState.Error) {
-    DictionaryHeadword(state.word)
     val message =
         when (state.kind) {
             DictionaryErrorKind.NETWORK -> stringResource(R.string.dictionary_error_network)
@@ -88,7 +99,6 @@ private fun DictionaryErrorContent(state: DictionaryUiState.Error) {
 @Composable
 private fun DictionarySuccessContent(state: DictionaryUiState.Success) {
     val definition = state.definition
-    DictionaryHeadword(definition.word)
 
     if (definition.definition.isNotBlank()) {
         Text(
@@ -130,9 +140,23 @@ private fun DictionarySuccessContent(state: DictionaryUiState.Success) {
     DictionaryFooter(costEur = state.costEur, fromCache = state.fromCache)
 }
 
+/** Sheet header: the `ic_translate` glyph identifies this as a dictionary lookup at a glance
+ * (distinct from [app.berilo.reader.interpretation.InterpretationSheet]'s header), the headword
+ * fills the remaining width, and an explicit close affordance replaces the previous
+ * swipe-or-tap-scrim-only dismiss — the sheet had no visible way to leave it. */
 @Composable
-private fun DictionaryHeadword(word: String) {
-    Text(text = word, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 16.dp))
+private fun DictionaryHeader(word: String, onDismiss: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            painter = painterResource(R.drawable.ic_translate),
+            contentDescription = null,
+            modifier = Modifier.padding(end = 8.dp).size(20.dp),
+        )
+        Text(text = word, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        IconButton(onClick = onDismiss) {
+            Icon(painter = painterResource(R.drawable.ic_close), contentDescription = stringResource(R.string.dictionary_dismiss_cd))
+        }
+    }
 }
 
 /** Cost + cached badge, shown small per design_guidelines.md restraint ("no percentages

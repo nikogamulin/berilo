@@ -100,6 +100,12 @@ android {
         getByName("test") {
             kotlin.srcDirs("src/test/kotlin")
         }
+        // S2.9: Compose UI tests (Robolectric-hosted, need a merged ComponentActivity from
+        // ui-test-manifest) live in a debug-only unit test source set — `debugImplementation`
+        // keeps that manifest out of the release build, so testReleaseUnitTest never needs it.
+        getByName("testDebug") {
+            kotlin.srcDirs("src/testDebug/kotlin")
+        }
     }
 }
 
@@ -145,4 +151,9 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(platform(libs.androidx.compose.bom))
+    // S2.9: Robolectric-hosted Compose UI tests for icon/content-description assertions, in the
+    // `testDebug` source set (see sourceSets above) — debugImplementation supplies both the
+    // test API and the ComponentActivity manifest (`ui-test-manifest`) those tests need.
+    debugImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

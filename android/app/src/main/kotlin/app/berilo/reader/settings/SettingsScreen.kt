@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -21,7 +22,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,12 +29,22 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import app.berilo.reader.R
+
+/** Test tags for the two API key fields — they share a label style, so tests need a stable way
+ * to target one section's field specifically. */
+internal const val OPENAI_KEY_FIELD_TAG = "settings_openai_key_field"
+internal const val ANTHROPIC_KEY_FIELD_TAG = "settings_anthropic_key_field"
+
+/** Test tag for the target-language field. */
+internal const val TARGET_LANG_FIELD_TAG = "settings_target_lang_field"
 
 /**
  * Settings screen: one screen, plain list, no chrome beyond a back affordance — per
@@ -82,6 +92,7 @@ fun SettingsScreen(
                 onKeyChanged = onOpenAiKeyChanged,
                 testState = uiState.openaiTestState,
                 onTestKey = onTestOpenAiKey,
+                fieldTestTag = OPENAI_KEY_FIELD_TAG,
             )
             HorizontalDivider()
             ApiKeySection(
@@ -90,6 +101,7 @@ fun SettingsScreen(
                 onKeyChanged = onAnthropicKeyChanged,
                 testState = uiState.anthropicTestState,
                 onTestKey = onTestAnthropicKey,
+                fieldTestTag = ANTHROPIC_KEY_FIELD_TAG,
             )
             HorizontalDivider()
             ModelPicker(selectedModel = uiState.model, onModelChanged = onModelChanged)
@@ -98,8 +110,9 @@ fun SettingsScreen(
                 value = uiState.targetLang,
                 onValueChange = onTargetLangChanged,
                 label = { Text(stringResource(R.string.settings_target_lang_label)) },
+                leadingIcon = { Icon(painterResource(R.drawable.ic_language), contentDescription = null) },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag(TARGET_LANG_FIELD_TAG),
             )
         }
     }
@@ -112,6 +125,7 @@ private fun ApiKeySection(
     onKeyChanged: (String) -> Unit,
     testState: KeyTestState,
     onTestKey: () -> Unit,
+    fieldTestTag: String,
 ) {
     var revealed by remember { mutableStateOf(false) }
 
@@ -125,7 +139,10 @@ private fun ApiKeySection(
             // learning/suggesting key fragments if a user ever types one (findings.md latent trap).
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().testTag(fieldTestTag),
+            // Decorative — the heading above already names the field, so no separate
+            // contentDescription is announced (avoids a redundant TalkBack readout).
+            leadingIcon = { Icon(painterResource(R.drawable.ic_key), contentDescription = null) },
             trailingIcon = {
                 TextButton(onClick = { revealed = !revealed }) {
                     Text(

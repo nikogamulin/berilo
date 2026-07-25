@@ -62,6 +62,7 @@
     <string name="dictionary_base_form">Base form: %1$s</string>
     <string name="dictionary_cached_badge">Cached</string>
     <string name="dictionary_cost">€%1$s</string>
+    <string name="dictionary_dismiss_cd">Dismiss</string>
 
     <string name="interpretation_title">Interpretation</string>
     <string name="interpretation_no_selection">Select a passage first, then tap Interpret.</string>
@@ -71,6 +72,7 @@
     <string name="interpretation_error_generic">Interpretation failed — try again.</string>
     <string name="interpretation_cached_badge">Cached</string>
     <string name="interpretation_cost">€%1$s</string>
+    <string name="interpretation_dismiss_cd">Dismiss</string>
 
     <string name="annotation_note_label">Note</string>
     <string name="annotation_save">Save</string>
@@ -82,4 +84,11 @@
     <string name="notebook_change_color">Change color</string>
     <string name="notebook_delete">Delete</string>
     <string name="notebook_delete_confirm_title">Delete this highlight?</string>
+
+    <string name="highlight_color_amber">Amber</string>
+    <string name="highlight_color_sage">Sage</string>
+    <string name="highlight_color_sky">Sky</string>
+    <string name="highlight_color_rose">Rose</string>
+    <string name="highlight_color_cd">%1$s highlight color</string>
+    <string name="highlight_color_selected_cd">%1$s highlight color, selected</string>
 </resources>

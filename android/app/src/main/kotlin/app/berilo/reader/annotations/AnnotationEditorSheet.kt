@@ -1,7 +1,6 @@
 package app.berilo.reader.annotations
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -18,9 +18,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
 import app.berilo.reader.R
@@ -75,6 +79,11 @@ private fun ColorPickerRow(actions: AnnotationEditorActions, modifier: Modifier 
 private fun NoteEditorSheet(state: AnnotationEditorUiState.NoteEditor, actions: AnnotationEditorActions, modifier: Modifier = Modifier) {
     ModalBottomSheet(onDismissRequest = actions.onDismiss, modifier = modifier) {
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+            // Deliberately no icon+title header here (unlike DictionarySheet/InterpretationSheet):
+            // the note text field right below already labels itself "Note"
+            // (R.string.annotation_note_label), so a matching "Note" header would duplicate that
+            // copy rather than aid recognition — and Cancel/Save already cover dismissal, so
+            // there's no missing affordance to add an icon for either.
             Text(
                 text = state.selectedText,
                 style = MaterialTheme.typography.bodyMedium,
@@ -121,11 +130,23 @@ private val MIN_TOUCH_TARGET_DP = 48.dp
 internal fun ColorSwatch(color: HighlightColor, onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false) {
     val ringColor = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline
     val swatchSize = if (selected) 36.dp else 32.dp
+    val label = stringResource(color.labelRes())
+    val description =
+        if (selected) {
+            stringResource(R.string.highlight_color_selected_cd, label)
+        } else {
+            stringResource(R.string.highlight_color_cd, label)
+        }
     Box(
+        // Previously an unlabelled clickable Box — TalkBack announced nothing at all for a
+        // color swatch. `selectable` gives it a proper RadioButton role (the four colors are
+        // a single-choice set) plus the selected state; `clearAndSetSemantics` replaces its
+        // default (empty) content description with the color name.
         modifier = modifier
             .size(MIN_TOUCH_TARGET_DP)
-            .clickable(onClick = onClick),
-        contentAlignment = androidx.compose.ui.Alignment.Center,
+            .selectable(selected = selected, onClick = onClick, role = Role.RadioButton)
+            .clearAndSetSemantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
     ) {
         Surface(
             modifier = Modifier.size(swatchSize).clip(CircleShape).background(color.toComposeColor()),
@@ -134,3 +155,12 @@ internal fun ColorSwatch(color: HighlightColor, onClick: () -> Unit, modifier: M
         ) {}
     }
 }
+
+/** Display name for a [HighlightColor], used as the swatch's accessible label. */
+private fun HighlightColor.labelRes(): Int =
+    when (this) {
+        HighlightColor.AMBER -> R.string.highlight_color_amber
+        HighlightColor.SAGE -> R.string.highlight_color_sage
+        HighlightColor.SKY -> R.string.highlight_color_sky
+        HighlightColor.ROSE -> R.string.highlight_color_rose
+    }
