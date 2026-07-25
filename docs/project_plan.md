@@ -109,13 +109,13 @@
 - [ ] Residual: T3 lands at 13.9/20, short of the plan's G3 target of 16 — the revision pass is a real, replicated gain but does not close the fluency gap alone. Next hypotheses in `docs/plans/2026-07-25-fluency-uplift.md`
 - **Verify:** Rubric T on the re-translated book **≥ 89** with T3 ≥ 16/20, T2 not regressed beyond −0.5 pts, T1 = 100%, T7 = 5; score row in `rubric_scores.jsonl`.
 
-### S1.14 — Carry images through the pipeline (3 pt)
+### S1.14 — Carry images through the pipeline (3 pt) ✅
 *Defect reported by Niko 2026-07-25: source books have images, every translated
 EPUB has none. Verified universal, not book-specific — source vs output image
 files: New Rules of War 4→**0**, Sandworm 3→**0**, Revenge of Geography 17→**0**,
 Active Measures (PDF) →**0**. Opus-tier: touches the segment model, both
 normalizers and the assembler.*
-- [ ] **Images are book-level resources, never segments.** `book_hash` is sha1
+- [x] **Images are book-level resources, never segments.** `book_hash` is sha1
       over ordered segment IDs (`cache.py:95`) and `make_segment_id` includes
       document position (`models.py:30`), so inserting IMAGE segments would
       change every ID, miss every cache row and force a **paid re-translation of
@@ -123,16 +123,16 @@ normalizers and the assembler.*
       field leaves `book_hash` byte-identical ⇒ rebuild from cache at **€0**.
       It also keeps `rubric_t.align`'s `(chapter, type, heading_level)`
       fingerprints unchanged, avoiding the AlignmentError class in findings
-- [ ] `models.py`: `ImageResource` (id, media_type, bytes, source_href, alt) +
+- [x] `models.py`: `ImageResource` (id, media_type, bytes, source_href, alt) +
       `Book.images`, anchored to the segment it follows; `to_json`/`from_json`
       round-trip
-- [ ] `normalize/epub.py`: collect manifest image items and `<img>` anchor
+- [x] `normalize/epub.py`: collect manifest image items and `<img>` anchor
       positions (today `_iter_blocks`/`_read_manifest` discard both)
-- [ ] `normalize/pdf.py`: pymupdf image extraction with page anchors — required,
+- [x] `normalize/pdf.py`: pymupdf image extraction with page anchors — required,
       since the reported book (*Active Measures*) is PDF-sourced. Existing
       CAPTION segments are already translated, so today captions survive while
       their image is dropped; captions must re-attach to their image
-- [ ] `assemble.py`: image entries into the zip with fixed `ZipInfo`
+- [x] `assemble.py`: image entries into the zip with fixed `ZipInfo`
       `date_time=(1980,1,1,...)` (byte-identical-output invariant), manifest
       entries in `_content_opf`, `<img>` emitted in `_render_chapter_body`
 - **Verify:** offline — `cd translator && make test && make lint` green, with a
@@ -142,6 +142,22 @@ normalizers and the assembler.*
   in the run log, then re-run the image census: each output's image-file count
   equals its source's (4/3/17 for the EPUB books, > 0 for Active Measures) and
   `epubcheck` still exits 0 on every output.
+- **Verify run 2026-07-25 on merged `main`** (commit `4d3cc84`): offline
+  `make test && make lint` → **270 passed**, black + ruff clean. Measured, at
+  **€0 proven by construction** — rebuilt through the real `translate_book`
+  path with a client whose every attribute raises on call, so a single API
+  request would have aborted the run; it never fired, i.e. 100% cache hits.
+  Image census on the rebuilt outputs: New Rules of War **4/4**, Sandworm
+  **3/3**, Revenge of Geography **17/17**, Active Measures **83/83** figures
+  (`<img>` refs match file counts on all four). `epubcheck` **exit 0, 0 errors,
+  0 warnings** on every output. `book_hash` byte-identical to pre-change on two
+  real books (`2db2bd1c…`/2309 segs, `f30cd8f3…`/1294 segs).
+- **Known limits:** *This Is How They Tell Me the World Ends* is OCR-sourced —
+  532/532 pages carry a page-sized raster, so image extraction is correctly
+  skipped wholesale rather than embedding a photographic copy of the English
+  source into the translation. Revenge of Geography's source has 17 image files
+  behind 45 `<img>` references; the rebuild emits 17 files / 17 references, so
+  repeated references collapse to one — acceptable, but not byte-parity.
 
 ---
 
