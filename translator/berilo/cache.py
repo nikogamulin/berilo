@@ -11,16 +11,27 @@ The cache is the mechanism behind two hard guarantees of the translate stage
   calls and yields byte-identical text, because translations are keyed on
   stable content hashes, not list position.
 
-The primary table is keyed ``(book_hash, segment_hash, model, lang)``:
+The primary table is keyed
+``(book_hash, segment_hash, model, lang, prompt_version)``:
 
 * ``book_hash`` — sha1 over the book's ordered segment IDs, pinning a cache
   entry to one specific book.
 * ``segment_hash`` — sha1 over the segment's stripped source text, so two
   segments with identical source text share one translation (extra dedup) and
   a resumed run recognises already-translated text regardless of position.
+* ``prompt_version`` — the :class:`~berilo.prompts.TranslationStyle` version
+  that produced the text. Without it, re-translating a book under a different
+  prompt would silently return the *old* text at zero cost, so a prompt
+  experiment (or a new default prompt) would report "no change" while never
+  calling the model. Databases written before this column existed are migrated
+  in place, their rows attributed to :data:`BASELINE_PROMPT_VERSION`.
 
-A companion ``calls`` table records per-call token/cost accounting for
-reporting, and a ``glossaries`` table memoizes the per-book glossary pass.
+Companion tables: ``calls`` records per-call token/cost accounting for
+reporting, ``glossaries`` memoizes the per-book glossary pass, and
+``book_contexts`` memoizes the per-book style memo used by book-context styles
+(keyed by prompt version as well, and memoized so a resumed run neither
+re-bills the memo call nor silently switches to a differently-worded memo
+mid-book).
 """
 
 from __future__ import annotations
@@ -43,6 +54,32 @@ DEFAULT_CACHE_DIR = Path.home() / ".cache" / "berilo"
 DEFAULT_CACHE_PATH = DEFAULT_CACHE_DIR / "translations.db"
 
 _IN_MEMORY = ":memory:"
+
+#: Prompt version attributed to rows written before the ``prompt_version``
+#: column existed. Those rows were produced by the pre-registry prompts, which
+#: :data:`berilo.prompts.BASELINE` reproduces byte-identically — the equality is
+#: pinned by ``tests/test_cache.py`` so a rename cannot silently invalidate five
+#: books' worth of cached translations.
+BASELINE_PROMPT_VERSION = "baseline_v1"
+
+#: DDL for the primary table. Held as a constant because the migration in
+#: :meth:`TranslationCache._migrate_prompt_version` rebuilds the table from it.
+_TRANSLATIONS_DDL = """
+    CREATE TABLE IF NOT EXISTS {table} (
+        book_hash      TEXT NOT NULL,
+        segment_hash   TEXT NOT NULL,
+        model          TEXT NOT NULL,
+        lang           TEXT NOT NULL,
+        prompt_version TEXT NOT NULL,
+        text           TEXT NOT NULL,
+        cost_eur       REAL NOT NULL DEFAULT 0,
+        created_at     REAL NOT NULL,
+        PRIMARY KEY (book_hash, segment_hash, model, lang, prompt_version)
+    );
+"""
+
+#: Scratch table name used while rebuilding ``translations`` during migration.
+_MIGRATION_TABLE = "translations_migrating"
 
 
 def book_hash(book: Book) -> str:
@@ -94,7 +131,7 @@ class CallRecord:
     """Accounting for one or more API calls, aggregated per stored batch.
 
     Attributes:
-        kind: Call category (``"batch"``, ``"glossary"``).
+        kind: Call category (``"batch"``, ``"glossary"``, ``"book_context"``).
         input_tokens: Total input (prompt) tokens billed.
         output_tokens: Total output (completion) tokens billed.
         cost_eur: Total EUR cost of the call(s).
@@ -127,22 +164,47 @@ class TranslationCache:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
+        self._migrate_prompt_version()
         self._init_schema()
+
+    def _migrate_prompt_version(self) -> None:
+        """Add ``prompt_version`` to an existing pre-registry ``translations``.
+
+        SQLite cannot extend a primary key in place, so the table is rebuilt.
+        The steps are ordered to be crash-recoverable: the scratch table is
+        dropped and re-created first, filled, and only then swapped in — an
+        interrupted migration leaves the original table intact and simply runs
+        again on the next open. Existing rows are attributed to
+        :data:`BASELINE_PROMPT_VERSION`, so no already-translated book re-bills
+        while the prompt is unchanged.
+        """
+        columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(translations)")}
+        if not columns or "prompt_version" in columns:
+            return
+
+        logger.info(
+            "Migrating translation cache %s: attributing existing rows to prompt version %r.",
+            self.db_path,
+            BASELINE_PROMPT_VERSION,
+        )
+        self._conn.execute(f"DROP TABLE IF EXISTS {_MIGRATION_TABLE}")
+        self._conn.executescript(_TRANSLATIONS_DDL.format(table=_MIGRATION_TABLE))
+        with self._conn:
+            self._conn.execute(
+                f"INSERT OR IGNORE INTO {_MIGRATION_TABLE} "
+                "(book_hash, segment_hash, model, lang, prompt_version, text, "
+                "cost_eur, created_at) "
+                "SELECT book_hash, segment_hash, model, lang, ?, text, cost_eur, created_at "
+                "FROM translations",
+                (BASELINE_PROMPT_VERSION,),
+            )
+        self._conn.execute("DROP TABLE translations")
+        self._conn.execute(f"ALTER TABLE {_MIGRATION_TABLE} RENAME TO translations")
 
     def _init_schema(self) -> None:
         """Create the cache tables if they do not already exist."""
         with self._conn:
-            self._conn.executescript("""
-                CREATE TABLE IF NOT EXISTS translations (
-                    book_hash    TEXT NOT NULL,
-                    segment_hash TEXT NOT NULL,
-                    model        TEXT NOT NULL,
-                    lang         TEXT NOT NULL,
-                    text         TEXT NOT NULL,
-                    cost_eur     REAL NOT NULL DEFAULT 0,
-                    created_at   REAL NOT NULL,
-                    PRIMARY KEY (book_hash, segment_hash, model, lang)
-                );
+            self._conn.executescript(_TRANSLATIONS_DDL.format(table="translations") + """
                 CREATE TABLE IF NOT EXISTS calls (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
                     book_hash     TEXT NOT NULL,
@@ -162,10 +224,24 @@ class TranslationCache:
                     created_at REAL NOT NULL,
                     PRIMARY KEY (book_hash, model, lang)
                 );
+                CREATE TABLE IF NOT EXISTS book_contexts (
+                    book_hash      TEXT NOT NULL,
+                    model          TEXT NOT NULL,
+                    lang           TEXT NOT NULL,
+                    prompt_version TEXT NOT NULL,
+                    memo           TEXT NOT NULL,
+                    created_at     REAL NOT NULL,
+                    PRIMARY KEY (book_hash, model, lang, prompt_version)
+                );
                 """)
 
     def get_translation(
-        self, book_hash_: str, segment_hash_: str, model: str, lang: str
+        self,
+        book_hash_: str,
+        segment_hash_: str,
+        model: str,
+        lang: str,
+        prompt_version: str = BASELINE_PROMPT_VERSION,
     ) -> str | None:
         """Return the cached translation for a segment, or ``None`` if absent.
 
@@ -174,31 +250,43 @@ class TranslationCache:
             segment_hash_: The segment's source-text hash.
             model: Model identifier the translation was produced with.
             lang: Target language code.
+            prompt_version: Translation style version that produced the text.
+                Defaults to the baseline, which is also what migrated
+                pre-registry rows are attributed to.
 
         Returns:
             The cached translated text, or ``None`` on a miss.
         """
         row = self._conn.execute(
             "SELECT text FROM translations "
-            "WHERE book_hash = ? AND segment_hash = ? AND model = ? AND lang = ?",
-            (book_hash_, segment_hash_, model, lang),
+            "WHERE book_hash = ? AND segment_hash = ? AND model = ? AND lang = ? "
+            "AND prompt_version = ?",
+            (book_hash_, segment_hash_, model, lang, prompt_version),
         ).fetchone()
         return row["text"] if row is not None else None
 
-    def cached_hashes(self, book_hash_: str, model: str, lang: str) -> set[str]:
+    def cached_hashes(
+        self,
+        book_hash_: str,
+        model: str,
+        lang: str,
+        prompt_version: str = BASELINE_PROMPT_VERSION,
+    ) -> set[str]:
         """Return the set of segment hashes already translated for this key.
 
         Args:
             book_hash_: The owning book's hash.
             model: Model identifier.
             lang: Target language code.
+            prompt_version: Translation style version that produced the text.
 
         Returns:
-            Every ``segment_hash`` present in the cache for the triple.
+            Every ``segment_hash`` present in the cache for the key.
         """
         rows = self._conn.execute(
-            "SELECT segment_hash FROM translations WHERE book_hash = ? AND model = ? AND lang = ?",
-            (book_hash_, model, lang),
+            "SELECT segment_hash FROM translations "
+            "WHERE book_hash = ? AND model = ? AND lang = ? AND prompt_version = ?",
+            (book_hash_, model, lang, prompt_version),
         ).fetchall()
         return {row["segment_hash"] for row in rows}
 
@@ -209,6 +297,7 @@ class TranslationCache:
         lang: str,
         translations: Sequence[SegmentTranslation],
         call: CallRecord,
+        prompt_version: str = BASELINE_PROMPT_VERSION,
     ) -> None:
         """Persist a batch's translations and its call accounting atomically.
 
@@ -222,15 +311,26 @@ class TranslationCache:
             lang: Target language code.
             translations: The batch's segment translations.
             call: Aggregate token/cost accounting for the batch's API call(s).
+            prompt_version: Translation style version that produced the text.
         """
         now = time.time()
         with self._conn:
             self._conn.executemany(
                 "INSERT OR IGNORE INTO translations "
-                "(book_hash, segment_hash, model, lang, text, cost_eur, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(book_hash, segment_hash, model, lang, prompt_version, text, "
+                "cost_eur, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    (book_hash_, t.segment_hash, model, lang, t.text, t.cost_eur, now)
+                    (
+                        book_hash_,
+                        t.segment_hash,
+                        model,
+                        lang,
+                        prompt_version,
+                        t.text,
+                        t.cost_eur,
+                        now,
+                    )
                     for t in translations
                 ],
             )
@@ -293,6 +393,75 @@ class TranslationCache:
                 "INSERT OR REPLACE INTO glossaries "
                 "(book_hash, model, lang, terms_json, created_at) VALUES (?, ?, ?, ?, ?)",
                 (book_hash_, model, lang, json.dumps(dict(terms), ensure_ascii=False), now),
+            )
+            if call is not None:
+                self._conn.execute(
+                    "INSERT INTO calls "
+                    "(book_hash, model, lang, kind, input_tokens, output_tokens, "
+                    "cost_eur, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        book_hash_,
+                        model,
+                        lang,
+                        call.kind,
+                        call.input_tokens,
+                        call.output_tokens,
+                        call.cost_eur,
+                        now,
+                    ),
+                )
+
+    def get_book_context(
+        self, book_hash_: str, model: str, lang: str, prompt_version: str
+    ) -> str | None:
+        """Return the cached per-book style memo, or ``None`` if not built yet.
+
+        Args:
+            book_hash_: The owning book's hash.
+            model: Model identifier the memo was built with.
+            lang: Target language code.
+            prompt_version: Translation style version that asked for the memo.
+
+        Returns:
+            The memo text, or ``None``.
+        """
+        row = self._conn.execute(
+            "SELECT memo FROM book_contexts "
+            "WHERE book_hash = ? AND model = ? AND lang = ? AND prompt_version = ?",
+            (book_hash_, model, lang, prompt_version),
+        ).fetchone()
+        return row["memo"] if row is not None else None
+
+    def store_book_context(
+        self,
+        book_hash_: str,
+        model: str,
+        lang: str,
+        prompt_version: str,
+        memo: str,
+        call: CallRecord | None = None,
+    ) -> None:
+        """Persist the per-book style memo (and optional call accounting).
+
+        Memoizing the memo keeps a resumed run both free and deterministic: it
+        neither re-bills the derivation call nor switches the rest of the book
+        onto differently-worded guidance.
+
+        Args:
+            book_hash_: The owning book's hash.
+            model: Model identifier.
+            lang: Target language code.
+            prompt_version: Translation style version that asked for the memo.
+            memo: The one-paragraph style memo.
+            call: Optional token/cost accounting for the derivation call.
+        """
+        now = time.time()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO book_contexts "
+                "(book_hash, model, lang, prompt_version, memo, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (book_hash_, model, lang, prompt_version, memo, now),
             )
             if call is not None:
                 self._conn.execute(

@@ -2,8 +2,8 @@
 
 Translates a :class:`~berilo.models.Book`'s segments in paragraph batches with
 rolling context and a per-book glossary, resumable via a SQLite cache keyed on
-``(book_hash, segment_hash, model, lang)``. The stage upholds the product's two
-non-negotiable guarantees (CLAUDE.md §2):
+``(book_hash, segment_hash, model, lang, prompt_version)``. The stage upholds
+the product's two non-negotiable guarantees (CLAUDE.md §2):
 
 * **Segment integrity.** The returned book has exactly the same segments — same
   count, order, IDs, positions, and types — as the input. Only ``text`` changes.
@@ -18,6 +18,13 @@ Batching groups consecutive source segments (respecting chapter boundaries)
 into a single numbered completion (``[[1]]`` … ``[[n]]``); the previous batch's
 last few source/target pairs are prepended as *context, do not retranslate* so
 style and terminology stay coherent across chunk boundaries.
+
+Which prompts are used is a parameter, not a constant: every entry point takes
+a :class:`~berilo.prompts.TranslationStyle`, defaulting to
+:data:`~berilo.prompts.BASELINE` so today's output is unchanged. A style may
+also require extra passes — a once-per-book style memo injected into every
+prompt, and a native-editor revision pass over each translated batch — both of
+which are accounted for in the run's cost and in :func:`estimate_cost`.
 
 This module also provides :func:`estimate_cost`, the no-API cost estimator that
 backs ``berilo translate --dry-run``. Its estimate deliberately includes a
@@ -43,6 +50,7 @@ from berilo.cache import (
 )
 from berilo.glossary import Glossary
 from berilo.models import Book, Segment
+from berilo.prompts import BASELINE, TranslationStyle
 from berilo.providers.base import CompletionResult, ContentPolicyError, LLMClient
 
 logger = logging.getLogger(__name__)
@@ -114,33 +122,16 @@ BACK_MATTER_TITLE_PATTERNS = (
 )
 
 # --------------------------------------------------------------------------
-# Prompts.
+# Prompts. The text itself lives in the versioned registry (berilo/prompts.py);
+# this stage only chooses which style to run and how to render its extra passes.
 # --------------------------------------------------------------------------
 
-_TRANSLATE_SYSTEM = (
-    "You are a professional literary translator. Translate the MEANING, not the "
-    "words: preserve register and tone, render idioms natively, and keep "
-    "terminology consistent with the glossary. Preserve any inline HTML tags "
-    "exactly (<em>, <strong>, <i>, <b>, <sub>, <sup>). Each source segment is "
-    "prefixed with a marker like [[1]]. Return EVERY segment, each prefixed with "
-    "its EXACT same marker, in the SAME order, and translate nothing else. Do "
-    "not merge, split, add, or drop segments. Output only the marked "
-    "translations."
-)
+#: Source characters sampled from the book's opening to derive the per-book
+#: style memo for styles that declare a ``book_context_system``.
+BOOK_CONTEXT_EXCERPT_CHARS = 6_000
 
-_TRANSLATE_SYSTEM_STRICT = (
-    _TRANSLATE_SYSTEM + " CRITICAL: the previous attempt did not return exactly one [[n]] marker "
-    "per source segment. Return EXACTLY the same markers you were given — no "
-    "more, no fewer — each on its own line followed by that segment's "
-    "translation."
-)
-
-_SINGLE_SEGMENT_SYSTEM = (
-    "You are a professional literary translator. Translate the MEANING, not the "
-    "words, preserving register, idioms, and any inline HTML tags exactly "
-    "(<em>, <strong>, <i>, <b>, <sub>, <sup>). Reply with ONLY the translation, "
-    "no markers, no commentary."
-)
+#: Estimated output tokens for one book-context memo call (≤ 90 words).
+BOOK_CONTEXT_OUTPUT_TOKENS = 200
 
 
 class TranslationError(RuntimeError):
@@ -165,6 +156,9 @@ class TranslationStats:
         input_tokens: Total input tokens billed this run.
         output_tokens: Total output tokens billed this run.
         cost_eur: Total EUR cost this run.
+        revision_failures: Batches whose revision pass could not be applied
+            (the first-pass translation was kept — integrity is preserved but
+            those segments only have the un-revised quality).
         current_chapter_index: Chapter index of the most recent batch.
         current_chapter_title: Chapter title of the most recent batch.
     """
@@ -175,6 +169,7 @@ class TranslationStats:
     skipped_segments: int = 0
     empty_segments: int = 0
     api_calls: int = 0
+    revision_failures: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     cost_eur: float = 0.0
@@ -244,11 +239,19 @@ def _context_block(context_pairs: Sequence[tuple[str, str]]) -> str:
     )
 
 
+def _book_context_block(book_context: str | None) -> str:
+    """Render the per-book style memo as a prompt block (empty when absent)."""
+    if not book_context:
+        return ""
+    return "BOOK STYLE MEMO (apply to every segment):\n" + book_context.strip()
+
+
 def _build_batch_prompt(
     segments: Sequence[Segment],
     glossary: Glossary | None,
     context_pairs: Sequence[tuple[str, str]],
     target_lang: str,
+    book_context: str | None = None,
 ) -> str:
     """Assemble the user prompt for one batch completion.
 
@@ -257,11 +260,15 @@ def _build_batch_prompt(
         glossary: Optional glossary injected into the prompt.
         context_pairs: Rolling context (previous source/target pairs).
         target_lang: Target language code.
+        book_context: Optional per-book style memo injected into every prompt.
 
     Returns:
         The assembled prompt string.
     """
     blocks: list[str] = [f"Translate into: {target_lang}."]
+    memo = _book_context_block(book_context)
+    if memo:
+        blocks.append(memo)
     if glossary is not None and not glossary.is_empty():
         blocks.append(glossary.to_prompt_block())
     context = _context_block(context_pairs)
@@ -318,17 +325,26 @@ def _translate_single(
     glossary: Glossary | None,
     target_lang: str,
     book_title: str,
+    style: TranslationStyle = BASELINE,
+    book_context: str | None = None,
 ) -> tuple[str, CompletionResult]:
     """Translate one segment on its own (per-segment fallback path).
+
+    Uses the *style's* single-segment prompt and the same per-book memo as the
+    batch path, so a batch that degrades to this fallback keeps the style's
+    quality contract instead of silently reverting to baseline.
 
     Raises:
         TranslationError: If the model returns an empty translation.
     """
     blocks: list[str] = [f"Translate into {target_lang}."]
+    memo = _book_context_block(book_context)
+    if memo:
+        blocks.append(memo)
     if glossary is not None and not glossary.is_empty():
         blocks.append(glossary.to_prompt_block())
     blocks.append(segment.text)
-    result = client.complete(prompt="\n\n".join(blocks), system=_SINGLE_SEGMENT_SYSTEM)
+    result = client.complete(prompt="\n\n".join(blocks), system=style.single_system)
     text = result.text.strip()
     if not text:
         raise TranslationError(
@@ -339,6 +355,21 @@ def _translate_single(
     return text, result
 
 
+@dataclass
+class _BatchOutcome:
+    """One batch's translations plus the accounting needed by the caller.
+
+    Attributes:
+        translations: Translations aligned 1:1 with the batch's segments.
+        results: Every completion result made (token/cost accounting).
+        revision_failed: Whether a declared revision pass could not be applied.
+    """
+
+    translations: list[str]
+    results: list[CompletionResult]
+    revision_failed: bool = False
+
+
 def _translate_batch(
     segments: Sequence[Segment],
     *,
@@ -347,8 +378,10 @@ def _translate_batch(
     context_pairs: Sequence[tuple[str, str]],
     target_lang: str,
     book_title: str,
+    style: TranslationStyle = BASELINE,
+    book_context: str | None = None,
     fallback_client: LLMClient | None = None,
-) -> tuple[list[str], list[CompletionResult]]:
+) -> _BatchOutcome:
     """Translate one batch, retrying then falling back on a bad response.
 
     Attempt 1: numbered batch prompt. On a 1:1 mismatch, attempt 2 retries the
@@ -361,18 +394,22 @@ def _translate_batch(
     the whole batch is retried once against ``fallback_client`` when one is
     configured; without a fallback the refusal is loud.
 
+    When ``style`` declares a revision pass, the accepted translations go
+    through it before being returned.
+
     Returns:
-        A tuple of (translations aligned 1:1 with ``segments``, all completion
-        results made — for token/cost accounting).
+        The :class:`_BatchOutcome` for this batch.
     """
     try:
-        return _translate_batch_attempts(
+        translations, results = _translate_batch_attempts(
             segments,
             client=client,
             glossary=glossary,
             context_pairs=context_pairs,
             target_lang=target_lang,
             book_title=book_title,
+            style=style,
+            book_context=book_context,
         )
     except ContentPolicyError as exc:
         if fallback_client is None:
@@ -385,14 +422,36 @@ def _translate_batch(
             "Content policy refusal for a batch of %d segments; retrying via fallback model.",
             len(segments),
         )
-        return _translate_batch_attempts(
+        client = fallback_client
+        translations, results = _translate_batch_attempts(
             segments,
             client=fallback_client,
             glossary=glossary,
             context_pairs=context_pairs,
             target_lang=target_lang,
             book_title=book_title,
+            style=style,
+            book_context=book_context,
         )
+
+    if style.revise_system is None:
+        return _BatchOutcome(translations=translations, results=results)
+
+    revised, revise_results = _revise_batch(
+        segments,
+        translations,
+        client=client,
+        glossary=glossary,
+        target_lang=target_lang,
+        style=style,
+        book_context=book_context,
+    )
+    results.extend(revise_results)
+    return _BatchOutcome(
+        translations=revised if revised is not None else translations,
+        results=results,
+        revision_failed=revised is None,
+    )
 
 
 def _translate_batch_attempts(
@@ -403,14 +462,14 @@ def _translate_batch_attempts(
     context_pairs: Sequence[tuple[str, str]],
     target_lang: str,
     book_title: str,
+    style: TranslationStyle = BASELINE,
+    book_context: str | None = None,
 ) -> tuple[list[str], list[CompletionResult]]:
     """Run the batch → strict retry → per-segment ladder against one client."""
     results: list[CompletionResult] = []
+    prompt = _build_batch_prompt(segments, glossary, context_pairs, target_lang, book_context)
 
-    first = client.complete(
-        prompt=_build_batch_prompt(segments, glossary, context_pairs, target_lang),
-        system=_TRANSLATE_SYSTEM,
-    )
+    first = client.complete(prompt=prompt, system=style.batch_system)
     results.append(first)
     try:
         return parse_numbered_response(first.text, len(segments)), results
@@ -421,10 +480,7 @@ def _translate_batch_attempts(
             exc,
         )
 
-    second = client.complete(
-        prompt=_build_batch_prompt(segments, glossary, context_pairs, target_lang),
-        system=_TRANSLATE_SYSTEM_STRICT,
-    )
+    second = client.complete(prompt=prompt, system=style.strict_system)
     results.append(second)
     try:
         return parse_numbered_response(second.text, len(segments)), results
@@ -442,10 +498,183 @@ def _translate_batch_attempts(
             glossary=glossary,
             target_lang=target_lang,
             book_title=book_title,
+            style=style,
+            book_context=book_context,
         )
         translations.append(text)
         results.append(result)
     return translations, results
+
+
+def _build_revise_prompt(
+    segments: Sequence[Segment],
+    drafts: Sequence[str],
+    glossary: Glossary | None,
+    target_lang: str,
+    book_context: str | None,
+) -> str:
+    """Assemble the editor-pass prompt: one marker per segment, SOURCE + DRAFT."""
+    blocks: list[str] = [f"Target language: {target_lang}."]
+    memo = _book_context_block(book_context)
+    if memo:
+        blocks.append(memo)
+    if glossary is not None and not glossary.is_empty():
+        blocks.append(glossary.to_prompt_block())
+    blocks.append(
+        "Revise each numbered draft below. Reply with each segment's marker "
+        "followed by the revised translation only:"
+    )
+    blocks.append(
+        "\n\n".join(
+            f"[[{i}]]\nSOURCE: {segment.text}\nDRAFT: {draft}"
+            for i, (segment, draft) in enumerate(zip(segments, drafts), start=1)
+        )
+    )
+    return "\n\n".join(blocks)
+
+
+def _revise_batch(
+    segments: Sequence[Segment],
+    drafts: Sequence[str],
+    *,
+    client: LLMClient,
+    glossary: Glossary | None,
+    target_lang: str,
+    style: TranslationStyle,
+    book_context: str | None,
+) -> tuple[list[str] | None, list[CompletionResult]]:
+    """Run the native-editor revision pass over one already-translated batch.
+
+    The pass is quality-only: it must never change the segment mapping. A reply
+    that does not map 1:1 onto the batch is retried strictly once and then
+    abandoned — the caller keeps the first-pass translations, so segment
+    integrity holds and the loss of fluency is surfaced as
+    :attr:`TranslationStats.revision_failures` rather than corrupting the book.
+
+    Returns:
+        ``(revised_translations_or_None, completion_results)``; ``None`` means
+        the pass could not be applied.
+    """
+    prompt = _build_revise_prompt(segments, drafts, glossary, target_lang, book_context)
+    results: list[CompletionResult] = []
+    systems = [style.revise_system, style.revise_strict_system]
+
+    for attempt, system in enumerate(systems, start=1):
+        assert system is not None  # guarded by style.revise_system is not None
+        try:
+            result = client.complete(prompt=prompt, system=system)
+        except ContentPolicyError as exc:
+            logger.warning(
+                "Revision pass refused on content-policy grounds for a batch of "
+                "%d segments; keeping the un-revised translation: %s",
+                len(segments),
+                exc,
+            )
+            return None, results
+        results.append(result)
+        try:
+            return parse_numbered_response(result.text, len(segments)), results
+        except ValueError as exc:
+            logger.warning(
+                "Revision pass attempt %d returned a bad mapping (%s).",
+                attempt,
+                exc,
+            )
+
+    logger.warning(
+        "Revision pass failed for a batch of %d segments; keeping the un-revised translation.",
+        len(segments),
+    )
+    return None, results
+
+
+def build_book_context(
+    book: Book,
+    *,
+    client: LLMClient,
+    style: TranslationStyle,
+    target_lang: str,
+    model: str | None = None,
+    cache: TranslationCache | None = None,
+    excerpt_chars: int = BOOK_CONTEXT_EXCERPT_CHARS,
+) -> tuple[str | None, CompletionResult | None]:
+    """Derive (or load) the one-paragraph per-book style memo for ``style``.
+
+    Makes at most one LLM call, memoized in the cache under
+    ``(book, model, lang, prompt_version)``. Styles without a
+    ``book_context_system`` return ``(None, None)`` without calling anything.
+
+    Args:
+        book: The source book.
+        client: LLM client for the single derivation call.
+        style: The translation style asking for the memo.
+        target_lang: Target language code.
+        model: Model identifier for cache keying; defaults to ``client.model``.
+        cache: Optional cache for memoization.
+        excerpt_chars: Source characters sampled from the book's opening.
+
+    Returns:
+        ``(memo_or_None, completion_result_or_None)``; the result is ``None``
+        on a cache hit or when the style needs no memo.
+    """
+    if style.book_context_system is None:
+        return None, None
+
+    model_name = model if model is not None else getattr(client, "model", "unknown")
+    bhash = book_hash(book)
+    if cache is not None:
+        cached = cache.get_book_context(bhash, model_name, target_lang, style.version)
+        if cached is not None:
+            logger.info("Book-context memo cache hit (%d chars).", len(cached))
+            return cached, None
+
+    excerpt = _book_excerpt(book, excerpt_chars)
+    if not excerpt.strip():
+        return None, None
+
+    prompt = (
+        f"Title: {book.title}\n"
+        f"Author(s): {', '.join(book.authors) or 'unknown'}\n"
+        f"Target language: {target_lang}\n\n"
+        f"Opening excerpt:\n{excerpt}"
+    )
+    result = client.complete(prompt=prompt, system=style.book_context_system)
+    memo = result.text.strip()
+    if not memo:
+        logger.warning("Book-context memo came back empty; translating without it.")
+        return None, result
+
+    logger.info("Book-context memo derived (%d chars).", len(memo))
+    if cache is not None:
+        cache.store_book_context(
+            bhash,
+            model_name,
+            target_lang,
+            style.version,
+            memo,
+            CallRecord(
+                kind="book_context",
+                input_tokens=result.input_tokens,
+                output_tokens=result.output_tokens,
+                cost_eur=result.cost_eur,
+            ),
+        )
+    return memo, result
+
+
+def _book_excerpt(book: Book, max_chars: int) -> str:
+    """Concatenate the book's opening non-empty segments, capped at ``max_chars``."""
+    parts: list[str] = []
+    used = 0
+    for segment in book.segments:
+        text = segment.text.strip()
+        if not text:
+            continue
+        parts.append(text)
+        used += len(text)
+        if used >= max_chars:
+            break
+    return "\n".join(parts)[:max_chars]
 
 
 def _aggregate_call(results: Sequence[CompletionResult], kind: str) -> CallRecord:
@@ -470,6 +699,7 @@ def translate_book(
     skip_segment_ids: Collection[str] = (),
     on_progress: ProgressCallback | None = None,
     fallback_client: LLMClient | None = None,
+    style: TranslationStyle = BASELINE,
 ) -> Book:
     """Translate every eligible segment of ``book`` into ``target_lang``.
 
@@ -492,6 +722,10 @@ def translate_book(
             :class:`TranslationStats` after each batch and once at the end.
         fallback_client: Optional second-provider client used only for
             batches the primary provider refuses on content-policy grounds.
+        style: Translation style (prompt set + extra passes). Its
+            ``version`` participates in the cache key, so switching styles
+            re-translates instead of serving text produced by another prompt.
+            Defaults to :data:`~berilo.prompts.BASELINE`.
 
     Returns:
         A new :class:`~berilo.models.Book` with the same segments (count, order,
@@ -504,7 +738,22 @@ def translate_book(
     model = client.model
     bhash = book_hash(book)
     skip = set(skip_segment_ids)
+    prompt_version = style.version
     stats = TranslationStats(total_segments=len(book.segments))
+
+    book_context, context_result = build_book_context(
+        book,
+        client=client,
+        style=style,
+        target_lang=target_lang,
+        model=model,
+        cache=cache,
+    )
+    if context_result is not None:
+        stats.api_calls += 1
+        stats.input_tokens += context_result.input_tokens
+        stats.output_tokens += context_result.output_tokens
+        stats.cost_eur += context_result.cost_eur
 
     output: list[Segment] = []
     recent_pairs: list[tuple[str, str]] = []
@@ -532,7 +781,7 @@ def translate_book(
             continue
 
         shash = segment_hash(segment.text)
-        cached = cache.get_translation(bhash, shash, model, target_lang)
+        cached = cache.get_translation(bhash, shash, model, target_lang, prompt_version)
         if cached is not None:
             output.append(replace(segment, text=cached))
             _remember(segment.text, cached)
@@ -551,22 +800,27 @@ def translate_book(
             if candidate.id in skip or not candidate.text.strip():
                 break
             if (
-                cache.get_translation(bhash, segment_hash(candidate.text), model, target_lang)
+                cache.get_translation(
+                    bhash, segment_hash(candidate.text), model, target_lang, prompt_version
+                )
                 is not None
             ):
                 break
             batch.append(candidate)
             cursor += 1
 
-        translations, results = _translate_batch(
+        outcome = _translate_batch(
             batch,
             client=client,
             glossary=glossary,
             context_pairs=list(recent_pairs),
             target_lang=target_lang,
             book_title=book.title,
+            style=style,
+            book_context=book_context,
             fallback_client=fallback_client,
         )
+        translations, results = outcome.translations, outcome.results
 
         # Persist immediately (kill-safety) — one transaction per batch.
         call = _aggregate_call(results, kind="batch")
@@ -584,6 +838,7 @@ def translate_book(
                 for seg, text in zip(batch, translations)
             ],
             call,
+            prompt_version,
         )
 
         for seg, text in zip(batch, translations):
@@ -592,6 +847,7 @@ def translate_book(
 
         stats.translated_segments += len(batch)
         stats.api_calls += len(results)
+        stats.revision_failures += int(outcome.revision_failed)
         stats.input_tokens += call.input_tokens
         stats.output_tokens += call.output_tokens
         stats.cost_eur += call.cost_eur
@@ -647,6 +903,7 @@ class CostEstimate:
     Attributes:
         model: Model the estimate is priced for.
         target_lang: Target language code.
+        prompt_version: Translation style version the estimate is priced for.
         total_segments: Total segments in the book.
         translatable_segments: Segments that would be sent to the API.
         skipped_segments: Segments passed through untranslated (back matter).
@@ -657,10 +914,14 @@ class CostEstimate:
         output_tokens: Estimated total output tokens (incl. reasoning surcharge).
         cost_eur: Estimated total EUR cost.
         chapters: Per-chapter breakdown (translatable chapters only).
+        revision_calls: Extra editor-pass calls the style requires (one per
+            batch for a revising style, zero otherwise).
+        book_context_calls: Extra per-book style-memo calls (0 or 1).
     """
 
     model: str
     target_lang: str
+    prompt_version: str
     total_segments: int
     translatable_segments: int
     skipped_segments: int
@@ -671,6 +932,8 @@ class CostEstimate:
     output_tokens: int
     cost_eur: float
     chapters: list[ChapterEstimate] = field(default_factory=list)
+    revision_calls: int = 0
+    book_context_calls: int = 0
 
 
 def _batches_for(segment_count: int, batch_size: int) -> int:
@@ -688,14 +951,20 @@ def estimate_cost(
     batch_size: int = DEFAULT_BATCH_SIZE,
     skip_segment_ids: Collection[str] = (),
     glossary: bool = True,
+    style: TranslationStyle = BASELINE,
 ) -> CostEstimate:
     """Estimate the cost of translating ``book`` without making any API calls.
 
     Token counts use a chars/4 heuristic plus fixed per-batch prompt overhead.
     For reasoning-billing models the estimate adds
     :data:`REASONING_TOKENS_PER_CALL` output tokens per API call (glossary +
-    batches), because those models bill hidden reasoning tokens as output and
-    would otherwise be underestimated.
+    batches + any extra passes), because those models bill hidden reasoning
+    tokens as output and would otherwise be underestimated.
+
+    The estimate is priced for the style it is asked about: a revising style
+    adds one editor call per batch (which reads the source *and* the draft, and
+    writes the draft again — roughly doubling the bill), and a book-context
+    style adds one memo call for the book.
 
     Args:
         book: The source book.
@@ -704,6 +973,7 @@ def estimate_cost(
         batch_size: Segments per batch (drives the batch count).
         skip_segment_ids: Segment IDs excluded from translation (back matter).
         glossary: Whether a glossary extraction call is included in the estimate.
+        style: Translation style being priced (drives the extra passes).
 
     Returns:
         The :class:`CostEstimate`, including a per-chapter breakdown.
@@ -712,6 +982,7 @@ def estimate_cost(
 
     skip = set(skip_segment_ids)
     reasoning = _is_reasoning_model(model)
+    revising = style.revise_system is not None
 
     # Group translatable segments by chapter, preserving first-seen order.
     chapters: dict[int, dict[str, object]] = {}
@@ -734,6 +1005,7 @@ def estimate_cost(
     chapter_estimates: list[ChapterEstimate] = []
     total_batches = 0
     total_reasoning = 0
+    total_revision_calls = 0
     for chapter_index in sorted(chapters):
         entry = chapters[chapter_index]
         seg_count = int(entry["segments"])  # type: ignore[arg-type]
@@ -742,9 +1014,21 @@ def estimate_cost(
         total_batches += batches
 
         source_tokens = chars // CHARS_PER_TOKEN
+        target_tokens = int(source_tokens * TARGET_EXPANSION)
         input_tokens = source_tokens + batches * PROMPT_OVERHEAD_TOKENS_PER_BATCH
-        output_tokens = int(source_tokens * TARGET_EXPANSION)
-        reasoning_tokens = batches * REASONING_TOKENS_PER_CALL if reasoning else 0
+        output_tokens = target_tokens
+        calls = batches
+
+        if revising:
+            # The editor pass re-reads the source and the draft, and rewrites
+            # the draft: input ≈ source + draft, output ≈ draft.
+            overhead = batches * PROMPT_OVERHEAD_TOKENS_PER_BATCH
+            input_tokens += source_tokens + target_tokens + overhead
+            output_tokens += target_tokens
+            calls += batches
+            total_revision_calls += batches
+
+        reasoning_tokens = calls * REASONING_TOKENS_PER_CALL if reasoning else 0
         output_tokens += reasoning_tokens
         total_reasoning += reasoning_tokens
 
@@ -760,22 +1044,31 @@ def estimate_cost(
         )
 
     # Glossary extraction: one call over a sampled excerpt.
-    glossary_input = 0
-    glossary_output = 0
+    extra_input = 0
+    extra_output = 0
     if glossary and chapter_estimates:
         from berilo.glossary import DEFAULT_MAX_SAMPLE_CHARS
 
-        glossary_input = DEFAULT_MAX_SAMPLE_CHARS // CHARS_PER_TOKEN
-        glossary_output = 300 + (REASONING_TOKENS_PER_CALL if reasoning else 0)
+        extra_input += DEFAULT_MAX_SAMPLE_CHARS // CHARS_PER_TOKEN
+        extra_output += 300 + (REASONING_TOKENS_PER_CALL if reasoning else 0)
         total_reasoning += REASONING_TOKENS_PER_CALL if reasoning else 0
 
-    input_tokens = sum(c.input_tokens for c in chapter_estimates) + glossary_input
-    output_tokens = sum(c.output_tokens for c in chapter_estimates) + glossary_output
+    # Book-context memo: one call over the book's opening excerpt.
+    book_context_calls = 0
+    if style.book_context_system is not None and chapter_estimates:
+        book_context_calls = 1
+        extra_input += BOOK_CONTEXT_EXCERPT_CHARS // CHARS_PER_TOKEN
+        extra_output += BOOK_CONTEXT_OUTPUT_TOKENS + (REASONING_TOKENS_PER_CALL if reasoning else 0)
+        total_reasoning += REASONING_TOKENS_PER_CALL if reasoning else 0
+
+    input_tokens = sum(c.input_tokens for c in chapter_estimates) + extra_input
+    output_tokens = sum(c.output_tokens for c in chapter_estimates) + extra_output
     total_cost = cost_eur(model, input_tokens, output_tokens)
 
     return CostEstimate(
         model=model,
         target_lang=target_lang,
+        prompt_version=style.version,
         total_segments=len(book.segments),
         translatable_segments=sum(c.segments for c in chapter_estimates),
         skipped_segments=skipped,
@@ -786,4 +1079,6 @@ def estimate_cost(
         output_tokens=output_tokens,
         cost_eur=total_cost,
         chapters=chapter_estimates,
+        revision_calls=total_revision_calls,
+        book_context_calls=book_context_calls,
     )
