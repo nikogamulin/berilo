@@ -258,8 +258,27 @@ MIN_IMAGE_DIMENSION_PX = 64
 
 # An image covering at least this share of the page area is a full-page SCAN,
 # not a figure: OCR-sourced PDFs place the whole page bitmap behind the text
-# layer, and carrying those would embed the entire book twice.
+# layer, and carrying those would embed a photographic copy of the whole book
+# (untranslated English) alongside the translated text.
+#
+# Measured on the two example PDFs, which look alike (both ~530 pages, both
+# with a text layer — a text layer does NOT discriminate) and are opposites:
+#   Active Measures  109 placements, coverage p50=0.21 p90=0.32, ONE at >=0.9
+#   World Ends      1064 placements, coverage min=max=1.000, ALL at >=0.9
+# The two populations do not overlap, so any cut in (0.32, 1.0) separates
+# them; 0.9 keeps a genuine near-full-page plate on the figure side.
 FULL_PAGE_IMAGE_AREA_RATIO = 0.9
+
+# Book-level scan detector, applied before any image is decoded. A book where
+# this share of pages carries a page-sized image is a scan front to back, so
+# image extraction is skipped wholesale rather than per instance (CLAUDE.md §9:
+# fix quality gates by CLASS). Deliberately uses a LOWER per-image bar than
+# FULL_PAGE_IMAGE_AREA_RATIO so a scanned book whose rasters sit inside a
+# margin — and would individually slip under the full-page test — is still
+# caught as a book.
+# Measured: World Ends 532/532 pages (100%); Active Measures 1/522 (0.2%).
+SCANNED_PAGE_IMAGE_AREA_RATIO = 0.5
+SCANNED_BOOK_PAGE_SHARE = 0.5
 
 # The same image appearing on at least this many pages is furniture (a logo,
 # a watermark, a chapter ornament) — mirrors RUNNING_HEAD_MIN_PAGES.
@@ -340,7 +359,11 @@ def normalize_pdf(path: Path) -> Book:
     path = Path(path)
     with fitz.open(path) as doc:
         pages = [_extract_page_lines(doc[i], i) for i in range(doc.page_count)]
-        page_images = [_extract_page_images(doc[i], i) for i in range(doc.page_count)]
+        page_images = (
+            []
+            if _is_scanned_book(doc)
+            else [_extract_page_images(doc[i], i) for i in range(doc.page_count)]
+        )
         toc = doc.get_toc(simple=True) or []
         metadata = doc.metadata or {}
     title = metadata.get("title") or path.stem
@@ -447,6 +470,45 @@ def _image_media_type(data: bytes, ext: str) -> tuple[bytes, str] | None:
     except (RuntimeError, ValueError) as exc:
         logger.warning("Could not re-encode a %s image to PNG: %s", ext, exc)
         return None
+
+
+def _is_scanned_book(doc: fitz.Document) -> bool:
+    """True if *doc* is a page-by-page scan rather than a text PDF with figures.
+
+    Surveys geometry only (``page.get_image_info()`` returns bounding boxes
+    without materializing pixel data), so a 532-page scan costs ~0.3s to
+    reject instead of decoding a thousand full-page rasters. A text layer does
+    NOT discriminate — both example PDFs have one; page coverage does.
+
+    Args:
+        doc: The open PyMuPDF document.
+
+    Returns:
+        True if at least :data:`SCANNED_BOOK_PAGE_SHARE` of pages carry a
+        page-sized image, in which case no image is worth extracting.
+    """
+    if not doc.page_count:
+        return False
+    scanned_pages = 0
+    for index in range(doc.page_count):
+        page = doc[index]
+        page_area = abs(page.rect.get_area()) or 1.0
+        if any(
+            abs(fitz.Rect(info["bbox"]).get_area()) / page_area >= SCANNED_PAGE_IMAGE_AREA_RATIO
+            for info in page.get_image_info()
+        ):
+            scanned_pages += 1
+    share = scanned_pages / doc.page_count
+    if share < SCANNED_BOOK_PAGE_SHARE:
+        return False
+    logger.info(
+        "skipping image extraction: %.0f%% of pages (%d/%d) carry a page-sized "
+        "image, so this PDF is a scan, not an illustrated text",
+        share * 100,
+        scanned_pages,
+        doc.page_count,
+    )
+    return True
 
 
 def _extract_page_images(page: fitz.Page, page_index: int) -> list[_PdfImage]:

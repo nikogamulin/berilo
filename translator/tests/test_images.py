@@ -29,6 +29,7 @@ from berilo.normalize.pdf import (
     FULL_PAGE_IMAGE_AREA_RATIO,
     MIN_IMAGE_DIMENSION_PX,
     RECURRING_IMAGE_MIN_PAGES,
+    SCANNED_BOOK_PAGE_SHARE,
     normalize_pdf,
 )
 
@@ -543,6 +544,76 @@ def test_pdf_full_page_scan_is_skipped(tmp_path: Path, png_image) -> None:
     assert book.segments  # the text layer still normalizes
     assert book.images == []
     assert FULL_PAGE_IMAGE_AREA_RATIO < 1.0
+
+
+def _scan_shaped_pdf(
+    tmp_path: Path, png_image, *, pages: int, raster_pages: int, name: str
+) -> Path:
+    """A PDF where *raster_pages* of *pages* carry a page-covering raster.
+
+    Every page also gets a real text layer, because a text layer does NOT
+    discriminate a scan from an illustrated text — both example PDFs have one.
+    """
+    lines, _ = _figure_page(png_image)
+    doc = fitz.open()
+    for index in range(pages):
+        page = doc.new_page()
+        if index < raster_pages:
+            page.insert_image(page.rect, stream=png_image(400, 560, (index, 40, 40)))
+        else:
+            # A figure-sized plate: well under the page-sized bar.
+            page.insert_image(
+                fitz.Rect(72, 150, 272, 300), stream=png_image(120, 90, (index, 200, 60))
+            )
+        for x, y, text in lines:
+            page.insert_text((x, y), text, fontsize=_BODY_SIZE)
+    path = tmp_path / name
+    doc.save(str(path))
+    doc.close()
+    return path
+
+
+def test_pdf_book_of_page_rasters_is_treated_as_a_scan(tmp_path: Path, png_image) -> None:
+    """World Ends' shape: every page is a raster, so extract nothing at all.
+
+    Measured on the real book: 532/532 pages carry an image covering 1.000 of
+    the page. Carrying those would embed a photographic copy of the whole
+    untranslated English book inside the translated EPUB.
+    """
+    path = _scan_shaped_pdf(tmp_path, png_image, pages=6, raster_pages=6, name="scanned.pdf")
+
+    book = normalize_pdf(path)
+
+    assert book.segments  # the text layer still normalizes
+    assert book.images == []
+
+
+def test_pdf_photo_insert_book_still_yields_its_figures(tmp_path: Path, png_image) -> None:
+    """Active Measures' shape: real figures on a minority of pages survive.
+
+    Measured on the real book: only 1 of 522 pages carries a page-sized image,
+    and figure coverage sits at p50=0.21 / p90=0.32 — far below the bar.
+    """
+    path = _scan_shaped_pdf(tmp_path, png_image, pages=6, raster_pages=1, name="figures.pdf")
+
+    book = normalize_pdf(path)
+
+    # The one page raster is dropped; the five figure-sized plates survive.
+    assert len(book.images) == 5
+
+
+def test_pdf_scan_detection_is_a_book_level_class_decision(tmp_path: Path, png_image) -> None:
+    """The boundary itself: same page shapes, only the SHARE of pages differs."""
+    below = normalize_pdf(
+        _scan_shaped_pdf(tmp_path, png_image, pages=8, raster_pages=3, name="below.pdf")
+    )
+    above = normalize_pdf(
+        _scan_shaped_pdf(tmp_path, png_image, pages=8, raster_pages=5, name="above.pdf")
+    )
+
+    assert SCANNED_BOOK_PAGE_SHARE == 0.5
+    assert len(below.images) == 5  # 3/8 < 0.5 -> not a scan, figures kept
+    assert above.images == []  # 5/8 >= 0.5 -> scan, nothing extracted
 
 
 def test_pdf_recurring_logo_is_dropped_as_furniture(tmp_path: Path, png_image) -> None:
