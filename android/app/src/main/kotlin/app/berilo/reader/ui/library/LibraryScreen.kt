@@ -1,5 +1,6 @@
 package app.berilo.reader.ui.library
 
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -132,6 +133,8 @@ private fun LibraryGrid(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BookCard(book: Book, onClick: () -> Unit, onLongClick: () -> Unit) {
+    val fallbackCover = fallbackCoverFor(book.title)
+
     Column(
         modifier =
             Modifier
@@ -140,7 +143,8 @@ private fun BookCard(book: Book, onClick: () -> Unit, onLongClick: () -> Unit) {
     ) {
         Box {
             AsyncImage(
-                model = book.coverPath,
+                model = book.coverPath ?: fallbackCover,
+                error = painterResource(fallbackCover),
                 contentDescription = stringResource(R.string.library_book_cover_cd, book.title),
                 contentScale = ContentScale.Crop,
                 modifier =
@@ -158,6 +162,24 @@ private fun BookCard(book: Book, onClick: () -> Unit, onLongClick: () -> Unit) {
             maxLines = 2,
             modifier = Modifier.padding(top = 8.dp),
         )
+    }
+}
+
+/**
+ * Curated, text-free covers for the translated books bundled with the project.
+ * Imported EPUB artwork still wins; these are only used when cover extraction
+ * produces no usable file.
+ */
+@DrawableRes
+internal fun fallbackCoverFor(title: String): Int {
+    val normalized = title.lowercase()
+    return when {
+        "active measures" in normalized -> R.drawable.cover_active_measures
+        "sandworm" in normalized -> R.drawable.cover_sandworm
+        "new rules of war" in normalized -> R.drawable.cover_new_rules_of_war
+        "revenge of geography" in normalized -> R.drawable.cover_revenge_of_geography
+        "this is how they tell me the world ends" in normalized -> R.drawable.cover_world_ends
+        else -> R.drawable.ic_book
     }
 }
 
