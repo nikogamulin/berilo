@@ -19,6 +19,19 @@
   mean before** the bootstrap arrays (`rubric_t.py`). Flattening N repeats of M
   samples into one N×M array would fake an N-fold larger sample and shrink the
   CI without adding information — the tempting-but-wrong implementation.
+- [2026-07-25] **A 60-segment A/B predicted the 1294-segment outcome almost
+  exactly**: the harness measured T3 **+1.93/20** for `revise_v1` from 6
+  contiguous runs at €0.26; the full-book run delivered **+1.9** (12.0→13.9).
+  Paired, cluster-bootstrapped sampling under production batching conditions is
+  therefore a trustworthy stand-in for a full run — hypotheses can be screened
+  at ~1/6 the cost and ~1/20 the wall-clock before committing to a book.
+- [2026-07-25] **Fixing a measurement artifact can LOWER the score, and that is
+  correct.** After S1.13 cleaned the body-prose pool, Kaplan went 89.0 → 88.0:
+  the removed segments were untranslated English headings that the meaning
+  judge had been scoring **5/5** (a title "translates" perfectly) while the
+  fluency judge scored 1/5. They were inflating T2 more than they depressed T3.
+  Expect artifact removal to move a score either way; judge the fix by pool
+  cleanliness (0 byte-identical source/target pairs), not by score direction.
 - [2026-07-25] **The fluency win comes from a SECOND PASS, not from a better
   prompt.** E2 bake-off (Kaplan, 6 contiguous runs × 10 segments, cluster
   bootstrap, seed 42): `sl_style_v1` — an explicit Slovenian style contract in

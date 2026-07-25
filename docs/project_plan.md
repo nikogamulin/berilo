@@ -94,17 +94,19 @@
 - [x] Verify run 2026-07-25 on merged `main`: 216 passed, lint clean; Supervisor-audited that `cluster_bootstrap_ci` resamples whole runs and that a test asserts production batch shapes (not just the function name). Used live for the E2 bake-off at €0.20–0.26 per hypothesis
 - **Verify:** offline — `python3 -m pytest tests/ -k experiment` green with mocked translate+judge, asserting the harness calls `translate_book` (not a bespoke path), that control and variant do not collide in the cache, and that the reported CI is cluster-bootstrapped. Live (Supervisor, ≤ €0.10): `berilo ab "data/examples/The Revenge of Geography.sl.epub" --variant sl_style_v1 --dry-run` then one real run inside budget.
 
-### S1.13 — Fix chapter-title fallback when TOC/nav fails to parse (2 pt)
+### S1.13 — Fix chapter-title fallback when TOC/nav fails to parse (2 pt) ✅
 *Defect found by the E1 calibration run, 2026-07-25. Gates a clean E3 measurement because Kaplan is the chosen book.*
-- [ ] When both `toc.ncx` and the nav document fail to resolve (manifest names absent from the archive), fall back to per-spine-item headings rather than to the book title. Today 94.9% of Kaplan's segments inherit the book title, which makes rubric v1.1's front/back-matter fold inert and lets untranslated TOC headings into the body-prose pool
-- [ ] Heading-like segments that are byte-identical to their source after translation must be typed out of the PARAGRAPH prose pool (they are headings, not prose) — fix by CLASS per §9, never per instance
-- [ ] Emit a loud warning (not the current cosmetic one) when the title-fallback share exceeds a threshold — a silent 95% fallback is how this hid
+- [x] When both `toc.ncx` and the nav document fail to resolve (manifest names absent from the archive), fall back to per-spine-item headings rather than to the book title. Today 94.9% of Kaplan's segments inherit the book title, which makes rubric v1.1's front/back-matter fold inert and lets untranslated TOC headings into the body-prose pool
+- [x] Heading-like segments that are byte-identical to their source after translation must be typed out of the PARAGRAPH prose pool (they are headings, not prose) — fix by CLASS per §9, never per instance
+- [x] Emit a loud warning (not the current cosmetic one) when the title-fallback share exceeds a threshold — a silent 95% fallback is how this hid
+- [x] Verify run 2026-07-25: title-fallback share 32.8 / 17.3 / **38.6** / 40.4 / 32.3 % — all < 50%; the seed-42 dump contains **0** byte-identical source/target samples (was 1–2); 239 passed on merged `main`, lint clean; no segment/chapter-count regression on any book; `book_hash` unchanged so both arms rebuilt from cache at €0
 - **Verify:** title-fallback share for all five example books printed and **< 50% each** (Kaplan is 94.9% today); `berilo eval "…Revenge of Geography.sl.epub" --sample 30 --seed 42 --dump` contains **zero** samples whose target is byte-identical to its English source; `make test && make lint` green.
 
 ### S1.12 — Promote the winning prompt (2 pt)
 - [x] `revise_v1` is the default style (`prompts.DEFAULT`); `translate --style <name>` selects any registry style; the choice flows through the dry-run estimate, confirmation prompt, cache key and run summary, and `revision_failures` is surfaced loudly
 - [x] Verify run 2026-07-25: 227 passed, lint clean. E2 deltas recorded in `loops/build/ledger.jsonl` and `docs/findings.md`
-- [ ] One full book re-translated and re-scored (Niko approved 2026-07-25, ~€1.22 estimated; **run in flight**)
+- [x] Full book re-translated and re-scored 2026-07-25 (Niko approved): **Kaplan 83.9 [81.7,86.1] → 88.0 [86.2,89.9]**, +4.1 pts with essentially disjoint CIs, both arms measured under the SAME fixed normalization. T2 24.6→26.7, T3 12.0→13.9, T4 7.6→7.7, T1 100%, T5 10/10, epubcheck 0 errors. Actual €1.4494 vs €1.2173 estimate (1.19×, inside T7's 1.5× clause); zero revision failures
+- [ ] Residual: T3 lands at 13.9/20, short of the plan's G3 target of 16 — the revision pass is a real, replicated gain but does not close the fluency gap alone. Next hypotheses in `docs/plans/2026-07-25-fluency-uplift.md`
 - **Verify:** Rubric T on the re-translated book **≥ 89** with T3 ≥ 16/20, T2 not regressed beyond −0.5 pts, T1 = 100%, T7 = 5; score row in `rubric_scores.jsonl`.
 
 ---
