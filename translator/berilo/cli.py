@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from berilo import prompts
 from berilo.cache import BASELINE_PROMPT_VERSION
 from berilo.models import Book
 from berilo.normalize import normalize
@@ -59,6 +60,16 @@ def cli() -> None:
 @click.option("--no-glossary", is_flag=True, help="Disable the per-book glossary pass.")
 @click.option("--yes", "-y", "assume_yes", is_flag=True, help="Skip the cost confirmation prompt.")
 @click.option(
+    "--style",
+    "style_name",
+    default=None,
+    help=(
+        "Translation prompt style from berilo.prompts "
+        f"(default: {prompts.DEFAULT_STYLE_NAME}, which adds a native-editor "
+        "revision pass; use baseline_v1 for the cheaper single-pass prompt)."
+    ),
+)
+@click.option(
     "--cache-db",
     default=None,
     type=click.Path(),
@@ -82,6 +93,7 @@ def translate(
     skip_back_matter: bool,
     no_glossary: bool,
     assume_yes: bool,
+    style_name: str | None,
     cache_db: str | None,
     output: str | None,
 ) -> None:
@@ -90,11 +102,21 @@ def translate(
     A real run REQUIRES the user's go-ahead for the printed cost estimate (this
     is enforced socially — the estimate and a "proceeding" line print first).
     Use ``--dry-run`` to see the estimate without spending anything.
+
+    The prompt style defaults to :data:`berilo.prompts.DEFAULT`; pass
+    ``--style baseline_v1`` for the cheaper single-pass prompt.
     """
     from dotenv import find_dotenv
 
     from berilo.config import load_config
     from berilo.translate import back_matter_segment_ids, estimate_cost
+
+    try:
+        style = prompts.get_style(style_name or prompts.DEFAULT_STYLE_NAME)
+    except KeyError as exc:
+        click.echo(f"translate: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
 
     try:
         book = normalize(source_file)
@@ -116,8 +138,9 @@ def translate(
             target_lang=lang,
             skip_segment_ids=skip_ids,
             glossary=not no_glossary,
+            style=style,
         )
-        _print_estimate(estimate, skip_back_matter=skip_back_matter)
+        _print_estimate(estimate, skip_back_matter=skip_back_matter, style=style)
         ctx.exit(0)
         return
 
@@ -146,11 +169,12 @@ def translate(
         target_lang=lang,
         skip_segment_ids=skip_ids,
         glossary=not no_glossary,
+        style=style,
     )
     click.echo(
         f"Estimated cost: €{estimate.cost_eur:.4f} "
         f"({estimate.translatable_segments} segments, ~{estimate.batches} batches, "
-        f"model {model_name})."
+        f"model {model_name}, style {style.name})."
     )
     if not assume_yes and not click.confirm(f"Proceed with translation into '{lang}'?"):
         ctx.exit(0)
@@ -184,11 +208,13 @@ def translate(
             skip_segment_ids=skip_ids,
             on_progress=_on_progress,
             fallback_client=fallback_client,
+            style=style,
         )
         _print_summary(
             latest.get("stats"),
             skip_back_matter=skip_back_matter,
             total_cost_eur=tracked_client.total_cost_eur,
+            style=style,
         )
 
         out_path = Path(output) if output else _default_output_path(source_file, lang)
@@ -203,9 +229,29 @@ def _default_output_path(source_file: str, lang: str) -> Path:
     return source.with_name(f"{source.stem}.{lang}.epub")
 
 
-def _print_estimate(estimate: CostEstimate, *, skip_back_matter: bool) -> None:
-    """Print the dry-run per-chapter table and total estimated cost."""
-    click.echo(f"Dry run — model {estimate.model} → '{estimate.target_lang}'. No API calls.")
+def _print_estimate(
+    estimate: CostEstimate,
+    *,
+    skip_back_matter: bool,
+    style: prompts.TranslationStyle | None = None,
+) -> None:
+    """Print the dry-run per-chapter table and total estimated cost.
+
+    Args:
+        estimate: The computed dry-run estimate.
+        skip_back_matter: Whether back matter was excluded from the estimate.
+        style: Prompt style the estimate was priced for, named in the header so
+            a two-pass style's higher figure is never mistaken for a bug.
+    """
+    style_note = f", style {style.name}" if style is not None else ""
+    click.echo(
+        f"Dry run — model {estimate.model} → '{estimate.target_lang}'{style_note}. No API calls."
+    )
+    if style is not None and style.revise_system is not None:
+        click.echo(
+            f"  Style '{style.name}' runs a second native-editor pass per batch, "
+            "so it makes roughly twice the calls of a single-pass style."
+        )
     click.echo(f"{'chapter':<48} {'segments':>9} {'est.tokens':>11}")
     for chapter in estimate.chapters:
         title = (chapter.title or f"chapter {chapter.index}")[:46]
@@ -255,23 +301,43 @@ class _CostTrackingClient(LLMClient):
 
 
 def _print_summary(
-    stats: TranslationStats | None, *, skip_back_matter: bool, total_cost_eur: float | None = None
+    stats: TranslationStats | None,
+    *,
+    skip_back_matter: bool,
+    total_cost_eur: float | None = None,
+    style: prompts.TranslationStyle | None = None,
 ) -> None:
-    """Print the end-of-run summary line."""
+    """Print the end-of-run summary line.
+
+    Args:
+        stats: Running totals from the translation, or ``None`` if nothing ran.
+        skip_back_matter: Whether back matter was passed through untranslated.
+        total_cost_eur: True total cost including the glossary call.
+        style: Prompt style used. When it carries a revision pass, any batch
+            whose revision could not be applied is surfaced loudly — those
+            segments silently hold only single-pass quality.
+    """
     if stats is None:
         return
     total = stats.cost_eur if total_cost_eur is None else total_cost_eur
+    style_note = f" Style: {style.name}." if style is not None else ""
     click.echo(
         f"Done: {stats.total_segments} segments "
         f"({stats.translated_segments} translated, {stats.cached_segments} from cache, "
         f"{stats.skipped_segments} back matter, {stats.empty_segments} empty). "
         f"{stats.api_calls} API calls, "
         f"{stats.input_tokens} in / {stats.output_tokens} out tokens, "
-        f"€{total:.4f} total (incl. glossary)."
+        f"€{total:.4f} total (incl. glossary).{style_note}"
     )
     if skip_back_matter and stats.skipped_segments:
         click.echo(
             f"{stats.skipped_segments} back-matter segments were passed through UNTRANSLATED."
+        )
+    if stats.revision_failures:
+        click.echo(
+            f"WARNING: the revision pass could not be applied to "
+            f"{stats.revision_failures} batch(es); those segments carry only "
+            f"un-revised, single-pass quality."
         )
 
 

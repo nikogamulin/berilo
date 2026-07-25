@@ -914,6 +914,12 @@ def test_cli_skip_back_matter_reports_and_passes_through(monkeypatch, epub_build
                 "--yes",
                 "--skip-back-matter",
                 "--no-glossary",
+                # Pinned: this test is about back-matter pass-through, not about
+                # which prompt style is default. Under the revise_v1 default the
+                # fake tags translated text "ED::" rather than "SL::"; pinning
+                # keeps the assertion focused and decoupled from that choice.
+                "--style",
+                "baseline_v1",
                 "--cache-db",
                 "cache.db",
             ],
@@ -927,3 +933,157 @@ def test_cli_skip_back_matter_reports_and_passes_through(monkeypatch, epub_build
     assert all(not s.text.startswith(_PREFIX) for s in index_segments)
     story_segments = [s for s in book.segments if s.chapter_title == "Chapter One"]
     assert any(s.text.startswith(_PREFIX) for s in story_segments)
+
+
+# --------------------------------------------------------------------------
+# S1.12 — revise_v1 is the default translation style.
+# --------------------------------------------------------------------------
+
+
+def test_default_style_is_revise_v1() -> None:
+    """The E2 bake-off promoted revise_v1 to the default (see ledger 2026-07-25)."""
+    from berilo import prompts
+
+    assert prompts.DEFAULT.name == "revise_v1"
+    assert prompts.DEFAULT_STYLE_NAME == "revise_v1"
+    assert prompts.DEFAULT.revise_system is not None, "the default must carry the revision pass"
+
+
+def test_cli_unknown_style_fails_loudly_and_lists_valid_names(epub_builder) -> None:
+    """A typo in --style must never silently fall back to the default."""
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli, ["translate", str(epub), "--dry-run", "--style", "no_such_style", "--to", "sl"]
+        )
+
+    assert result.exit_code != 0
+    assert "no_such_style" in result.output
+    assert "revise_v1" in result.output, "the error must list the valid style names"
+
+
+def test_cli_dry_run_default_style_costs_about_twice_baseline(epub_builder) -> None:
+    """The estimate must price the style actually selected, not always baseline.
+
+    revise_v1 runs a second editor pass per batch, so its estimate must be
+    materially higher than baseline_v1's — otherwise a two-pass run would be
+    approved against a one-pass number.
+    """
+    import re
+
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+
+    def _estimate(args: list[str]) -> float:
+        with runner.isolated_filesystem():
+            result = runner.invoke(
+                cli,
+                ["translate", str(epub), "--dry-run", "--model", "gpt-5-mini", "--to", "sl", *args],
+            )
+        assert result.exit_code == 0, result.output
+        match = re.search(r"Estimated total cost:?\s*€([0-9.]+)", result.output) or re.search(
+            r"€([0-9.]+)", result.output
+        )
+        assert match is not None, result.output
+        return float(match.group(1))
+
+    baseline = _estimate(["--style", "baseline_v1"])
+    default = _estimate([])
+    # The ratio is compressed on this tiny fixture because the fixed per-batch
+    # prompt overhead dominates; on a real ~2300-segment book it is ~2.09x.
+    # Assert the direction and a clear margin, not a brittle exact multiple.
+    assert default > baseline * 1.25, f"default {default} should exceed baseline {baseline}"
+    assert default < baseline * 3.0, f"default {default} implausibly above baseline {baseline}"
+
+
+def test_cli_dry_run_names_the_style_and_flags_the_second_pass(epub_builder) -> None:
+    """The dry run must say which style it priced and that it is two-pass."""
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli, ["translate", str(epub), "--dry-run", "--model", "gpt-5-mini", "--to", "sl"]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "revise_v1" in result.output
+    assert "second native-editor pass" in result.output
+
+
+def test_print_summary_warns_when_revision_pass_failed() -> None:
+    """A batch that fell back to un-revised text must be surfaced, never silent."""
+    from click.testing import CliRunner as _CliRunner
+
+    from berilo import prompts
+    from berilo.cli import _print_summary
+    from berilo.translate import TranslationStats
+
+    stats = TranslationStats(total_segments=10)
+    stats.translated_segments = 10
+    stats.revision_failures = 2
+
+    runner = _CliRunner()
+    with runner.isolation() as streams:
+        _print_summary(stats, skip_back_matter=False, style=prompts.DEFAULT)
+    text = streams[0].getvalue().decode()
+
+    assert "revision pass could not be applied" in text
+    assert "2 batch" in text
+    assert "revise_v1" in text
+
+
+def test_cli_default_style_also_skips_back_matter(monkeypatch, epub_builder) -> None:
+    """Back matter stays untranslated under the revise_v1 default too.
+
+    The focused test above pins ``baseline_v1``; this one exercises the real
+    default path so the two-pass style cannot quietly start translating
+    (and billing for) Index/Notes chapters.
+    """
+    import berilo.assemble as assemble_module
+    import berilo.providers as providers_module
+
+    captured: dict = {}
+
+    monkeypatch.setattr(
+        providers_module, "create_client", lambda model, config: FakeLLMClient(model=model)
+    )
+
+    def _fake_build_epub(book, output_path, *, bilingual=False, source_book=None):
+        captured["book"] = book
+        return output_path
+
+    monkeypatch.setattr(assemble_module, "build_epub", _fake_build_epub, raising=False)
+
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "translate",
+                str(epub),
+                "--model",
+                "gpt-5-mini",
+                "--to",
+                "sl",
+                "--yes",
+                "--skip-back-matter",
+                "--no-glossary",
+                "--cache-db",
+                "cache.db",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "revise_v1" in result.output, "the summary must name the style actually used"
+    book = captured["book"]
+    index_segments = [s for s in book.segments if s.chapter_title == "Index"]
+    assert index_segments
+    for seg in index_segments:
+        assert not seg.text.startswith(_PREFIX)
+        assert not seg.text.startswith(_REVISED_PREFIX)
+    story_segments = [s for s in book.segments if s.chapter_title == "Chapter One"]
+    assert any(
+        s.text.startswith(_REVISED_PREFIX) for s in story_segments
+    ), "under the default style, body prose must come back through the revision pass"

@@ -226,6 +226,22 @@ _STYLES: dict[str, TranslationStyle] = {
 #: Version string the cache uses for rows written before the registry existed.
 BASELINE_VERSION = BASELINE.version
 
+# Default style, set by the E2 bake-off on 2026-07-25 (Kaplan, 6 contiguous
+# runs x 10 segments, cluster-bootstrapped, seed 42; see
+# loops/build/ledger.jsonl). Against baseline_v1, revise_v1 won BOTH judged
+# dimensions with CI lower bounds above zero — T3 fluency +0.48 [+0.17, +0.87]
+# and T2 meaning +0.23 [+0.07, +0.45] — while sl_style_v1 (the same Slovenian
+# contract WITHOUT the revision pass) was null on fluency (+0.05 [-0.10, +0.22])
+# and hinted at a meaning regression. The gain therefore comes from the second
+# editing pass, not from the style contract. revise_v1 costs ~2.9x baseline in
+# translation calls but measures EUR1.23/100k words, inside Rubric T7's EUR1.50
+# full-marks threshold, which is why it ships as the default rather than an
+# opt-in flag.
+DEFAULT = REVISE
+
+#: Name of the default style (used as the CLI default for ``--style``).
+DEFAULT_STYLE_NAME = DEFAULT.name
+
 
 def get_style(name: str) -> TranslationStyle:
     """Look up a translation style by registry name.
