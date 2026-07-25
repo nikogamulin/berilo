@@ -167,6 +167,20 @@ git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!docs/
   checkout (recurred 3×) → **run worktree tests with
   `PYTHONPATH=<worktree>/translator`; keep `data/`-gated tests skippable;
   never copy books into worktrees** (details in `docs/findings.md`).
+- A cache key that omits an experimental factor silently turns every
+  experiment on that factor into a no-op that looks like a null result (the
+  translation cache keyed `(book, segment, model, lang)` but not the prompt,
+  so a prompt change would have re-served old text at €0) →
+  **before trusting any null result, check that the cache key contains the
+  thing you changed.** Corollary: `book_hash`/`segment_hash` cover segment IDs
+  and text only, so normalize fixes that change types or titles rebuild from
+  cache for €0 — verify the hash before assuming a paid re-run.
+- Measure the judge before tuning the thing it judges: intra-sample σ plus the
+  verdict distribution costs ~€0.15 and settles "is this a real ceiling or a
+  measurement artifact". **A judge that already awards top marks to some of
+  your output is not what is capping you.** Related: fixing a measurement
+  artifact can move a score DOWN (untranslated headings scored meaning 5/5),
+  so judge such fixes by pool cleanliness, not score direction.
 - Screen-gate fixes chased flagged instances for 4 rounds while the
   fixed-seed sample kept redrawing (recurred 3×) → **fix quality gates by
   artifact CLASS (type/fold/exclude whole categories), never by instance;
