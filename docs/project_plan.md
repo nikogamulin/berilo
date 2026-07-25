@@ -157,6 +157,12 @@
 - [ ] Signed APK, GitHub release, README install instructions
 - **Verify:** `gh release view` shows APK asset; fresh install from the release artifact passes R1 on Boox.
 
+### S2.9 — Curated book icons + library polish (2 pt)
+- [x] Generate cohesive, text-free 2:3 cover icons for the five translated example books and use them as title-matched fallbacks when an imported EPUB has no usable embedded cover
+- [ ] Prettify the Android library: add restrained card surfaces, consistent cover corner treatment, author hierarchy, improved empty/loading states, and responsive spacing while preserving the e-ink-first palette and ≥ 48 dp touch targets
+- [ ] Review the reader, notebook, dictionary, interpretation, and settings screens for the same spacing, typography, icon, and state-treatment consistency; fix visible regressions without adding decorative animation
+- **Verify:** `./gradlew test assembleDebug` green; all five translated books show either their embedded cover or the correct curated fallback; screenshot comparison at phone and Boox widths has no clipping, uneven grid rhythm, or low-contrast controls; TalkBack labels and R6 checklist remain passing.
+
 ---
 
 ## Phase 3 — Cloud sync & web review (milestone `m3`) — target: Rubric S ≥ 85
