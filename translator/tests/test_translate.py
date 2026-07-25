@@ -16,15 +16,17 @@ import re
 import pytest
 from click.testing import CliRunner
 
-from berilo.cache import TranslationCache, book_hash, segment_hash
+from berilo.cache import CallRecord, SegmentTranslation, TranslationCache, book_hash, segment_hash
 from berilo.cli import cli
 from berilo.glossary import Glossary, build_glossary
 from berilo.models import Book, Segment, SegmentType, make_segment_id
+from berilo.prompts import BASELINE, get_style, style_names
 from berilo.providers.base import CompletionResult, LLMClient
 from berilo.providers.pricing import cost_eur
 from berilo.translate import (
     REASONING_TOKENS_PER_CALL,
     TranslationError,
+    TranslationStats,
     back_matter_segment_ids,
     estimate_cost,
     is_back_matter_title,
@@ -34,6 +36,21 @@ from berilo.translate import (
 
 _MARKER_RE = re.compile(r"\[\[(\d+)\]\]")
 _PREFIX = "SL::"
+_REVISED_PREFIX = "ED::"
+
+#: System prompts that identify an extra pass, taken from the registry itself
+#: so the fakes classify calls exactly rather than by guessing at wording.
+_REVISE_SYSTEMS = {
+    text
+    for name in style_names()
+    for text in (get_style(name).revise_system, get_style(name).revise_strict_system)
+    if text is not None
+}
+_BOOK_CONTEXT_SYSTEMS = {
+    get_style(name).book_context_system
+    for name in style_names()
+    if get_style(name).book_context_system is not None
+}
 
 
 # --------------------------------------------------------------------------
@@ -52,6 +69,12 @@ def _extract_numbered(prompt: str) -> list[tuple[int, str]]:
     return out
 
 
+def _draft_of(revise_body: str) -> str:
+    """Pull the DRAFT line out of one ``SOURCE:``/``DRAFT:`` revise-prompt entry."""
+    _, _, draft = revise_body.partition("DRAFT: ")
+    return draft.strip()
+
+
 class FakeLLMClient(LLMClient):
     """Deterministic offline stand-in for a provider client.
 
@@ -67,10 +90,17 @@ class FakeLLMClient(LLMClient):
         self.glossary_terms = dict(glossary_terms or {})
         self.calls: list[dict] = []
         self.batch_prompts: list[str] = []
+        self.revise_prompts: list[str] = []
         self.translation_calls = 0
         self.glossary_calls = 0
+        self.revise_calls = 0
+        self.book_context_calls = 0
 
     def _kind(self, prompt: str | None, system: str | None) -> str:
+        if system in _REVISE_SYSTEMS:
+            return "revise"
+        if system in _BOOK_CONTEXT_SYSTEMS:
+            return "book_context"
         if prompt and _MARKER_RE.search(prompt):
             return "batch"
         if system and "glossary" in system.lower():
@@ -101,6 +131,14 @@ class FakeLLMClient(LLMClient):
         if kind == "glossary":
             self.glossary_calls += 1
             return self._result(json.dumps(self.glossary_terms, ensure_ascii=False), 20)
+        if kind == "book_context":
+            self.book_context_calls += 1
+            return self._result(self._book_context_response())
+        if kind == "revise":
+            assert prompt is not None
+            self.revise_calls += 1
+            self.revise_prompts.append(prompt)
+            return self._revise_response(prompt)
         self.translation_calls += 1
         if kind == "batch":
             assert prompt is not None
@@ -116,6 +154,15 @@ class FakeLLMClient(LLMClient):
     def _single_response(self, prompt: str) -> CompletionResult:
         source = prompt.strip().split("\n\n")[-1]
         return self._result(f"{_PREFIX}{source}")
+
+    def _book_context_response(self) -> str:
+        return "Reportorial nonfiction; short declarative sentences; dry irony."
+
+    def _revise_response(self, prompt: str) -> CompletionResult:
+        parts = [
+            f"[[{n}]] {_REVISED_PREFIX}{_draft_of(body)}" for n, body in _extract_numbered(prompt)
+        ]
+        return self._result("\n".join(parts))
 
 
 class MismatchClient(FakeLLMClient):
@@ -538,6 +585,263 @@ def test_skip_back_matter_estimate_excludes_it() -> None:
     assert estimate.skipped_segments == 2
     assert estimate.translatable_segments == 1
     assert [c.title for c in estimate.chapters] == ["Chapter One"]
+
+
+# --------------------------------------------------------------------------
+# Prompt registry (S1.10): style selection, cache keying, extra passes.
+# --------------------------------------------------------------------------
+
+
+class _ReviseMismatchClient(FakeLLMClient):
+    """Translates fine but the editor pass never returns a 1:1 mapping."""
+
+    def _revise_response(self, prompt: str) -> CompletionResult:
+        pairs = _extract_numbered(prompt)[:-1]  # drop the last marker
+        parts = [f"[[{n}]] {_REVISED_PREFIX}{_draft_of(body)}" for n, body in pairs]
+        return self._result("\n".join(parts))
+
+
+def test_default_style_is_baseline_and_sends_the_pre_refactor_prompt() -> None:
+    """With no style argument the engine sends baseline_v1's system prompts."""
+    book = _paragraph_book(3)
+    client = FakeLLMClient()
+
+    translate_book(book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=3)
+
+    systems = [call["system"] for call in client.calls]
+    assert systems == [BASELINE.batch_system]
+
+
+def test_style_version_keys_the_cache_so_a_variant_retranslates() -> None:
+    """The A/B blocker: a different prompt must MISS, not serve baseline text."""
+    book = _paragraph_book(4)
+    cache = _memory_cache()
+    bhash = book_hash(book)
+
+    baseline_client = FakeLLMClient()
+    translate_book(
+        book, client=baseline_client, target_lang="sl", cache=cache, batch_size=4, style=BASELINE
+    )
+    assert baseline_client.translation_calls == 1
+
+    variant = get_style("sl_style_v1")
+    variant_client = FakeLLMClient()
+    result = translate_book(
+        book, client=variant_client, target_lang="sl", cache=cache, batch_size=4, style=variant
+    )
+
+    # The variant actually called the model instead of replaying the cache.
+    assert variant_client.translation_calls == 1
+    assert variant_client.calls[0]["system"] == variant.batch_system
+    assert len(result.segments) == len(book.segments)
+
+    # Both versions are stored side by side and each reads back its own text.
+    shash = segment_hash("Paragraph 0.")
+    assert cache.get_translation(bhash, shash, "gpt-5-mini", "sl", "baseline_v1") is not None
+    assert cache.get_translation(bhash, shash, "gpt-5-mini", "sl", "sl_style_v1") is not None
+    rows = cache._conn.execute(
+        "SELECT DISTINCT prompt_version FROM translations ORDER BY prompt_version"
+    ).fetchall()
+    assert [row["prompt_version"] for row in rows] == ["baseline_v1", "sl_style_v1"]
+
+
+def test_baseline_run_against_a_populated_cache_makes_zero_api_calls() -> None:
+    """A pre-existing (migrated) baseline cache re-bills nothing."""
+    book = _paragraph_book(5)
+    cache = _memory_cache()
+    bhash = book_hash(book)
+    cache.store_batch(
+        bhash,
+        "gpt-5-mini",
+        "sl",
+        [
+            SegmentTranslation(
+                segment_hash=segment_hash(seg.text), text=f"{_PREFIX}{seg.text}", cost_eur=0.0
+            )
+            for seg in book.segments
+        ],
+        CallRecord(kind="batch", input_tokens=1, output_tokens=1, cost_eur=0.0),
+        "baseline_v1",
+    )
+
+    client = FakeLLMClient()
+    result = translate_book(book, client=client, target_lang="sl", cache=cache, glossary=None)
+
+    assert client.calls == []
+    expected = [f"{_PREFIX}{seg.text}" for seg in book.segments]
+    assert [seg.text for seg in result.segments] == expected
+
+
+def test_variant_contract_applies_to_the_single_segment_fallback() -> None:
+    """A batch that degrades to per-segment translation keeps the style's prompt."""
+    book = _paragraph_book(3)
+    style = get_style("sl_style_v1")
+    client = MismatchClient()
+
+    translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=3, style=style
+    )
+
+    singles = [call for call in client.calls if call["kind"] == "single"]
+    assert len(singles) == 3
+    for call in singles:
+        assert call["system"] == style.single_system
+        assert "SLOVENIAN STYLE CONTRACT" in call["system"]
+        assert call["system"] != BASELINE.single_system
+
+
+@pytest.mark.parametrize("name", style_names())
+def test_every_style_preserves_segment_integrity(name: str) -> None:
+    """Count, order, IDs, positions and types survive every registered style."""
+    segments = [
+        _segment("Chapter One", 0, 0, "Chapter One", seg_type=SegmentType.HEADING, heading_level=1),
+        _segment("First paragraph.", 0, 1, "Chapter One"),
+        _segment("  ", 0, 2, "Chapter One"),
+        _segment("Second paragraph.", 0, 3, "Chapter One"),
+    ]
+    book = _book(segments)
+
+    result = translate_book(
+        book,
+        client=FakeLLMClient(),
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=2,
+        style=get_style(name),
+    )
+
+    assert len(result.segments) == len(book.segments)
+    for original, translated in zip(book.segments, result.segments):
+        assert (translated.id, translated.position, translated.type) == (
+            original.id,
+            original.position,
+            original.type,
+        )
+    assert result.segments[2].text == "  "  # empty passthrough untouched
+
+
+def test_revise_style_runs_an_editor_pass_over_every_batch() -> None:
+    """revise_v1 adds one editor call per batch and returns the revised text."""
+    book = _paragraph_book(4)
+    style = get_style("revise_v1")
+    client = FakeLLMClient()
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2, style=style
+    )
+
+    assert client.translation_calls == 2  # two batches
+    assert client.revise_calls == 2  # one editor pass each
+    assert all(seg.text.startswith(f"{_REVISED_PREFIX}{_PREFIX}") for seg in result.segments)
+    # The editor saw both the source and the draft for every segment.
+    for prompt in client.revise_prompts:
+        assert "SOURCE: Paragraph" in prompt
+        assert f"DRAFT: {_PREFIX}Paragraph" in prompt
+
+
+def test_revise_failure_keeps_the_draft_and_is_counted() -> None:
+    """A bad editor reply never corrupts the mapping — it is reported instead."""
+    book = _paragraph_book(3)
+    style = get_style("revise_v1")
+    client = _ReviseMismatchClient()
+    seen: list[TranslationStats] = []
+
+    result = translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=3,
+        style=style,
+        on_progress=seen.append,
+    )
+
+    assert client.revise_calls == 2  # attempt + strict retry, then abandoned
+    assert len(result.segments) == 3
+    assert all(seg.text == f"{_PREFIX}Paragraph {i}." for i, seg in enumerate(result.segments))
+    assert seen[-1].revision_failures == 1
+
+
+def test_book_context_memo_is_derived_once_and_injected_everywhere() -> None:
+    """book_context_v1 derives one memo, injects it in every prompt, caches it."""
+    book = _paragraph_book(6)
+    style = get_style("book_context_v1")
+    cache = _memory_cache()
+    client = FakeLLMClient()
+
+    translate_book(book, client=client, target_lang="sl", cache=cache, batch_size=3, style=style)
+
+    assert client.book_context_calls == 1
+    assert len(client.batch_prompts) == 2
+    for prompt in client.batch_prompts:
+        assert "BOOK STYLE MEMO" in prompt
+        assert "Reportorial nonfiction" in prompt
+
+    # Memoized per (book, model, lang, prompt_version): a resumed run is free.
+    assert cache.get_book_context(book_hash(book), "gpt-5-mini", "sl", "book_context_v1")
+    resumed = FakeLLMClient()
+    translate_book(book, client=resumed, target_lang="sl", cache=cache, batch_size=3, style=style)
+    assert resumed.calls == []
+
+
+def test_book_context_memo_reaches_the_single_segment_fallback() -> None:
+    """Fallback segments get the same memo the batch prompts got."""
+    book = _paragraph_book(2)
+    style = get_style("book_context_v1")
+    client = MismatchClient()
+
+    translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2, style=style
+    )
+
+    singles = [call for call in client.calls if call["kind"] == "single"]
+    assert len(singles) == 2
+    assert all("Reportorial nonfiction" in call["prompt"] for call in singles)
+
+
+def test_baseline_style_asks_for_no_extra_passes() -> None:
+    """The default path is unchanged: no memo call, no editor call."""
+    book = _paragraph_book(4)
+    client = FakeLLMClient()
+
+    translate_book(book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2)
+
+    assert client.book_context_calls == 0
+    assert client.revise_calls == 0
+    assert {call["kind"] for call in client.calls} == {"batch"}
+
+
+def test_estimate_cost_reflects_the_style_it_is_asked_about() -> None:
+    """revise_v1 roughly doubles the bill; book_context_v1 adds one call."""
+    book = _paragraph_book(20)
+    baseline = estimate_cost(book, model="gpt-5-mini", target_lang="sl", batch_size=10)
+    revise = estimate_cost(
+        book,
+        model="gpt-5-mini",
+        target_lang="sl",
+        batch_size=10,
+        style=get_style("revise_v1"),
+    )
+    book_context = estimate_cost(
+        book,
+        model="gpt-5-mini",
+        target_lang="sl",
+        batch_size=10,
+        style=get_style("book_context_v1"),
+    )
+
+    assert baseline.prompt_version == "baseline_v1"
+    assert baseline.revision_calls == 0 and baseline.book_context_calls == 0
+
+    assert revise.prompt_version == "revise_v1"
+    assert revise.revision_calls == revise.batches == 2
+    assert revise.cost_eur > baseline.cost_eur
+    # Two calls per batch instead of one: the reasoning surcharge doubles too.
+    assert revise.reasoning_tokens == baseline.reasoning_tokens + 2 * REASONING_TOKENS_PER_CALL
+
+    assert book_context.book_context_calls == 1
+    assert book_context.cost_eur > baseline.cost_eur
+    assert book_context.reasoning_tokens == baseline.reasoning_tokens + REASONING_TOKENS_PER_CALL
 
 
 # --------------------------------------------------------------------------
