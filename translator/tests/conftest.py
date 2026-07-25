@@ -8,11 +8,35 @@ on any real (copyrighted) book under ``data/``.
 
 from __future__ import annotations
 
+import os
 import zipfile
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+
+def _example_book_path(filename: str) -> Path | None:
+    """Locate an example book via ``BERILO_EXAMPLE_DIR`` or a repo ``data/`` dir.
+
+    ``data/`` holds copyrighted books, is gitignored, and therefore exists
+    only in the main checkout — agent worktrees and CI must skip every test
+    that needs it rather than fail.
+
+    Args:
+        filename: Bare filename of the example book.
+
+    Returns:
+        The located path, or ``None`` when the book is not available.
+    """
+    candidates: list[Path] = []
+    env_dir = os.environ.get("BERILO_EXAMPLE_DIR")
+    if env_dir:
+        candidates.append(Path(env_dir) / filename)
+    for parent in Path(__file__).resolve().parents:
+        candidates.append(parent / "data" / "examples" / filename)
+    return next((candidate for candidate in candidates if candidate.exists()), None)
+
 
 _CONTAINER_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -196,6 +220,16 @@ def write_epub(
                 _xhtml_doc(item.get("doc_title", item["href"]), item["body"]),
             )
     return destination
+
+
+@pytest.fixture
+def example_book():
+    """Return the example-book locator (see :func:`_example_book_path`).
+
+    Exposed as a fixture rather than an import: a foreign ``tests`` package on
+    this box's ``sys.path`` shadows ``tests.conftest``.
+    """
+    return _example_book_path
 
 
 @pytest.fixture

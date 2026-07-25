@@ -21,9 +21,8 @@ from berilo.models import SegmentType
 from berilo.normalize import normalize
 from berilo.normalize.epub import normalize_epub
 
-_EXAMPLES = Path(__file__).parents[2] / "data" / "examples"
-EXAMPLE_EPUB = _EXAMPLES / "The New Rules of War.epub"
-KAPLAN_EPUB = _EXAMPLES / (
+EXAMPLE_EPUB = Path(__file__).parents[2] / "data" / "examples" / "The New Rules of War.epub"
+KAPLAN_EPUB_NAME = (
     "The Revenge of Geography What the Map Tells Us About Coming Conflicts "
     "and the Battle Against Fate (Robert D. Kaplan) (z-library.sk, 1lib.sk, z-lib.sk).epub"
 )
@@ -526,16 +525,17 @@ def test_resolved_chapter_titles_log_no_error(epub_builder, caplog) -> None:
     assert caplog.records == []
 
 
-@pytest.mark.skipif(
-    not KAPLAN_EPUB.exists(), reason="data/examples Kaplan EPUB not present (worktree/CI)"
-)
-def test_kaplan_chapter_titles_do_not_collapse() -> None:
+def test_kaplan_chapter_titles_do_not_collapse(example_book) -> None:
     """S1.13 Verify line: no example book concentrates titles on one bucket.
 
     Kaplan sat at 94.9% before the fix, which made rubric T v1.1's
     front/back-matter fold inert.
     """
-    book = normalize_epub(KAPLAN_EPUB)
+    path = example_book(KAPLAN_EPUB_NAME)
+    if path is None:
+        pytest.skip("data/examples Kaplan EPUB not present (worktree/CI)")
+
+    book = normalize_epub(path)
 
     _, top_count = Counter(s.chapter_title for s in book.segments).most_common(1)[0]
     assert top_count / len(book.segments) < MAX_TITLE_CONCENTRATION

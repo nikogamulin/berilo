@@ -12,15 +12,40 @@ from __future__ import annotations
 import shutil
 import subprocess
 import zipfile
+from collections import Counter
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
 
 from berilo.assemble import build_epub
+from berilo.eval.rubric_t import align
 from berilo.models import Book, Segment, SegmentType
+from berilo.normalize import normalize
 
 EPUBCHECK = shutil.which("epubcheck")
+
+_KAPLAN_EPUB_NAME = (
+    "The Revenge of Geography What the Map Tells Us About Coming Conflicts "
+    "and the Battle Against Fate (Robert D. Kaplan) (z-library.sk, 1lib.sk, z-lib.sk).epub"
+)
+_ACTIVE_MEASURES_PDF_NAME = (
+    "Active Measures The Secret History of Disinformation and Political "
+    "Warfare (Thomas Rid) (z-library.sk, 1lib.sk, z-lib.sk).pdf"
+)
+
+#: S1.13: no book may concentrate this share of its segments on one chapter
+#: title, on either side of the source/target pair.
+MAX_TITLE_CONCENTRATION = 0.5
+
+
+def _chapter_count(book: Book) -> int:
+    return len({segment.chapter_index for segment in book.segments})
+
+
+def _top_title_share(book: Book) -> float:
+    counts = Counter(segment.chapter_title for segment in book.segments)
+    return counts.most_common(1)[0][1] / len(book.segments)
 
 
 def _segment(
@@ -341,3 +366,83 @@ def test_epubcheck_passes_bilingual_variant(tmp_path: Path) -> None:
 
     result = subprocess.run([EPUBCHECK, str(output)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- source/target normalization symmetry (S1.13) ---------------------------------
+
+
+def _round_trip(book: Book, tmp_path: Path, name: str) -> Book:
+    """Assemble *book* and normalize the result back into a Book."""
+    return normalize(build_epub(book, tmp_path / name))
+
+
+def test_assembled_epub_round_trips_to_an_aligning_book(tmp_path: Path) -> None:
+    """S1.13: normalize(assemble(book)) aligns 1:1 with ``book``.
+
+    ``rubric_t.align`` fingerprints on (chapter, type, heading_level), so an
+    assembled EPUB that re-normalizes to different types or chapter grouping
+    makes every ``berilo eval`` run fail. This pins the invariant across the
+    whole segment-type spectrum, including the heading levels the PDF
+    normalizer emits and the class-tagged CAPTION/OTHER round-trip.
+    """
+    segments = [
+        _segment("s0", SegmentType.HEADING, "Chapter One", 0, "Chapter One", 0, 1),
+        _segment(
+            "s1", SegmentType.PARAGRAPH, "Prose with <em>emphasis</em> inside.", 0, "Chapter One", 1
+        ),
+        _segment("s2", SegmentType.HEADING, "A Sub Heading", 0, "Chapter One", 2, 2),
+        _segment("s3", SegmentType.BLOCKQUOTE, "A quoted passage.", 0, "Chapter One", 3),
+        _segment("s4", SegmentType.CAPTION, "Figure 1: a caption.", 0, "Chapter One", 4),
+        _segment("s5", SegmentType.OTHER, "A dateline, retyped not dropped.", 0, "Chapter One", 5),
+        _segment("s6", SegmentType.LIST_ITEM, "First item", 0, "Chapter One", 6),
+        _segment("s7", SegmentType.LIST_ITEM, "Second item", 0, "Chapter One", 7),
+        _segment("s8", SegmentType.HEADING, "Notes", 1, "Notes", 8, 3),
+        _segment("s9", SegmentType.PARAGRAPH, "A citation fragment.", 1, "Notes", 9),
+    ]
+    book = Book(
+        title="Test Book",
+        authors=["Test Author"],
+        language="sl",
+        source_path="/nonexistent/source.epub",
+        source_format="epub",
+        segments=segments,
+    )
+
+    rebuilt = _round_trip(book, tmp_path, "round_trip.epub")
+
+    alignment = align(book, rebuilt)
+    assert all(target is not None for _, target in alignment.pairs)
+    assert len(alignment.pairs) == len(segments)
+    assert [s.type for s in rebuilt.segments] == [s.type for s in segments]
+    assert [s.heading_level for s in rebuilt.segments] == [s.heading_level for s in segments]
+    assert [s.chapter_index for s in rebuilt.segments] == [s.chapter_index for s in segments]
+    # Chapter titles survive the nav document, so the front/back-matter fold
+    # still sees "Notes" on the translated side.
+    assert [s.chapter_title for s in rebuilt.segments] == [s.chapter_title for s in segments]
+
+
+@pytest.mark.parametrize("filename", [_KAPLAN_EPUB_NAME, _ACTIVE_MEASURES_PDF_NAME])
+def test_real_book_round_trips_to_an_aligning_book(
+    filename: str, tmp_path: Path, example_book
+) -> None:
+    """S1.13: the round-trip invariant holds on a real EPUB- and PDF-sourced book.
+
+    Uses a freshly assembled EPUB rather than the ``.sl.epub`` artifacts under
+    ``data/examples``: those are outputs of earlier runs, and a stale one
+    proves nothing about the current assembler.
+    """
+    source_path = example_book(filename)
+    if source_path is None:
+        pytest.skip(f"example book not available: {filename}")
+
+    source = normalize(source_path)
+    rebuilt = _round_trip(source, tmp_path, "real_round_trip.epub")
+
+    alignment = align(source, rebuilt)
+    assert all(target is not None for _, target in alignment.pairs)
+    assert len(alignment.pairs) == len(source.segments)
+    assert _chapter_count(rebuilt) == _chapter_count(source)
+    # The translated side must resolve chapter titles too, or rubric T's
+    # front/back-matter fold is inert on exactly the book it is scoring.
+    assert _top_title_share(rebuilt) < MAX_TITLE_CONCENTRATION
+    assert _top_title_share(rebuilt) == pytest.approx(_top_title_share(source))
