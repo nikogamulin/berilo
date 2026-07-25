@@ -1,7 +1,8 @@
 """Command-line entry point for the Berilo translator.
 
 Subcommands (all implemented): ``translate`` (S1.5), ``inspect`` (S1.1, with
-``--screen`` from S1.2), ``eval`` (S1.7, Rubric T), ``doctor`` (S1.4).
+``--screen`` from S1.2), ``eval`` (S1.7, Rubric T; ``--dump``/``--judge-repeats``
+from S1.9), ``doctor`` (S1.4).
 """
 
 from __future__ import annotations
@@ -432,6 +433,19 @@ ALIGNMENT_ERROR_EXIT_CODE = 2
 @click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
 @click.option("--dry-run", is_flag=True, help="Describe the run without any judge calls or cost.")
 @click.option("--no-write", is_flag=True, help="Do not append a score row.")
+@click.option(
+    "--dump",
+    "dump_path",
+    default=None,
+    type=click.Path(),
+    help="Write one JSON row per judged T2/T3/T6 sample to this JSONL path (S1.9).",
+)
+@click.option(
+    "--judge-repeats",
+    default=1,
+    type=click.IntRange(min=1),
+    help="Judge each sample this many times, to measure the judge's own noise floor.",
+)
 @click.pass_context
 def eval_(
     ctx: click.Context,
@@ -446,6 +460,8 @@ def eval_(
     as_json: bool,
     dry_run: bool,
     no_write: bool,
+    dump_path: str | None,
+    judge_repeats: int,
 ) -> None:
     """Score TRANSLATED_EPUB against Rubric T (seeded judge + bootstrap CI)."""
     from dotenv import find_dotenv
@@ -495,6 +511,7 @@ def eval_(
                 seed=seed,
                 glossary=glossary,
                 actual_cost_eur=actual_cost,
+                judge_repeats=judge_repeats,
             )
         )
         ctx.exit(0)
@@ -518,6 +535,7 @@ def eval_(
             seed=seed,
             glossary=glossary,
             actual_cost_eur=actual_cost,
+            judge_repeats=judge_repeats,
         )
     except AlignmentError as exc:
         click.echo(f"eval: ALIGNMENT FAILURE — {exc}", err=True)
@@ -527,6 +545,11 @@ def eval_(
         click.echo(f"eval: {exc}", err=True)
         ctx.exit(INPUT_ERROR_EXIT_CODE)
         return
+
+    if dump_path is not None:
+        n_rows = runner.write_dump(result, dump_path)
+        if not as_json:
+            click.echo(f"Wrote {n_rows} sample row(s) to {dump_path}")
 
     if as_json:
         payload = runner.result_to_dict(result, seed=seed, sample=sample, title=source.title)

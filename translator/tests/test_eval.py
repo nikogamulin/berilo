@@ -1,11 +1,12 @@
-"""Tests for the Rubric T eval harness (S1.7).
+"""Tests for the Rubric T eval harness (S1.7) and its instrumentation (S1.9).
 
 All judge calls are mocked — no real LLM client is constructed and no API budget
 is spent. Fakes replay deterministic ``SCORE: <n>`` verdicts and record their
 calls so we can assert seeded-sampling determinism, the T1 completeness cap,
 loud alignment-mismatch detection, structural diffs, bootstrap-CI sanity,
-verdict parsing/retry, weight renormalization, the score-row schema, and the
-CLI's dry-run (zero judge calls) contract.
+verdict parsing/retry, weight renormalization, the score-row schema, the
+CLI's dry-run (zero judge calls) contract, and (S1.9) the per-sample
+``--dump`` and ``--judge-repeats`` judge-noise-floor instrumentation.
 """
 
 from __future__ import annotations
@@ -404,8 +405,12 @@ def test_extraction_pdf_screens_paragraphs() -> None:
         [(SegmentType.PARAGRAPH, f"para {i}", 0, None) for i in range(30)], source_format="pdf"
     )
     judge = Judge(ScriptedJudgeClient(screen=1))
-    dim, scores, fell_back = score_extraction(source_fmt, translated, judge, sample_size=20, seed=1)
+    dim, scores, fell_back, samples = score_extraction(
+        source_fmt, translated, judge, sample_size=20, seed=1
+    )
     assert len(scores) == 20  # sampled 20 paragraphs
+    assert len(samples) == 20
+    assert all(s.screen_scores == [1] for s in samples)  # judge_repeats=1 default
     assert judge.calls == 20
     assert dim.fraction == pytest.approx(1.0)
     assert fell_back is False
@@ -414,10 +419,13 @@ def test_extraction_pdf_screens_paragraphs() -> None:
 def test_extraction_epub_is_automatic_full_no_calls() -> None:
     translated = make_book([(SegmentType.PARAGRAPH, "p", 0, None)])
     judge = Judge(ExplodingClient())
-    dim, scores, fell_back = score_extraction("epub", translated, judge, sample_size=20, seed=1)
+    dim, scores, fell_back, samples = score_extraction(
+        "epub", translated, judge, sample_size=20, seed=1
+    )
     assert dim.fraction == pytest.approx(1.0)
     assert scores == []
     assert fell_back is False
+    assert samples == []
 
 
 def test_cost_scoring_bands() -> None:
@@ -752,13 +760,14 @@ def test_t6_sampling_excludes_back_matter_paragraphs() -> None:
         specs.append((SegmentType.PARAGRAPH, f"Note {i} junk header 12.", 1, None))
     translated = make_book(specs, source_format="pdf", titles={1: "Notes"})
     judge = Judge(ContentScreenClient())
-    dim, scores, fell_back = score_extraction(
+    dim, scores, fell_back, samples = score_extraction(
         "pdf", translated, judge, sample_size=20, seed=1, excluded_chapters={1}
     )
     # Only body (chapter 0) paragraphs screened -> all clean, no fallback.
     assert fell_back is False
     assert len(scores) == 20
     assert dim.fraction == pytest.approx(1.0)
+    assert all(seg.chapter_index == 0 for seg in samples)  # excluded chapter never sampled
 
 
 def test_term_occurrences_uses_word_boundaries() -> None:
@@ -788,3 +797,277 @@ def test_terminology_word_boundary_no_substring_inflation() -> None:
     # 'united'/'understand' substring hits.
     assert dim.fraction == pytest.approx(1.0)
     assert "2/2" in dim.detail
+
+
+# --------------------------------------------------------------------------
+# S1.9: per-sample dump + judge-repeat noise floor.
+# --------------------------------------------------------------------------
+
+
+class CyclingJudgeClient(LLMClient):
+    """Judge client cycling meaning verdicts across repeats (noise-floor tests).
+
+    Fluency and screen replies are fixed (zero noise), so a noise-floor test
+    can assert T2 noise > 0 while T3 noise == 0 from the same run.
+    """
+
+    def __init__(self, meaning_cycle: list[int], *, fluency: int = 4, screen: int = 1) -> None:
+        self.model = "gpt-5-mini"
+        self.meaning_cycle = meaning_cycle
+        self.fluency = fluency
+        self.screen = screen
+        self._n_meaning = 0
+        self.calls: list[str] = []
+
+    def complete(
+        self,
+        prompt: str | None = None,
+        messages: list[dict[str, str]] | None = None,
+        **kwargs: object,
+    ) -> CompletionResult:
+        text = prompt or ""
+        if _MEANING_MARKER in text:
+            score = self.meaning_cycle[self._n_meaning % len(self.meaning_cycle)]
+            self._n_meaning += 1
+            role = "meaning"
+        elif _FLUENCY_MARKER in text:
+            role, score = "fluency", self.fluency
+        elif _SCREEN_MARKER in text:
+            role, score = "screen", self.screen
+        else:  # pragma: no cover - defensive
+            role, score = "unknown", 0
+        self.calls.append(role)
+        return CompletionResult(
+            text=f"SCORE: {score}",
+            input_tokens=10,
+            output_tokens=3,
+            cost_eur=0.0001,
+            model=self.model,
+        )
+
+
+def test_sampling_stdev_matches_population_formula() -> None:
+    assert sampling.stdev([]) == 0.0
+    assert sampling.stdev([7]) == 0.0
+    # mean 3, variance (4+1+0+1+4)/5 = 2 -> stdev sqrt(2).
+    assert sampling.stdev([1, 2, 3, 4, 5]) == pytest.approx(2**0.5)
+
+
+def test_judge_repeats_multiplies_calls_and_keeps_score_shape() -> None:
+    source = make_book(_prose_specs(10))
+    translated = _translate(source)
+    judge = Judge(ScriptedJudgeClient(meaning=4, fluency=4))
+    result = score_book(source, translated, judge, sample_size=5, seed=42, judge_repeats=3)
+    # epub source -> T6 automatic full, no screen calls: meaning+fluency only.
+    assert judge.calls == 5 * 3 * 2
+    assert result.judge_repeats == 3
+    assert len(result.prose_samples) == 5
+    for sample in result.prose_samples:
+        assert sample.meaning_scores == [4, 4, 4]
+        assert sample.fluency_scores == [4, 4, 4]
+    # Existing dimension/score shape is unaffected by repeats.
+    assert result.by_key()["T2"].points is not None
+    assert result.by_key()["T3"].points is not None
+
+
+def test_judge_repeats_default_one_is_unchanged_behavior() -> None:
+    source = make_book(_prose_specs(10))
+    translated = _translate(source)
+    judge = Judge(ScriptedJudgeClient(meaning=5, fluency=5))
+    result = score_book(source, translated, judge, sample_size=5, seed=42)
+    assert result.judge_repeats == 1
+    assert judge.calls == 5 * 2
+    assert all(len(s.meaning_scores) == 1 for s in result.prose_samples)
+
+
+def test_score_book_computes_intra_sample_noise_floor() -> None:
+    source = make_book(_prose_specs(6))
+    translated = _translate(source)
+    judge = Judge(CyclingJudgeClient(meaning_cycle=[3, 5], fluency=4))
+    result = score_book(source, translated, judge, sample_size=6, seed=42, judge_repeats=4)
+    assert result.meaning_noise is not None
+    assert result.meaning_noise > 0  # meaning alternates 3/5 across repeats
+    assert result.fluency_noise == pytest.approx(0.0)  # fluency is constant
+
+
+def test_write_dump_prose_rows_all_fields_populated(tmp_path: Path) -> None:
+    source = make_book(_prose_specs(40, chapters=4))
+    translated = _translate(source)
+    judge = Judge(ScriptedJudgeClient(meaning=4, fluency=3))
+    result = score_book(source, translated, judge, sample_size=40, seed=42)
+    dump_path = tmp_path / "dump.jsonl"
+    n_rows = runner.write_dump(result, dump_path)
+    assert n_rows == 40
+    lines = dump_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 40
+    for line in lines:
+        row = json.loads(line)
+        assert row["kind"] == "prose"
+        for key in (
+            "segment_id",
+            "chapter_index",
+            "chapter_title",
+            "source",
+            "target",
+            "meaning",
+            "fluency",
+        ):
+            assert key in row and row[key] not in (None, "", [])
+        assert row["meaning"] == [4]
+        assert row["fluency"] == [3]
+
+
+def test_write_dump_judge_repeats_records_every_repeat(tmp_path: Path) -> None:
+    source = make_book(_prose_specs(10))
+    translated = _translate(source)
+    judge = Judge(ScriptedJudgeClient(meaning=5, fluency=2))
+    result = score_book(source, translated, judge, sample_size=10, seed=42, judge_repeats=3)
+    dump_path = tmp_path / "dump.jsonl"
+    n_rows = runner.write_dump(result, dump_path)
+    assert n_rows == 10
+    rows = [json.loads(line) for line in dump_path.read_text(encoding="utf-8").splitlines()]
+    assert all(row["meaning"] == [5, 5, 5] for row in rows)
+    assert all(row["fluency"] == [2, 2, 2] for row in rows)
+
+
+def test_write_dump_screen_rows_are_distinguishable_from_prose_rows(tmp_path: Path) -> None:
+    # PDF source triggers real T6 screening (score_extraction), unlike epub.
+    specs = [(SegmentType.PARAGRAPH, f"Body {i} clean prose.", 0, None) for i in range(25)]
+    source = make_book(specs, source_format="pdf")
+    translated = _translate(source)
+    judge = Judge(ScriptedJudgeClient(meaning=5, fluency=5, screen=1))
+    result = score_book(source, translated, judge, sample_size=10, seed=42, judge_repeats=2)
+    assert result.screen_samples  # PDF source produced screen samples
+    dump_path = tmp_path / "dump.jsonl"
+    runner.write_dump(result, dump_path)
+    rows = [json.loads(line) for line in dump_path.read_text(encoding="utf-8").splitlines()]
+    prose_rows = [r for r in rows if r["kind"] == "prose"]
+    screen_rows = [r for r in rows if r["kind"] == "screen"]
+    assert prose_rows and screen_rows
+    for row in screen_rows:
+        assert "source" not in row and "meaning" not in row and "fluency" not in row
+        assert row["screen"] == [1, 1]  # judge_repeats=2, both clean
+        for key in ("segment_id", "chapter_index", "chapter_title", "target"):
+            assert key in row
+
+
+def test_cli_eval_dump_writes_one_row_per_judged_sample(
+    epub_builder, tmp_path, monkeypatch
+) -> None:
+    source, translated = _epub_pair(epub_builder)
+    monkeypatch.setattr(
+        "berilo.providers.create_client", _fake_client_factory(ScriptedJudgeClient())
+    )
+    dump_path = tmp_path / "dump.jsonl"
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        result = runner_.invoke(
+            cli,
+            [
+                "eval",
+                str(translated),
+                "--source",
+                str(source),
+                "--sample",
+                "20",
+                "--seed",
+                "42",
+                "--dump",
+                str(dump_path),
+                "--no-write",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert dump_path.exists()
+    lines = dump_path.read_text(encoding="utf-8").strip().splitlines()
+    assert len(lines) == 20
+    assert all(json.loads(line)["kind"] == "prose" for line in lines)
+
+
+def test_cli_eval_no_dump_flag_writes_no_file(epub_builder, tmp_path, monkeypatch) -> None:
+    source, translated = _epub_pair(epub_builder)
+    monkeypatch.setattr(
+        "berilo.providers.create_client", _fake_client_factory(ScriptedJudgeClient())
+    )
+    would_be_dump = tmp_path / "should_not_exist.jsonl"
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        result = runner_.invoke(
+            cli,
+            [
+                "eval",
+                str(translated),
+                "--source",
+                str(source),
+                "--sample",
+                "10",
+                "--no-write",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert not would_be_dump.exists()
+
+
+def test_cli_eval_judge_repeats_multiplies_judge_calls(epub_builder, tmp_path, monkeypatch) -> None:
+    source, translated = _epub_pair(epub_builder)
+    client = ScriptedJudgeClient(meaning=4, fluency=4)
+    monkeypatch.setattr("berilo.providers.create_client", _fake_client_factory(client))
+    dump_path = tmp_path / "dump.jsonl"
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        result = runner_.invoke(
+            cli,
+            [
+                "eval",
+                str(translated),
+                "--source",
+                str(source),
+                "--sample",
+                "10",
+                "--judge-repeats",
+                "3",
+                "--dump",
+                str(dump_path),
+                "--no-write",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    # 10 pairs x (meaning + fluency) x 3 repeats, epub source -> no T6 calls.
+    assert len(client.calls) == 10 * 2 * 3
+    rows = [json.loads(line) for line in dump_path.read_text(encoding="utf-8").splitlines()]
+    assert all(len(row["meaning"]) == 3 for row in rows)
+    assert all(len(row["fluency"]) == 3 for row in rows)
+    assert "judge noise floor" in result.output
+
+
+def test_cli_eval_dry_run_zero_calls_reports_repeat_multiplier(
+    epub_builder, tmp_path, monkeypatch
+) -> None:
+    source, translated = _epub_pair(epub_builder)
+    exploding = ExplodingClient()
+    monkeypatch.setattr("berilo.providers.create_client", _fake_client_factory(exploding))
+    dump_path = tmp_path / "should_not_exist.jsonl"
+    runner_ = CliRunner()
+    with runner_.isolated_filesystem():
+        result = runner_.invoke(
+            cli,
+            [
+                "eval",
+                str(translated),
+                "--source",
+                str(source),
+                "--sample",
+                "10",
+                "--judge-repeats",
+                "4",
+                "--dump",
+                str(dump_path),
+                "--dry-run",
+                "--no-write",
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "DRY RUN" in result.output
+    # 10 pairs -> 20 base judge calls, x4 repeats -> 80; no calls actually made.
+    assert "80" in result.output
+    assert not dump_path.exists()  # dry-run writes no dump either

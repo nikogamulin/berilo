@@ -119,3 +119,23 @@ def bootstrap_ci(
 def mean(values: Sequence[float]) -> float:
     """Arithmetic mean, or ``0.0`` for an empty sequence."""
     return sum(values) / len(values) if values else 0.0
+
+
+def stdev(values: Sequence[float]) -> float:
+    """Population standard deviation (``ddof=0``).
+
+    Used to measure the judge's own intra-sample noise floor across repeated
+    verdicts on the same segment (S1.9): with fewer than two values there is
+    nothing to disperse, so this returns ``0.0`` rather than raising.
+
+    Args:
+        values: The repeated observations for one sample.
+
+    Returns:
+        The population standard deviation, or ``0.0`` for 0 or 1 values.
+    """
+    if len(values) < 2:
+        return 0.0
+    m = mean(values)
+    variance = sum((v - m) ** 2 for v in values) / len(values)
+    return variance**0.5

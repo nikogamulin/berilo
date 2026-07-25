@@ -220,6 +220,51 @@ class DimensionScore:
         return None if self.fraction is None else self.fraction * self.weight
 
 
+@dataclass(frozen=True)
+class ProseSample:
+    """One judged T2/T3 (meaning + fluency) sample, with full repeat detail.
+
+    Attributes:
+        segment_id: Source segment id.
+        chapter_index: Chapter index (shared by source and translation).
+        chapter_title: Chapter title (from the source book).
+        source: Source segment text.
+        target: Translated segment text.
+        meaning_scores: Every meaning verdict for this sample, one per judge
+            repeat (length ``judge_repeats``), in call order.
+        fluency_scores: Every fluency verdict for this sample, one per judge
+            repeat (length ``judge_repeats``), in call order.
+    """
+
+    segment_id: str
+    chapter_index: int
+    chapter_title: str
+    source: str
+    target: str
+    meaning_scores: list[int]
+    fluency_scores: list[int]
+
+
+@dataclass(frozen=True)
+class ScreenSample:
+    """One judged T6 (extraction cleanliness) sample, with full repeat detail.
+
+    Attributes:
+        segment_id: Translated segment id.
+        chapter_index: Chapter index.
+        chapter_title: Chapter title.
+        target: Translated paragraph text that was screened.
+        screen_scores: Every screen verdict (0 dirty / 1 clean) for this
+            sample, one per judge repeat, in call order.
+    """
+
+    segment_id: str
+    chapter_index: int
+    chapter_title: str
+    target: str
+    screen_scores: list[int]
+
+
 @dataclass
 class RubricTResult:
     """Full Rubric T scoring result.
@@ -234,6 +279,15 @@ class RubricTResult:
             under a fixed seed).
         notes: Human-readable notes (renormalization, cap, cost limitations).
         cost_eur: EUR actually spent on judge calls in this eval run.
+        prose_samples: Per-sample T2/T3 detail (source/target text + every
+            repeat verdict) for ``berilo eval --dump`` (S1.9).
+        screen_samples: Per-sample T6 detail (target text + every repeat
+            verdict) for ``berilo eval --dump`` (S1.9).
+        judge_repeats: How many times each sample was judged.
+        meaning_noise: Mean intra-sample standard deviation of T2 (meaning)
+            verdicts across repeats — the judge's own noise floor. ``None``
+            when there were no judged pairs.
+        fluency_noise: Same as :attr:`meaning_noise`, for T3 (fluency).
     """
 
     dimensions: list[DimensionScore]
@@ -243,6 +297,11 @@ class RubricTResult:
     sample_ids: list[str]
     notes: list[str] = field(default_factory=list)
     cost_eur: float = 0.0
+    prose_samples: list[ProseSample] = field(default_factory=list)
+    screen_samples: list[ScreenSample] = field(default_factory=list)
+    judge_repeats: int = 1
+    meaning_noise: float | None = None
+    fluency_noise: float | None = None
 
     def by_key(self) -> dict[str, DimensionScore]:
         """Return the dimensions keyed by id."""
@@ -511,15 +570,21 @@ def score_extraction(
     sample_size: int,
     seed: int,
     excluded_chapters: set[int] | None = None,
-) -> tuple[DimensionScore, list[int], bool]:
+    judge_repeats: int = 1,
+) -> tuple[DimensionScore, list[float], bool, list[ScreenSample]]:
     """T6: extraction cleanliness. Automatic full for non-PDF sources.
 
     Screens only body-prose paragraphs — front/back-matter chapters (which hold
     citation fragments and TOC/title debris, not body prose) are excluded, with
     a fallback to the full paragraph pool when that leaves too few (v1.1).
 
-    Returns the dimension, the per-paragraph 0/1 screen scores (empty for
-    non-PDF sources), and whether the pool fell back to the full paragraph set.
+    Each sampled paragraph is screened ``judge_repeats`` times (S1.9); the
+    per-sample score fed into the dimension/bootstrap is the mean of its
+    repeats, so the dimension's shape is unchanged when ``judge_repeats == 1``.
+
+    Returns the dimension, the per-paragraph mean screen scores (empty for
+    non-PDF sources), whether the pool fell back to the full paragraph set,
+    and the full per-repeat detail for each sample (for ``--dump``).
     """
     if source_format != "pdf":
         return (
@@ -532,6 +597,7 @@ def score_extraction(
             ),
             [],
             False,
+            [],
         )
 
     paragraphs = [
@@ -541,20 +607,34 @@ def score_extraction(
         paragraphs, lambda seg: seg.chapter_index, excluded_chapters or set(), sample_size, "T6"
     )
     indices = sampling.select_indices(len(pool), sample_size, seed)
-    scores = [judge.screen(pool[i].text) for i in indices]
+    repeats = [[judge.screen(pool[i].text) for _ in range(judge_repeats)] for i in indices]
+    scores = [sampling.mean(r) for r in repeats]
     fraction = sampling.mean(scores) if scores else 1.0
 
     def statistic(resample: list[int]) -> float:
         return sampling.mean([scores[i] for i in resample]) * WEIGHTS["T6"]
 
     ci = sampling.bootstrap_ci(statistic, len(scores), seed=seed) if scores else None
-    detail = f"{sum(scores)}/{len(scores)} screened paragraphs clean" if scores else "no paragraphs"
+    detail = (
+        f"{sum(scores):.1f}/{len(scores)} screened paragraphs clean" if scores else "no paragraphs"
+    )
+    samples = [
+        ScreenSample(
+            segment_id=pool[i].id,
+            chapter_index=pool[i].chapter_index,
+            chapter_title=pool[i].chapter_title,
+            target=pool[i].text,
+            screen_scores=repeat,
+        )
+        for i, repeat in zip(indices, repeats)
+    ]
     return (
         DimensionScore(
             "T6", DIMENSION_NAMES["T6"], WEIGHTS["T6"], fraction, ci_points=ci, detail=detail
         ),
         scores,
         fell_back,
+        samples,
     )
 
 
@@ -644,6 +724,7 @@ def score_book(
     seed: int,
     glossary: dict[str, str] | None = None,
     actual_cost_eur: float | None = None,
+    judge_repeats: int = 1,
 ) -> RubricTResult:
     """Score ``translated`` against ``source`` on all of Rubric T.
 
@@ -655,6 +736,12 @@ def score_book(
         seed: Seed for all sampling and bootstraps.
         glossary: The per-book glossary from the cache, or ``None`` (→ T4 dropped).
         actual_cost_eur: Total translation cost from the cache, or ``None`` (→ T7 dropped).
+        judge_repeats: Judge each sampled T2/T3/T6 item this many times (S1.9).
+            The dimension/bootstrap score per sample is the mean of its
+            repeats, so ``judge_repeats == 1`` reproduces prior behavior
+            exactly; every repeat is retained on the result for ``--dump``
+            and the judge-noise-floor report (:attr:`RubricTResult.meaning_noise`
+            / :attr:`RubricTResult.fluency_noise`).
 
     Returns:
         The :class:`RubricTResult`.
@@ -682,8 +769,32 @@ def score_book(
     sample_pairs = [pool[i] for i in sample_indices]
     sample_ids = [s.id for s, _ in sample_pairs]
 
-    meaning_scores = [judge.meaning(s.text, t.text) for s, t in sample_pairs]
-    fluency_scores = [judge.fluency(t.text) for _, t in sample_pairs]
+    meaning_repeats = [
+        [judge.meaning(s.text, t.text) for _ in range(judge_repeats)] for s, t in sample_pairs
+    ]
+    fluency_repeats = [
+        [judge.fluency(t.text) for _ in range(judge_repeats)] for _, t in sample_pairs
+    ]
+    meaning_scores = [sampling.mean(r) for r in meaning_repeats]
+    fluency_scores = [sampling.mean(r) for r in fluency_repeats]
+    prose_samples = [
+        ProseSample(
+            segment_id=s.id,
+            chapter_index=s.chapter_index,
+            chapter_title=s.chapter_title,
+            source=s.text,
+            target=t.text,
+            meaning_scores=m_repeat,
+            fluency_scores=f_repeat,
+        )
+        for (s, t), m_repeat, f_repeat in zip(sample_pairs, meaning_repeats, fluency_repeats)
+    ]
+    meaning_noise = (
+        sampling.mean([sampling.stdev(r) for r in meaning_repeats]) if meaning_repeats else None
+    )
+    fluency_noise = (
+        sampling.mean([sampling.stdev(r) for r in fluency_repeats]) if fluency_repeats else None
+    )
 
     m_fraction, m_ci = _bootstrap_points(meaning_scores, WEIGHTS["T2"], seed)
     f_fraction, f_ci = _bootstrap_points(fluency_scores, WEIGHTS["T3"], seed)
@@ -714,13 +825,14 @@ def score_book(
 
     t4 = score_terminology(alignment, glossary)
     t5 = score_structure(source, translated)
-    t6, screen_scores, t6_fell_back = score_extraction(
+    t6, screen_scores, t6_fell_back, screen_samples = score_extraction(
         source.source_format,
         translated,
         judge,
         sample_size=T6_SAMPLE,
         seed=seed + 1,
         excluded_chapters=excluded,
+        judge_repeats=judge_repeats,
     )
     word_count = sum(len(seg.text.split()) for seg in source.segments)
     t7 = score_cost(actual_cost_eur, word_count)
@@ -762,4 +874,9 @@ def score_book(
         sample_ids=sample_ids,
         notes=notes,
         cost_eur=judge.total_cost_eur,
+        prose_samples=prose_samples,
+        screen_samples=screen_samples,
+        judge_repeats=judge_repeats,
+        meaning_noise=meaning_noise,
+        fluency_noise=fluency_noise,
     )
