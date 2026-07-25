@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">Berilo: orchestrate in večagentska razvojna zanka</title>
+  <desc id="desc">Supervisor vodi planiranje, valove, preverjanje in združevanje. Specializirani agenti kritizirajo načrt, implementirajo zgodbe, pregledujejo spremembe, raziskujejo napake in kartirajo kodo.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f5f0e5}.ink{fill:#20251f}.muted{fill:#667066}.green{fill:#244b3b}.terracotta{fill:#b75d42}
+      .cream{fill:#fffaf0}.line{fill:none;stroke:#315544;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
+      .dash{fill:none;stroke:#8a9389;stroke-width:3;stroke-dasharray:10 10}
+      .card{fill:#fffaf0;stroke:#c8c0ad;stroke-width:2}.gate{fill:#e8efe8;stroke:#56705f;stroke-width:2}
+      .eyebrow{font-family:Arial,sans-serif;font-size:20px;font-weight:700;letter-spacing:3px}
+      .h1{font-family:Georgia,serif;font-size:52px;font-weight:700}
+      .h2{font-family:Arial,sans-serif;font-size:27px;font-weight:700}
+      .h3{font-family:Arial,sans-serif;font-size:23px;font-weight:700}
+      .body{font-family:Arial,sans-serif;font-size:20px;font-weight:400}
+      .small{font-family:Arial,sans-serif;font-size:17px;font-weight:400}
+      .label{font-family:Arial,sans-serif;font-size:17px;font-weight:700;letter-spacing:1px}
+      .num{font-family:Georgia,serif;font-size:30px;font-weight:700}
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1l10 5-10 5z" fill="#315544"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="1000"/>
+  <text x="90" y="78" class="eyebrow terracotta">BERILO · VEČAGENTSKI RAZVOJ</text>
+  <text x="90" y="142" class="h1 ink">Skill orchestrate vodi agente skozi preverljivo zanko</text>
+  <text x="90" y="185" class="body muted">Supervisor razdeli delo, agenti opravijo specializirane naloge, vsaka zgodba pa gre skozi pregled in dokazila.</text>
+
+  <!-- central supervisor -->
+  <circle cx="800" cy="505" r="158" fill="#244b3b"/>
+  <circle cx="800" cy="505" r="132" fill="none" stroke="#f5f0e5" stroke-width="2" stroke-dasharray="5 9"/>
+  <text x="800" y="450" text-anchor="middle" class="eyebrow" fill="#d9a18e">ORCHESTRATE</text>
+  <text x="800" y="495" text-anchor="middle" class="h1" fill="#fffaf0">Supervisor</text>
+  <text x="800" y="535" text-anchor="middle" class="small" fill="#fffaf0">specifikacija · zgodbe · valovi</text>
+  <text x="800" y="563" text-anchor="middle" class="small" fill="#fffaf0">združevanje · stroški · naprava</text>
+  <text x="800" y="591" text-anchor="middle" class="small" fill="#fffaf0">skupno stanje · pogovor z Nikom</text>
+
+  <!-- agent cards -->
+  <g transform="translate(90 245)">
+    <rect class="card" width="410" height="170" rx="22"/>
+    <circle cx="52" cy="50" r="25" class="terracotta"/>
+    <text x="52" y="59" text-anchor="middle" class="num" fill="#fffaf0">1</text>
+    <text x="92" y="48" class="h2 ink">plan-critic</text>
+    <text x="92" y="76" class="label terracotta">OPUS · PRED GRADNJO</text>
+    <text x="30" y="115" class="body ink">Napade predpostavke, Verify vrstice,</text>
+    <text x="30" y="144" class="body ink">odvisnosti, stroške in skrite konflikte.</text>
+  </g>
+
+  <g transform="translate(90 565)">
+    <rect class="card" width="410" height="170" rx="22"/>
+    <circle cx="52" cy="50" r="25" class="green"/>
+    <text x="52" y="59" text-anchor="middle" class="num" fill="#fffaf0">2</text>
+    <text x="92" y="48" class="h2 ink">task-implementer</text>
+    <text x="92" y="76" class="label green">SONNET / OPUS · ENA ZGODBA</text>
+    <text x="30" y="115" class="body ink">Implementira v ločenem worktreeju,</text>
+    <text x="30" y="144" class="body ink">z mock testi, lintom in brez skritih stroškov.</text>
+  </g>
+
+  <g transform="translate(1100 245)">
+    <rect class="card" width="410" height="170" rx="22"/>
+    <circle cx="52" cy="50" r="25" class="terracotta"/>
+    <text x="52" y="59" text-anchor="middle" class="num" fill="#fffaf0">3</text>
+    <text x="92" y="48" class="h2 ink">impl-reviewer</text>
+    <text x="92" y="76" class="label terracotta">OPUS · PRED ZDRUŽITVIJO</text>
+    <text x="30" y="115" class="body ink">Adversarno pregleda diff, obseg, teste,</text>
+    <text x="30" y="144" class="body ink">skrivnosti, stroške in integriteto segmentov.</text>
+  </g>
+
+  <g transform="translate(1100 565)">
+    <rect class="card" width="410" height="170" rx="22"/>
+    <circle cx="52" cy="50" r="25" class="green"/>
+    <text x="52" y="59" text-anchor="middle" class="num" fill="#fffaf0">4</text>
+    <text x="92" y="48" class="h2 ink">defect-investigator</text>
+    <text x="92" y="76" class="label green">OPUS · FORENZIKA NAPAK</text>
+    <text x="30" y="115" class="body ink">Prebere artefakte, določi vzrok napake</text>
+    <text x="30" y="144" class="body ink">in vrne razvrstitev ter osnutek zgodbe.</text>
+  </g>
+
+  <!-- directional flow -->
+  <path class="line" marker-end="url(#arrow)" d="M500 330C620 330 625 395 674 430"/>
+  <path class="line" marker-end="url(#arrow)" d="M675 590C610 635 605 650 500 650"/>
+  <path class="line" marker-end="url(#arrow)" d="M925 430C980 390 995 330 1100 330"/>
+  <path class="line" marker-end="url(#arrow)" d="M1100 650C990 650 982 620 925 585"/>
+
+  <!-- scouts -->
+  <rect x="570" y="238" width="460" height="90" rx="45" class="card"/>
+  <text x="620" y="275" class="h3 ink">Skavti · Explore / general-purpose</text>
+  <text x="620" y="305" class="small muted">Kartiranje kode · analiza vpliva · raziskava knjižnic</text>
+  <path class="dash" d="M800 328v38"/>
+
+  <!-- verification gate -->
+  <rect x="180" y="815" width="1240" height="125" rx="28" class="gate"/>
+  <text x="225" y="858" class="eyebrow green">SKILL VERIFY-IMPLEMENTATION · KAKOVOSTNA VRATA</text>
+  <circle cx="290" cy="900" r="20" class="green"/><text x="290" y="907" text-anchor="middle" class="label" fill="#fff">1</text>
+  <text x="325" y="907" class="h3 ink">Deterministično:</text>
+  <text x="525" y="907" class="body ink">scenariji → testi → popravek → vse zeleno</text>
+  <path class="line" marker-end="url(#arrow)" d="M840 900h95"/>
+  <circle cx="980" cy="900" r="20" class="terracotta"/><text x="980" y="907" text-anchor="middle" class="label" fill="#fff">2</text>
+  <text x="1015" y="907" class="h3 ink">V živo:</text>
+  <text x="1115" y="907" class="body ink">omejen API / Boox / rubrika</text>
+
+  <!-- status chips -->
+  <rect x="590" y="695" width="420" height="66" rx="33" fill="#fffaf0" stroke="#c8c0ad" stroke-width="2"/>
+  <text x="800" y="737" text-anchor="middle" class="h3 ink">≤ 3 agenti na val · brez prekrivanja datotek</text>
+</svg>

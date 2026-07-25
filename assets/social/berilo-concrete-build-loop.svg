@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="2000" viewBox="0 0 1600 2000" role="img" aria-labelledby="title desc">
+  <title id="title">Berilo: konkretna večagentska razvojna zanka in rezultati petih knjig</title>
+  <desc id="desc">Prikaz 27 poskusov od načrta prek gradnje, pregleda, merjenja, raziskave napak in popravkov. Vključuje ocene prevoda petih knjig, intervale zaupanja, stroške in ugotovitve.</desc>
+  <defs>
+    <style>
+      .bg{fill:#f5f0e5}.paper{fill:#fffaf0;stroke:#c8c0ad;stroke-width:2}.green{fill:#244b3b}.green2{fill:#e6eee8}
+      .red{fill:#b75d42}.red2{fill:#f3e2dc}.gold{fill:#d49b46}.ink{fill:#20251f}.muted{fill:#667066}
+      .line{fill:none;stroke:#315544;stroke-width:6;stroke-linecap:round;stroke-linejoin:round}.thin{fill:none;stroke:#8e968d;stroke-width:2}
+      .dash{fill:none;stroke:#8e968d;stroke-width:3;stroke-dasharray:10 10}.white{fill:#fffaf0}
+      .eyebrow{font-family:Arial,sans-serif;font-size:20px;font-weight:700;letter-spacing:3px}
+      .title{font-family:Georgia,serif;font-size:58px;font-weight:700}.section{font-family:Georgia,serif;font-size:39px;font-weight:700}
+      .h2{font-family:Arial,sans-serif;font-size:27px;font-weight:700}.h3{font-family:Arial,sans-serif;font-size:22px;font-weight:700}
+      .body{font-family:Arial,sans-serif;font-size:20px}.small{font-family:Arial,sans-serif;font-size:17px}
+      .tiny{font-family:Arial,sans-serif;font-size:15px}.score{font-family:Georgia,serif;font-size:52px;font-weight:700}
+      .step{font-family:Georgia,serif;font-size:34px;font-weight:700}.mono{font-family:monospace;font-size:17px}
+    </style>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1l10 5-10 5z" fill="#315544"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1600" height="2000"/>
+  <text x="80" y="72" class="eyebrow red">BERILO · 24.–25. JULIJ 2026</text>
+  <text x="80" y="142" class="title ink">27 poskusov v eni preverljivi zanki</text>
+  <text x="80" y="186" class="body muted">Hipoteza → več agentov → adversarni pregled → meritev → raziskava napake → popravek → nova hipoteza</text>
+
+  <!-- KPI strip -->
+  <g transform="translate(80 230)">
+    <rect class="paper" width="1440" height="115" rx="26"/>
+    <text x="55" y="48" class="score green">27</text><text x="135" y="45" class="h3 ink">zabeleženih poskusov</text><text x="135" y="75" class="small muted">vsi obdržani, rezultati zapisani</text>
+    <line x1="410" y1="25" x2="410" y2="90" class="thin"/>
+    <text x="455" y="48" class="score green">5</text><text x="505" y="45" class="h3 ink">prevedenih knjig</text><text x="505" y="75" class="small muted">PDF + EPUB, vsak EPUB brez napak</text>
+    <line x1="800" y1="25" x2="800" y2="90" class="thin"/>
+    <text x="845" y="48" class="score green">€4,42</text><text x="1005" y="45" class="h3 ink">zabeležen strošek</text><text x="1005" y="75" class="small muted">seštevek cost_eur v dnevniku</text>
+    <line x1="1240" y1="25" x2="1240" y2="90" class="thin"/>
+    <text x="1280" y="48" class="score green">0</text><text x="1320" y="45" class="h3 ink">EPUB napak</text><text x="1320" y="75" class="small muted">epubcheck</text>
+  </g>
+
+  <!-- concrete loop -->
+  <text x="80" y="410" class="section ink">Konkretna razvojna zanka</text>
+  <circle cx="800" cy="785" r="315" fill="none" stroke="#d6cfbf" stroke-width="42"/>
+  <path class="line" marker-end="url(#arrow)" d="M571 570C690 438 906 435 1030 560"/>
+  <path class="line" marker-end="url(#arrow)" d="M1100 670C1180 815 1115 1000 963 1072"/>
+  <path class="line" marker-end="url(#arrow)" d="M820 1110C640 1125 485 1000 477 825"/>
+  <path class="line" marker-end="url(#arrow)" d="M485 700C500 650 525 610 571 570"/>
+
+  <!-- center -->
+  <circle cx="800" cy="785" r="150" class="green"/>
+  <text x="800" y="735" text-anchor="middle" class="eyebrow" fill="#d9a18e">ORCHESTRATE</text>
+  <text x="800" y="785" text-anchor="middle" class="section white">Supervisor</text>
+  <text x="800" y="825" text-anchor="middle" class="small white">razdeli zgodbe v valove</text>
+  <text x="800" y="852" text-anchor="middle" class="small white">združi, plača, meri in zapisuje</text>
+
+  <!-- loop steps -->
+  <g transform="translate(235 495)">
+    <rect class="paper" width="380" height="185" rx="24"/>
+    <circle cx="55" cy="55" r="31" class="red"/><text x="55" y="66" text-anchor="middle" class="step white">1</text>
+    <text x="105" y="50" class="h2 ink">Hipoteza in merilo</text>
+    <text x="30" y="100" class="body ink">Specifikacija, rubrika, 24 zgodb</text>
+    <text x="30" y="132" class="body ink">in Verify vrstica za vsak korak.</text>
+    <text x="30" y="163" class="small muted">plan-critic napade načrt pred gradnjo</text>
+  </g>
+
+  <g transform="translate(985 495)">
+    <rect class="paper" width="380" height="185" rx="24"/>
+    <circle cx="55" cy="55" r="31" class="green"/><text x="55" y="66" text-anchor="middle" class="step white">2</text>
+    <text x="105" y="50" class="h2 ink">Zgradi in pregleda</text>
+    <text x="30" y="100" class="body ink">Do 3 implementerji v ločenih</text>
+    <text x="30" y="132" class="body ink">worktreejih; reviewer odloči LAND.</text>
+    <text x="30" y="163" class="small muted">141 translator + 176 Android testov</text>
+  </g>
+
+  <g transform="translate(985 885)">
+    <rect class="paper" width="380" height="205" rx="24"/>
+    <circle cx="55" cy="55" r="31" class="gold"/><text x="55" y="66" text-anchor="middle" class="step white">3</text>
+    <text x="105" y="50" class="h2 ink">Izmeri in preveri</text>
+    <text x="30" y="100" class="body ink">Brezplačni testi, nato omejen</text>
+    <text x="30" y="132" class="body ink">API preizkus in rubrika T.</text>
+    <text x="30" y="166" class="small muted">T ≥ 85 · CI spodaj ≥ 80 · T1 = 100 %</text>
+    <text x="30" y="190" class="small muted">epubcheck = 0 · PDF čistost ≥ 95 %</text>
+  </g>
+
+  <g transform="translate(235 865)">
+    <rect class="paper" width="400" height="245" rx="24"/>
+    <circle cx="55" cy="55" r="31" class="red"/><text x="55" y="66" text-anchor="middle" class="step white">4</text>
+    <text x="105" y="50" class="h2 ink">Napaka → nova hipoteza</text>
+    <text x="30" y="96" class="h3 red">Active Measures: 13/30 = 43,3 %</text>
+    <text x="30" y="128" class="small ink">Endnote, napisi in prelomi čez strani.</text>
+    <text x="30" y="158" class="small ink">Round 3: 27 → 22/30; vzorec je razkril OCR.</text>
+    <text x="30" y="190" class="small ink">Round 4: AM 29/30 + WE 29/30 = 96,7 %.</text>
+    <text x="30" y="220" class="small muted">defect-investigator določi vzrok; ponovi zanko</text>
+  </g>
+
+  <!-- notable course correction -->
+  <rect x="160" y="1160" width="1280" height="160" rx="28" class="red2" stroke="#b75d42" stroke-width="2"/>
+  <text x="205" y="1205" class="eyebrow red">KLJUČNA OPAZKA · MERITEV JE LAHKO NAPAKA</text>
+  <text x="205" y="1248" class="h2 ink">Active Measures je najprej dobil T = 78,6 — nato je agent odkril evalvacijski artefakt.</text>
+  <text x="205" y="1282" class="body ink">Rubrika v1.0 je med prozo vzorčila 989 fragmentov opomb in napačno štela termine znotraj besed.</text>
+  <text x="205" y="1308" class="body ink">Rubrika v1.1: samo osrednja proza + besedne meje → T = 85,0 [82,6–87,5].</text>
+
+  <!-- book results -->
+  <text x="80" y="1390" class="section ink">Pet knjig · prevod EN → SL · rubrika T v1.1</text>
+
+  <g transform="translate(80 1430)">
+    <rect class="paper" width="440" height="225" rx="24"/>
+    <rect x="0" y="0" width="12" height="225" rx="6" class="green"/>
+    <text x="35" y="42" class="h2 ink">The New Rules of War</text>
+    <text x="35" y="84" class="score green">88,5</text><text x="178" y="82" class="body muted">CI [86,0–90,8]</text>
+    <text x="35" y="123" class="small ink">EPUB · strošek prvega teka €0,60</text>
+    <text x="35" y="154" class="small ink">kill/resume: 0 ponovnih zaračunavanj</text>
+    <text x="35" y="184" class="small red">Opazka: šibkejša tekočnost in terminologija.</text>
+  </g>
+
+  <g transform="translate(580 1430)">
+    <rect class="paper" width="440" height="225" rx="24"/>
+    <rect x="0" y="0" width="12" height="225" rx="6" class="green"/>
+    <text x="35" y="42" class="h2 ink">Active Measures</text>
+    <text x="35" y="84" class="score green">85,0</text><text x="178" y="82" class="body muted">CI [82,6–87,5]</text>
+    <text x="35" y="123" class="small ink">PDF · prevod/eval €1,01</text>
+    <text x="35" y="154" class="small ink">pred popravkom meritve: 78,6</text>
+    <text x="35" y="184" class="small red">Opazka: neuspeh je razkril napako vzorčenja.</text>
+  </g>
+
+  <g transform="translate(1080 1430)">
+    <rect class="paper" width="440" height="225" rx="24"/>
+    <rect x="0" y="0" width="12" height="225" rx="6" class="green"/>
+    <text x="35" y="42" class="h2 ink">This Is How They Tell Me</text>
+    <text x="35" y="70" class="h2 ink">the World Ends</text>
+    <text x="35" y="112" class="score green">86,7</text><text x="178" y="110" class="body muted">CI [84,3–89,0]</text>
+    <text x="35" y="151" class="small ink">OCR PDF · strošek €1,22</text>
+    <text x="35" y="182" class="small red">Opazka: robovi strani in OCR zahtevajo reflow.</text>
+  </g>
+
+  <g transform="translate(330 1695)">
+    <rect class="paper" width="440" height="225" rx="24"/>
+    <rect x="0" y="0" width="12" height="225" rx="6" class="green"/>
+    <text x="35" y="42" class="h2 ink">Sandworm</text>
+    <text x="35" y="84" class="score green">88,5</text><text x="178" y="82" class="body muted">CI [86,2–90,5]</text>
+    <text x="35" y="123" class="small ink">EPUB · strošek €0,75</text>
+    <text x="35" y="154" class="small ink">ustaljena nastavitev cevovoda</text>
+    <text x="35" y="184" class="small green">Opazka: čist prenos, epubcheck brez napak.</text>
+  </g>
+
+  <g transform="translate(830 1695)">
+    <rect class="paper" width="440" height="225" rx="24"/>
+    <rect x="0" y="0" width="12" height="225" rx="6" class="gold"/>
+    <text x="35" y="42" class="h2 ink">The Revenge of Geography</text>
+    <text x="35" y="84" class="score gold">84,9</text><text x="178" y="82" class="body muted">CI [82,1–87,5]</text>
+    <text x="35" y="123" class="small ink">EPUB · strošek €0,63 · ni vezan na gate</text>
+    <text x="35" y="154" class="small ink">T4 terminologija = 7,6 · najšibkejše merilo</text>
+    <text x="35" y="184" class="small red">Opazka: 94,9 % segmentov ima fallback naslov.</text>
+  </g>
+
+  <!-- metric legend -->
+  <rect x="80" y="1950" width="1440" height="35" rx="17" class="green"/>
+  <text x="800" y="1975" text-anchor="middle" class="tiny white">T1 popolnost 20 · T2 pomen 30 · T3 tekočnost 20 · T4 terminologija 10 · T5 struktura 10 · T6 čistost PDF 5 · T7 strošek 5</text>
+</svg>

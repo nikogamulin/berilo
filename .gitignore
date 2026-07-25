@@ -53,3 +53,4 @@ android/local.properties
 .claude/worktrees/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+/.codebase-memory/
