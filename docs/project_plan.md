@@ -68,6 +68,36 @@
 - [ ] Residual: 2-page manual spot-read sign-off by Niko (record in issue #11)
 - **Verify:** Rubric **T ≥ 85 (CI lower bound ≥ 80) on all 3 books**; total cost ≤ €5; scores in `rubric_scores.jsonl`; 2-page manual spot-read by Niko signed off (recorded in issue).
 
+### S1.9 — Eval instrumentation: per-sample dump + judge-repeat (2 pt) ✅
+*Plan: [`docs/plans/2026-07-25-fluency-uplift.md`](plans/2026-07-25-fluency-uplift.md) §3 F1. Rationale: T3 is flat at 12.4–13.5/20 on all 5 books and we have no per-sample evidence of why.*
+- [x] `berilo eval --dump <file.jsonl>` writes one row per judged sample: `segment_id`, `chapter_index`, `chapter_title`, `source`, `target`, `meaning`, `fluency` (and `screen` rows where applicable)
+- [x] `berilo eval --judge-repeats N` (default 1) judges each sample N times; the dump records every repeat and the report prints mean intra-sample standard deviation for T2 and T3
+- [x] Dump path never written unless requested; `--dry-run` still makes zero judge calls; existing score-row schema unchanged
+- [x] Offline Verify run 2026-07-25 on merged `main`: 190 passed, lint clean. Supervisor-audited: repeats collapse to a per-sample mean (`rubric_t.py:778-779`) **before** the bootstrap arrays, so the CI is not shrunk by repeat count
+- **Verify:** offline — `python3 -m pytest tests/ -k "dump or repeat"` green with a mocked judge, asserting a 40-row dump with all fields and that `--judge-repeats 3` produces 3× the judge calls and a σ column. Live (Supervisor, ~€0.07): `berilo eval "data/examples/The Revenge of Geography.sl.epub" --sample 40 --seed 42 --dump /tmp/kaplan.jsonl --no-write` yields 40 well-formed rows.
+
+### S1.10 — Prompt registry + Slovenian style contract + prompt-keyed cache (3 pt) ✅
+*Plan: §3 F2 and §3.1. Opus-tier story: translate path, silent-degradation failure mode.*
+- [x] `berilo/prompts.py`: named, versioned registry of translation styles; `baseline_v1` reproduces today's `_TRANSLATE_SYSTEM`, `_TRANSLATE_SYSTEM_STRICT` and `_SINGLE_SEGMENT_SYSTEM` **byte-identically** (test asserts exact string equality)
+- [x] Variants `sl_style_v1`, `book_context_v1`, `revise_v1` per plan §4; each applies to the batch prompt **and** the `_translate_single` fallback
+- [x] `translate_book(..., style=BASELINE)` — default behavior unchanged; the style's version string flows into the cache
+- [x] **Cache-key fix (§3.1):** `prompt_version` joins the `translations` primary key; migration defaults existing rows to `baseline_v1`
+- [x] Offline Verify run 2026-07-25 on merged `main`: 190 passed, lint clean. Supervisor-audited independently: byte-identity confirmed by diffing the registry against `main:translate.py` pre-refactor constants; migration run against a **copy of the real 10,936-row cache** — all rows preserved, text byte-identical, all tagged `baseline_v1`, idempotent across repeated opens, `glossaries`/`calls` intact; estimator honest (`revise_v1` = 2.09× baseline, style-only variants 1.00×); revise pass degrades to un-revised text on a mapping mismatch (segment integrity holds) and is counted in `TranslationStats.revision_failures`; cache commit happens after both passes
+- **Verify:** `cd translator && make test && make lint` green, including new tests proving (a) `baseline_v1` strings are byte-identical to the pre-refactor constants, (b) the same segment under two prompt versions stores two distinct cache rows and each reads back correctly, (c) a pre-migration cache DB opens and its rows read as `baseline_v1`, (d) a `baseline_v1` run against an existing cache makes zero API calls.
+
+### S1.11 — A/B prompt-variant harness (3 pt)
+*Plan: §3 F3. Depends on S1.9 + S1.10. Opus-tier: measurement correctness is the whole point.*
+- [ ] `berilo/experiment.py` + `berilo ab <translated.epub> --variant <name>`: seeded selection of K *contiguous* body-prose runs, re-translated through the real `translate_book` path (production batch size, rolling context, the book's cached glossary) against a scratch cache
+- [ ] Judges control vs variant on T2 + T3, reports **paired** deltas with bootstrap CIs, plus actual € spent and €/1k words per variant
+- [ ] Resampling unit is the contiguous run (cluster), not the segment, so within-run correlation does not shrink the CI
+- [ ] `--dry-run` prints the plan, judge-call count and estimated cost without spending
+- **Verify:** offline — `python3 -m pytest tests/ -k experiment` green with mocked translate+judge, asserting the harness calls `translate_book` (not a bespoke path), that control and variant do not collide in the cache, and that the reported CI is cluster-bootstrapped. Live (Supervisor, ≤ €0.10): `berilo ab "data/examples/The Revenge of Geography.sl.epub" --variant sl_style_v1 --dry-run` then one real run inside budget.
+
+### S1.12 — Promote the winning prompt (2 pt) — *blocked on S1.11 experiment results*
+- [ ] Winning variant becomes the default style; findings + ledger record the paired deltas
+- [ ] One full book re-translated and re-scored (**needs Niko's go-ahead, ~€0.8**)
+- **Verify:** Rubric T on the re-translated book **≥ 89** with T3 ≥ 16/20, T2 not regressed beyond −0.5 pts, T1 = 100%, T7 = 5; score row in `rubric_scores.jsonl`.
+
 ---
 
 ## Phase 2 — Android reader (milestone `m2`) — target: Rubric R ≥ 85 on Boox

@@ -1,5 +1,33 @@
 # Findings register (Tier 2)
 
+- [2026-07-25] **The translation cache was not keyed on the prompt** — PK was
+  `(book_hash, segment_hash, model, lang)`. Any prompt change would therefore
+  serve the OLD translation at €0 on a re-run: a prompt A/B or a full re-run
+  would report "no change" while never calling the model at all — a null result
+  indistinguishable from a real one. Fixed in S1.10: `prompt_version` joins the
+  PK, migration defaults existing rows to `baseline_v1`. **Generalization: any
+  cache whose key omits an experimental factor silently converts that
+  experiment into a no-op — check the key before trusting a null result.**
+- [2026-07-25] Cache migrations must be verified against a COPY of the real
+  cache, not just synthetic fixtures: `~/.cache/berilo/translations.db` holds
+  10,936 rows / 4.0 MB of text across 5 books ≈ €4 of paid work. Verification
+  recipe that caught nothing but would have caught everything: snapshot
+  `{(book,segment,model,lang): text}` before, open the cache twice (proves
+  idempotency), then assert row count, per-row text equality, correct default
+  `prompt_version`, and that `glossaries`/`calls` survive.
+- [2026-07-25] Judge-repeat aggregation must collapse repeats to a **per-sample
+  mean before** the bootstrap arrays (`rubric_t.py`). Flattening N repeats of M
+  samples into one N×M array would fake an N-fold larger sample and shrink the
+  CI without adding information — the tempting-but-wrong implementation.
+- [2026-07-25] **T3 fluency is flat at 12.4–13.5/20 across all 5 books**, every
+  source format and genre (mean judge ≈ 3.1–3.4/5), while T2 sits at 4.2/5 and
+  T1/T5 are perfect. A dimension invariant across 5 different books is systemic
+  — in the translate stage or in the measurement — never a property of a book.
+  Note `fluency_v1` judges the target in ISOLATION (no source, no surrounding
+  text, same model family that wrote it), so the ceiling may be partly the
+  judge's; a human-prose control is the discriminator. Do not tune the
+  translate prompt against an unmeasured judge ceiling (cf. §9 screen-gate).
+
 - [2026-07-24] Book-1 milestone numbers (The New Rules of War, EN→SL,
   gpt-5-mini @ reasoning_effort=low): translation €0.56 actual (dry-run
   estimated €0.53 at default effort — the low-effort surcharge constant now
