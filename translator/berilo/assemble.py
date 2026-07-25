@@ -27,7 +27,7 @@ import uuid
 import zipfile
 from pathlib import Path
 
-from berilo.models import Book, Segment, SegmentType
+from berilo.models import Book, ImageResource, Segment, SegmentType
 
 # Namespace UUID used to derive a stable per-book dc:identifier (arbitrary
 # fixed constant, not looked up anywhere -- only its stability matters).
@@ -50,6 +50,28 @@ _INLINE_TAG_RE = re.compile(r"</?(?:em|strong|i|b|sub|sup)>", re.IGNORECASE)
 
 _HEADING_MIN_LEVEL = 1
 _HEADING_MAX_LEVEL = 3
+
+# Zip-internal directory holding carried-over image resources.
+_IMAGE_DIR = "images"
+
+# File extension written for each media type an image resource can carry. The
+# bytes are copied through unmodified, so the extension is cosmetic — but it
+# must be deterministic, and unknown types get a neutral fallback rather than
+# being dropped.
+_IMAGE_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/svg+xml": ".svg",
+    "image/webp": ".webp",
+    "image/tiff": ".tif",
+    "image/bmp": ".bmp",
+}
+_DEFAULT_IMAGE_EXTENSION = ".img"
+
+# Image formats that are already compressed: re-deflating them costs time and
+# gains nothing, so they are stored.
+_STORED_IMAGE_TYPES = frozenset({"image/jpeg", "image/png", "image/gif", "image/webp"})
 
 _ChapterGroup = tuple[int, "str | None", list[Segment]]
 
@@ -121,6 +143,45 @@ def _group_chapters(book: Book) -> list[_ChapterGroup]:
     return [(index, chapters[index][0].chapter_title, chapters[index]) for index in order]
 
 
+def _image_hrefs(book: Book) -> dict[str, str]:
+    """Map each image resource id to its OPF-relative href.
+
+    Hrefs are derived from the resource's document-order index rather than
+    from its source filename, so two source images that share a basename
+    cannot collide and the output stays byte-identical across runs.
+
+    Args:
+        book: The book whose ``images`` to place.
+
+    Returns:
+        ``{ImageResource.id: href}``, one entry per image, in document order.
+    """
+    hrefs: dict[str, str] = {}
+    for position, image in enumerate(book.images, start=1):
+        extension = _IMAGE_EXTENSIONS.get(image.media_type, _DEFAULT_IMAGE_EXTENSION)
+        hrefs[image.id] = f"{_IMAGE_DIR}/img_{position:04d}{extension}"
+    return hrefs
+
+
+def _group_images(images: list[ImageResource], chapter_index: int) -> dict[str | None, list[str]]:
+    """Group one chapter's images by the segment id they follow.
+
+    Args:
+        images: All of the book's image resources, in document order.
+        chapter_index: The chapter being rendered.
+
+    Returns:
+        ``{anchor segment id (or None for chapter-leading): [image id, ...]}``,
+        each list in document order.
+    """
+    grouped: dict[str | None, list[str]] = {}
+    for image in images:
+        if image.chapter_index != chapter_index:
+            continue
+        grouped.setdefault(image.anchor_segment_id, []).append(image.id)
+    return grouped
+
+
 def _chapter_label(title: str | None, position: int) -> str:
     """Return *title*, or a ``"Chapter N"`` fallback when it is missing."""
     return title if title else f"Chapter {position}"
@@ -154,7 +215,32 @@ def _validate_bilingual_alignment(book: Book, source_book: Book) -> None:
             )
 
 
-def _render_chapter_body(segments: list[Segment], source_by_id: dict[str, Segment] | None) -> str:
+def _render_image(image: ImageResource, href: str) -> str:
+    """Render one image resource as a self-contained XHTML figure block.
+
+    The wrapper is a plain ``div`` (never ``<figure>``/``<figcaption>``):
+    ``normalize_epub`` turns a ``figcaption`` into a CAPTION segment, so a
+    real ``<figure>`` would mint a new segment on every rebuild and break
+    eval alignment against the already-translated book.
+
+    Args:
+        image: The image resource to render.
+        href: The image's OPF-relative href inside the package.
+
+    Returns:
+        The XHTML markup for the image block.
+    """
+    alt = _escape_text(image.alt or "").replace('"', "&quot;")
+    return f'<div class="figure"><img src="{href}" alt="{alt}"/></div>'
+
+
+def _render_chapter_body(
+    segments: list[Segment],
+    source_by_id: dict[str, Segment] | None,
+    images: dict[str, ImageResource] | None = None,
+    image_anchors: dict[str | None, list[str]] | None = None,
+    image_hrefs: dict[str, str] | None = None,
+) -> str:
     """Render one chapter's XHTML ``<body>`` inner markup from its segments.
 
     Consecutive ``LIST_ITEM`` segments are grouped into a single ``<ul>``.
@@ -165,10 +251,19 @@ def _render_chapter_body(segments: list[Segment], source_by_id: dict[str, Segmen
     are never duplicated as a second heading: the translated heading tag is
     followed by a plain ``p.source``, matching every other block type.
 
+    Images anchored to this chapter are emitted after the segment they
+    follow (or at the top of the chapter when their anchor is ``None``).
+    Images anchored to a list item are emitted after the whole ``<ul>``,
+    since a ``div`` may not sit between list items.
+
     Args:
         segments: One chapter's segments, in document order.
         source_by_id: ``{segment.id: source Segment}`` map, or ``None`` for
             a monolingual (translated-only) render.
+        images: ``{ImageResource.id: ImageResource}`` for the whole book.
+        image_anchors: ``{anchor segment id or None: [image id, ...]}`` for
+            this chapter, from :func:`_group_images`.
+        image_hrefs: ``{ImageResource.id: href}``, from :func:`_image_hrefs`.
 
     Returns:
         The concatenated inner XHTML for the chapter's ``<body>``.
@@ -183,6 +278,14 @@ def _render_chapter_body(segments: list[Segment], source_by_id: dict[str, Segmen
         source = source_by_id[segment.id]
         return f'<p class="source">{_render_inline(source.text)}</p>'
 
+    def anchored_images(anchor: str | None) -> str:
+        if not image_anchors or images is None or image_hrefs is None:
+            return ""
+        return "".join(
+            _render_image(images[image_id], image_hrefs[image_id])
+            for image_id in image_anchors.get(anchor, ())
+        )
+
     def flush_list() -> None:
         if not pending_list:
             return
@@ -190,7 +293,10 @@ def _render_chapter_body(segments: list[Segment], source_by_id: dict[str, Segmen
             f"<li>{_render_inline(item.text)}{source_paragraph(item)}</li>" for item in pending_list
         )
         parts.append(f"<ul>{items}</ul>")
+        parts.extend(anchored_images(item.id) for item in pending_list)
         pending_list.clear()
+
+    parts.append(anchored_images(None))
 
     for segment in segments:
         if segment.type == SegmentType.LIST_ITEM:
@@ -218,6 +324,7 @@ def _render_chapter_body(segments: list[Segment], source_by_id: dict[str, Segmen
             parts.append(f"<p>{inline}</p>")
 
         parts.append(source_paragraph(segment))
+        parts.append(anchored_images(segment.id))
 
     flush_list()
     return "".join(parts)
@@ -270,7 +377,12 @@ def _book_identifier(book: Book) -> str:
     return f"urn:uuid:{uuid.uuid5(_ID_NAMESPACE, seed)}"
 
 
-def _content_opf(book: Book, chapters: list[_ChapterGroup], chapter_hrefs: dict[int, str]) -> bytes:
+def _content_opf(
+    book: Book,
+    chapters: list[_ChapterGroup],
+    chapter_hrefs: dict[int, str],
+    image_hrefs: dict[str, str] | None = None,
+) -> bytes:
     """Render ``content.opf``: metadata, manifest, and spine."""
     lang = book.language
     dc_title = f"[{lang.upper()}] {book.title}"
@@ -290,6 +402,16 @@ def _content_opf(book: Book, chapters: list[_ChapterGroup], chapter_hrefs: dict[
             f'<item id="{item_id}" href="{href}" media-type="application/xhtml+xml"/>'
         )
         spine_items.append(f'<itemref idref="{item_id}"/>')
+
+    # Images are manifest resources only: they carry no reading order and so
+    # never enter the spine.
+    for position, image in enumerate(book.images, start=1):
+        href = (image_hrefs or {}).get(image.id)
+        if href is None:
+            continue
+        manifest_items.append(
+            f'<item id="img{position:04d}" href="{href}" media-type="{image.media_type}"/>'
+        )
 
     manifest_xml = "".join(manifest_items)
     spine_xml = "".join(spine_items)
@@ -326,6 +448,8 @@ _STYLESHEET_CSS = (
     b"body { font-family: serif; }\n"
     b"p.caption { font-style: italic; font-size: 0.9em; }\n"
     b"p.source { color: #666666; font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }\n"
+    b"div.figure { margin: 1em 0; text-align: center; }\n"
+    b"div.figure img { max-width: 100%; height: auto; }\n"
 )
 
 
@@ -390,17 +514,29 @@ def build_epub(
         chapter_index: f"chap_{position:04d}.xhtml"
         for position, (chapter_index, _title, _segments) in enumerate(chapters, start=1)
     }
+    image_hrefs = _image_hrefs(book)
+    images_by_id = {image.id: image for image in book.images}
 
     entries: list[tuple[str, bytes, int]] = [
         ("mimetype", _MIMETYPE, zipfile.ZIP_STORED),
         ("META-INF/container.xml", _CONTAINER_XML, zipfile.ZIP_DEFLATED),
-        ("OEBPS/content.opf", _content_opf(book, chapters, chapter_hrefs), zipfile.ZIP_DEFLATED),
+        (
+            "OEBPS/content.opf",
+            _content_opf(book, chapters, chapter_hrefs, image_hrefs),
+            zipfile.ZIP_DEFLATED,
+        ),
         ("OEBPS/nav.xhtml", _nav_xhtml(book, chapters, chapter_hrefs), zipfile.ZIP_DEFLATED),
         ("OEBPS/stylesheet.css", _STYLESHEET_CSS, zipfile.ZIP_DEFLATED),
     ]
     for position, (chapter_index, title, segments) in enumerate(chapters, start=1):
         label = _chapter_label(title, position)
-        body_inner = _render_chapter_body(segments, source_by_id)
+        body_inner = _render_chapter_body(
+            segments,
+            source_by_id,
+            images_by_id,
+            _group_images(book.images, chapter_index),
+            image_hrefs,
+        )
         href = chapter_hrefs[chapter_index]
         entries.append(
             (
@@ -409,6 +545,14 @@ def build_epub(
                 zipfile.ZIP_DEFLATED,
             )
         )
+
+    # Image entries last, in document order: a fixed entry order is what makes
+    # re-assembly byte-identical (see module docstring).
+    for image in book.images:
+        compress_type = (
+            zipfile.ZIP_STORED if image.media_type in _STORED_IMAGE_TYPES else zipfile.ZIP_DEFLATED
+        )
+        entries.append((f"OEBPS/{image_hrefs[image.id]}", image.data, compress_type))
 
     _write_zip(output_path, entries)
     return output_path

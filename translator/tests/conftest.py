@@ -9,7 +9,9 @@ on any real (copyrighted) book under ``data/``.
 from __future__ import annotations
 
 import os
+import struct
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -55,11 +57,20 @@ def _content_opf(
     include_ncx: bool,
     nav_href: str | None,
     ncx_href: str = "toc.ncx",
+    image_items: list[dict[str, Any]] | None = None,
 ) -> str:
     creators = "".join(f"<dc:creator>{author}</dc:creator>" for author in authors)
     manifest_entries = "\n".join(
-        f'    <item id="{item["id"]}" href="{item["href"]}" media-type="application/xhtml+xml"/>'
-        for item in items
+        [
+            f'    <item id="{item["id"]}" href="{item["href"]}" '
+            'media-type="application/xhtml+xml"/>'
+            for item in items
+        ]
+        + [
+            f'    <item id="{image["id"]}" href="{image["href"]}" '
+            f'media-type="{image["media_type"]}"/>'
+            for image in image_items or []
+        ]
     )
     spine_entries = "\n".join(f'    <itemref idref="{item["id"]}"/>' for item in items)
     ncx_entry = (
@@ -161,6 +172,7 @@ def write_epub(
     nav_toc: list[tuple[str, str]] | None = None,
     opf_dir: str = "",
     declared_ncx_href: str | None = None,
+    image_items: list[dict[str, Any]] | None = None,
 ) -> Path:
     """Write a minimal synthetic EPUB at *destination*.
 
@@ -186,6 +198,9 @@ def write_epub(
         declared_ncx_href: NCX href written into the manifest when it must
             differ from the archive entry (``toc.ncx``) — repackaged books
             name a TOC document that is not there under that name.
+        image_items: One dict per image resource. Keys: ``id`` (manifest id),
+            ``href`` (path relative to the OPF), ``media_type``, ``data``
+            (raw bytes written into the archive).
 
     Returns:
         *destination*, for convenient chaining.
@@ -208,8 +223,11 @@ def write_epub(
                 include_ncx,
                 nav_href,
                 ncx_href=declared_ncx_href or "toc.ncx",
+                image_items=image_items,
             ),
         )
+        for image in image_items or []:
+            archive.writestr(f"{prefix}{image['href']}", image["data"])
         if include_ncx:
             archive.writestr(f"{prefix}toc.ncx", _toc_ncx(items))
         if nav_href:
@@ -220,6 +238,41 @@ def write_epub(
                 _xhtml_doc(item.get("doc_title", item["href"]), item["body"]),
             )
     return destination
+
+
+def _png_bytes(width: int, height: int, color: tuple[int, int, int] = (90, 90, 90)) -> bytes:
+    """Encode a solid-color RGB PNG entirely from the standard library.
+
+    Synthetic rather than a checked-in binary: image fixtures must not depend
+    on (copyrighted) books under ``data/``, and a generated image lets a test
+    pick the exact pixel dimensions a threshold is being probed with.
+
+    Args:
+        width: Image width in pixels.
+        height: Image height in pixels.
+        color: Solid ``(r, g, b)`` fill.
+
+    Returns:
+        The encoded PNG bytes.
+    """
+    raw = b"".join(b"\x00" + bytes(color) * width for _ in range(height))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        body = tag + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(raw))
+        + chunk(b"IEND", b"")
+    )
+
+
+@pytest.fixture
+def png_image():
+    """Return :func:`_png_bytes`, a ``(width, height, color) -> bytes`` encoder."""
+    return _png_bytes
 
 
 @pytest.fixture
