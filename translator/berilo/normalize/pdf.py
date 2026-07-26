@@ -204,10 +204,10 @@ _BACK_MATTER_SUBSTRINGS = ("notes", "index", "bibliography", "references", "ackn
 # numerals (any case — OCR renders "xix" as "Xix").
 _PAGE_NUMBER_RE = re.compile(r"^\d+\.?$")
 _ROMAN_NUMERAL_RE = re.compile(r"^[ivxlcdm]+$", re.IGNORECASE)
-# A single whitespace-free token containing a digit — a garbled OCR page number
-# in the header/footer band ("40OI1" for 401) that evades the bare-number and
-# roman regexes. Only applied inside the margin bands.
-_GARBLED_PAGE_TOKEN_RE = re.compile(r"^\S*\d\S*$")
+# A bare URI printed in a margin band is a scan-provenance stamp (archive.org,
+# a library watermark), not book prose — furniture by the same argument as a
+# running head. Body lines are never tested against this.
+_URI_TOKEN_RE = re.compile(r"^(?:https?|ftp)://\S+$", re.IGNORECASE)
 _NON_WORD_RE = re.compile(r"[^\w]", re.UNICODE)
 _DIGITS_RE = re.compile(r"\d+")
 _WHITESPACE_RE = re.compile(r"\s+")
@@ -232,9 +232,19 @@ _CAPTION_LEAD_RE = re.compile(
     r"^(?:Image|Photograph|Photo|Portrait|Cartoon|Illustration|Map|Poster|Facsimile|Front page"
     r"|Cover) of\b"
 )
-# A lone token with digits ("CINCUSAREUR.20") is an endnote-marker artifact,
-# never a prose paragraph.
+# A lone token with digits ("CINCUSAREUR.20", "p=17628.", "05:36:11") reflowed
+# into a block of its own is an endnote-marker/citation artifact, never a prose
+# paragraph. Measured on both example PDFs: 27 blocks are dropped by this rule
+# and every one of them is citation debris (see the module note on _is_droppable
+# versus _is_garbled_page_number).
 _SINGLE_TOKEN_WITH_DIGIT_RE = re.compile(r"^\S*\d\S*$")
+# Maximal runs of letters inside such a token. A GARBLED PAGE NUMBER ("40OI1"
+# for 401, "XXV1" for XXVI) is built from digits and digit-lookalike glyphs, so
+# every letter run in it is either too short to be a word or a roman numeral —
+# whereas "COVID-19" or "MiG-29" carries a real word and is content.
+_LETTER_RUN_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
+# A letter run of at least this length is a word rather than a digit lookalike.
+_LOOKALIKE_RUN_MAX_CHARS = 2
 # Chapter-opening scene setters: a bare date ("November 2020") or a
 # "Place, Region" line ("Fort Meade, Maryland").
 SCENE_SETTER_MAX_WORDS = 6
@@ -372,7 +382,7 @@ def normalize_pdf(path: Path) -> Book:
     running_heads = _detect_running_heads(pages)
     body_pages = [_strip_page_furniture(page, running_heads) for page in pages]
     body_size = _body_font_size(body_pages)
-    blocks = _iter_blocks(body_pages, body_size)
+    blocks = _iter_blocks(body_pages, body_size, _outline_titles(toc))
 
     toc_starts = _toc_content_starts(toc)
     if toc_starts:
@@ -690,6 +700,32 @@ def _is_page_number(text: str) -> bool:
     return bool(_PAGE_NUMBER_RE.match(stripped) or _ROMAN_NUMERAL_RE.match(stripped))
 
 
+def _is_garbled_page_number(text: str) -> bool:
+    """Return True if *text* is a lone token that can only be a page number.
+
+    Applied inside the margin bands only. OCR renders a folio as a token of
+    digits and digit-lookalike glyphs ("40OI1" for 401, "Il0" for 110, "XXV1"
+    for XXVI), which evades both :data:`_PAGE_NUMBER_RE` and
+    :data:`_ROMAN_NUMERAL_RE`. The discriminator is *lexical content*, not
+    shape: every letter run in the token must be too short to be a word, or a
+    roman numeral. The predecessor of this function matched any whitespace-free
+    token containing a digit, so a band line reading "COVID-19", "MiG-29" or
+    "9/11-era" was destroyed with it (review finding 1).
+
+    Args:
+        text: One line's text, already stripped.
+
+    Returns:
+        True if the token is a page-number rendering and must be dropped.
+    """
+    if not _SINGLE_TOKEN_WITH_DIGIT_RE.match(text):
+        return False
+    return all(
+        len(run) <= _LOOKALIKE_RUN_MAX_CHARS or _ROMAN_NUMERAL_RE.match(run)
+        for run in _LETTER_RUN_RE.findall(text)
+    )
+
+
 def _detect_running_heads(pages: list[list[_Line]]) -> set[str]:
     """Find normalized header/footer keys that recur across pages.
 
@@ -717,8 +753,9 @@ def _strip_page_furniture(page: list[_Line], running_heads: set[str]) -> list[_L
     """Drop running headers/footers and bare page numbers from one page.
 
     A band line is removed when it is a bare page number/roman numeral, its
-    normalized key is a known running head, or it reduces to nothing but
-    digits/punctuation. Body lines are always kept.
+    normalized key is a known running head, it reduces to nothing but
+    digits/punctuation, it is a garbled OCR folio, or it is a bare URI
+    (a scan-provenance stamp). Body lines are always kept.
 
     Args:
         page: Extracted lines for one page.
@@ -736,7 +773,8 @@ def _strip_page_furniture(page: list[_Line], running_heads: set[str]) -> list[_L
                 _is_page_number(line.text)
                 or not key
                 or key in running_heads
-                or _GARBLED_PAGE_TOKEN_RE.match(stripped)
+                or _is_garbled_page_number(stripped)
+                or _URI_TOKEN_RE.match(stripped)
             ):
                 continue
         kept.append(line)
@@ -756,7 +794,9 @@ def _body_font_size(pages: list[list[_Line]]) -> float:
     return median(sizes) if sizes else 12.0
 
 
-def _looks_like_heading(line: _Line, body_size: float) -> bool:
+def _looks_like_heading(
+    line: _Line, body_size: float, outline_titles: frozenset[str] = frozenset()
+) -> bool:
     """Decide whether a line is a chapter/section heading.
 
     A heading is either a short font-size outlier or a short line matching a
@@ -765,6 +805,10 @@ def _looks_like_heading(line: _Line, body_size: float) -> bool:
     Args:
         line: The candidate line.
         body_size: Estimated body font size.
+        outline_titles: Normalized titles declared by the PDF's own outline
+            (:func:`_outline_titles`). A line the document itself declares to
+            be a chapter title is exempt from the word-run guard below —
+            structural evidence from the document outranks a shape heuristic.
 
     Returns:
         True if the line should become a :class:`SegmentType.HEADING` segment.
@@ -778,7 +822,10 @@ def _looks_like_heading(line: _Line, body_size: float) -> bool:
     # Title-shape guard: a real heading contains at least one real word (a run
     # of 3+ letters). This rejects OCR debris on scanned pages ("7 me ah 1%",
     # "aT", "ia") while keeping numeric section titles ("1975–1989: Escalate").
-    if not _WORD_RUN_RE.search(text):
+    # A purely numeric chapter title ("1984", "1917") has no real word either,
+    # so it is admitted only on the document outline's own say-so — the sole
+    # signal that separates such a title from a folio (review finding 1).
+    if not _WORD_RUN_RE.search(text) and _outline_key(text) not in outline_titles:
         return False
     # Primary signal: a short font-size outlier.
     if line.size >= body_size * HEADING_SIZE_RATIO:
@@ -825,16 +872,53 @@ def _clean_segment_text(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", text).strip()
 
 
+def _outline_key(text: str) -> str:
+    """Normalize a title for outline comparison: collapse space, casefold."""
+    return _WHITESPACE_RE.sub(" ", text).strip().casefold()
+
+
+def _outline_titles(toc: list) -> frozenset[str]:
+    """Normalized titles declared by the PDF's own outline (bookmarks).
+
+    Args:
+        toc: ``doc.get_toc(simple=True)`` entries, ``[level, title, page]``.
+
+    Returns:
+        Every non-empty outline title, normalized by :func:`_outline_key`.
+    """
+    return frozenset(
+        key for entry in toc if len(entry) >= 2 and (key := _outline_key(str(entry[1])))
+    )
+
+
 def _is_droppable(text: str) -> bool:
-    """Return True if a segment must be discarded (empty/number/punctuation)."""
+    """Return True if a reflowed BODY block must be discarded.
+
+    Scoped to body blocks on purpose. Beyond the empty/page-number/punctuation
+    cases it also drops a lone digit-bearing token, because a reflowed block
+    consisting of one such token is an endnote marker or a citation fragment
+    ("CINCUSAREUR.20", "p=17628.", "05:36:11", a bare download URL) — measured
+    across both example PDFs, all 27 blocks it removes are of that kind.
+
+    It must NOT be used to re-judge a line that :func:`_looks_like_heading`
+    has already admitted: that line has passed a font-size-outlier or
+    chapter-pattern test and carries a real word, which is evidence a body
+    block does not have. Applying this predicate there is what silently lost a
+    chapter titled "COVID-19" or "9/11" (review finding 1); heading admission
+    uses :func:`_is_contentless` instead.
+    """
     stripped = text.strip()
-    if not stripped:
+    if _is_contentless(stripped):
         return True
     if _is_page_number(stripped):
         return True
-    if _SINGLE_TOKEN_WITH_DIGIT_RE.match(stripped):
-        return True
-    return not _WORD_RE.search(stripped)
+    return bool(_SINGLE_TOKEN_WITH_DIGIT_RE.match(stripped))
+
+
+def _is_contentless(text: str) -> bool:
+    """Return True if *text* carries no word character at all (or is empty)."""
+    stripped = text.strip()
+    return not stripped or not _WORD_RE.search(stripped)
 
 
 def _heading_level(size: float, body_size: float) -> int:
@@ -926,7 +1010,9 @@ class _Block:
     y0: float = 0.0
 
 
-def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
+def _iter_blocks(
+    pages: list[list[_Line]], body_size: float, outline_titles: frozenset[str] = frozenset()
+) -> list[_Block]:
     """Reflow body lines into ordered heading/paragraph blocks (no chapters).
 
     Paragraph boundaries are drawn on headings, first-line indents, and large
@@ -936,6 +1022,8 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
     Args:
         pages: Body lines per page (after furniture removal).
         body_size: Estimated body font size.
+        outline_titles: Normalized titles from the PDF outline, passed through
+            to :func:`_looks_like_heading`.
 
     Returns:
         Ordered blocks, each tagged with its start page and font size.
@@ -979,10 +1067,13 @@ def _iter_blocks(pages: list[list[_Line]], body_size: float) -> list[_Block]:
             gap = None if prev_y is None else line.y0 - prev_y
             prev_y = line.y0
 
-            if _looks_like_heading(line, body_size):
+            if _looks_like_heading(line, body_size, outline_titles):
                 flush()
                 title = _clean_segment_text(line.text)
-                if not _is_droppable(title):
+                # A line already admitted as a heading is NOT re-judged by
+                # _is_droppable's body-block artifact rules; only a title with
+                # no word character at all is discarded (review finding 1).
+                if not _is_contentless(title):
                     blocks.append(
                         _Block(SegmentType.HEADING, title, line.page_index, line.size, line.y0)
                     )
@@ -1071,10 +1162,19 @@ def _starts_lowercase(line: _Line) -> bool:
 
 
 def _is_front_matter_title(title: str) -> bool:
-    """Return True if a title is front matter (excluded from TOC chapters)."""
+    """Return True if a title is front matter (excluded from TOC chapters).
+
+    The empty-key case is deliberately split: ``_normalize_head_key`` drops
+    digits, so a chapter genuinely titled "1984" or "1921–1945" normalizes to
+    the empty key exactly like an untitled entry does. Only a title with no
+    word character AT ALL is treated as untitled (review finding 1, third
+    instance of the same class as the two drop paths).
+    """
+    if _is_contentless(title):
+        return True
     key = _normalize_head_key(title)
     if not key:
-        return True
+        return False
     return key in _FRONT_MATTER_TITLES or key.startswith(_FRONT_MATTER_PREFIXES)
 
 

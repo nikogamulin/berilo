@@ -183,7 +183,11 @@ def write_epub(
             (inner XHTML for ``<body>``), ``nav_title`` (optional TOC
             label; a ``None``/absent value omits the document from
             ``toc.ncx``), ``doc_title`` (optional ``<title>`` fallback,
-            defaults to ``href``).
+            defaults to ``href``), ``raw`` (optional complete document text
+            written verbatim, bypassing the well-formed wrapper — the only
+            way to build the malformed XHTML the leniency rule is about),
+            ``absent`` (when true the document is declared in the manifest
+            and spine but never written into the archive).
         title: Book title (``dc:title``).
         authors: Book authors (``dc:creator`` entries).
         language: Book language (``dc:language``).
@@ -233,9 +237,11 @@ def write_epub(
         if nav_href:
             archive.writestr(f"{prefix}{nav_href}", _nav_toc_doc(nav_toc or []))
         for item in items:
+            if item.get("absent"):
+                continue
             archive.writestr(
                 f"{prefix}{item['href']}",
-                _xhtml_doc(item.get("doc_title", item["href"]), item["body"]),
+                item.get("raw") or _xhtml_doc(item.get("doc_title", item["href"]), item["body"]),
             )
     return destination
 
