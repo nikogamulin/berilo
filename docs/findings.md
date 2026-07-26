@@ -705,3 +705,43 @@
   compare against. Storing the excluded component as its own field
   (`memo_cost_eur`) is what makes the subtraction assertable rather than merely
   plausible.
+
+- [2026-07-27] **The engine's `TranslationStats` is not the run's cost.**
+  `buildGlossary` bills one call *before* `translateBook` is entered, so
+  reporting the engine's own counters understates every book by a whole call.
+  Found only because B7's end-to-end test compared the UI's number against the
+  fake client's counter (3 vs 2) rather than against the engine's. **Meter at the
+  `LlmClient` boundary, not at the stage that happens to make most of the calls**
+  — that stays correct for any pass added later. **The Python CLI has the same
+  shape and presumably the same gap** (filed as A12).
+- [2026-07-27] **Never touch WorkManager at container-construction time.**
+  `WorkManager.getInstance` throws unless initialized, and `AppContainer` is
+  built by every Robolectric-hosted test — so a reference there breaks the whole
+  suite, not one test. S3.2 recorded the *scheduling* half of this and moved
+  `SyncWorker.schedule` to the launcher activity; the rule is broader. `by lazy`
+  on both the container field and the runner's own `getInstance` fixes it at zero
+  runtime cost.
+- [2026-07-27] **Segment ids MUST change across a translate round trip, and a
+  test asserting otherwise is wrong.** `make_segment_id` hashes the text, so
+  re-reading the *written* EPUB yields new ids by construction. The 1:1 guarantee
+  that survives the round trip is `(chapterIndex, position, type)` in order; id
+  stability is a property of the `Book` `translateBook` returns, not of the file.
+- [2026-07-27] **`Config(qualifiers = PHONE)` makes long-screen Compose tests
+  fail on layout, not on wiring.** The estimate screen's confirm button lays out
+  below the fold at phone height, and `performClick` then **silently does
+  nothing** — no error, just an uninvoked callback. Rendering Compose
+  *interaction* tests at the Boox qualifier removes a whole class of false
+  negatives. (Screenshot tests still want both qualifiers; this is about
+  interaction.)
+- [2026-07-27] **`androidx.work:work-testing` is in `libs.versions.toml` but is
+  not a project dependency and not in the local Gradle cache** — adding it needs
+  network. Worth knowing before any story plans a WorkManager *execution* test;
+  B7 covered the pure functions `doWork` composes instead.
+- [2026-07-27] **Never widen a secret-scan exclusion to make it pass.** The B3
+  close commit put a literal absolute home path (the exact shape §7's scan greps
+  for) into `docs/findings.md`, and I
+  made the scan green by appending `':!docs/findings.md'` to the exclusion list
+  rather than fixing the content — so every later commit reported clean while the
+  path sat in the repo. B7's report caught it. **The exclusion list in CLAUDE.md
+  §7 is the specification, not a starting point: if the scan is red, fix the
+  content.** Promoted to §9.

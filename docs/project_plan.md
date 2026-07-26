@@ -609,8 +609,31 @@ Two independent defects, either of which alone makes the feature unreachable:
 - [ ] **Decision required:** reseed the identifier on something path-free such as `book_hash` — which changes `dc:identifier` for every EPUB already produced — or accept per-device identifiers and dedupe on `book_hash` instead of file bytes
 - **Verify:** the same `Book` written from two different `source_path` values produces byte-identical output, mutation-proven; existing translated EPUBs' identifiers reported before/after so the blast radius is known before anything ships.
 
-#### Remaining (1 story, 3 pt)
-**B7** import → estimate → confirm → WorkManager → progress UI (3).
+#### B7 — Translation UI, cost gate and background job (3 pt) ✅
+***The last story of m4. B5's engine was complete, tested and unreachable — the exact position S2.6's highlights were in for two months. This makes it reachable and proves it.***
+- [x] Source-EPUB import, dry-run estimate screen, explicit confirmation, WorkManager job, progress from `TranslationStats`, translated EPUB written and imported into the library
+- [x] **§4 enforced structurally, not by convention:** `TranslationPlanner` holds no `LlmClient` at all, so the estimate screen *cannot* spend. `confirmAndTranslate` is the only entry point that can, and a mutation starting the run from the estimate screen is caught
+- [x] ECONOMY is the device default; the QUALITY toggle is a **tier override** alongside `context = DEVICE` — with an explicit test that DEVICE→ECONOMY and WORKSTATION→QUALITY genuinely differ
+- [x] Both filed settings defects fixed: `persistCurrentState` no longer drops `dictionaryModel`/`interpretationModel`, and the key test routes through `createLlmClient`'s pricing pre-flight
+- **Verify:** `./gradlew test assembleDebug` green; the end-to-end path walked in one test; no path reaches a paid run without confirmation, mutation-proven; both tier costs shown; a killed job resumes without re-billing; settings survive a save; screenshots at both qualifiers in both themes.
+- **Verify run 2026-07-27 on merged `main`:** **1065 JVM tests** (567 debug incl. 44 skipped + 498 release), **0 failures**, from a **982** baseline the agent measured with `git reset --hard`. **7/7 mutations caught.** 40 screenshots (14 new). Lint 0 errors. **€0.**
+- **The end-to-end test, Supervisor-verified — 2 tests, 0 skipped:** `import a source EPUB, estimate, confirm, and the translated book is in the library` and `translating the same book twice bills nothing the second time`. Assertions in order: reach Estimate → ECONOMY default → `baseline_v1` → chapters and segments counted → priced → quality > economy > 0 → **zero API calls to reach a price** → nothing started → confirm → exactly one run → worker SUCCESS → exactly one book in the library DB → EPUB on disk → source `en-US`, output `sl` → segment count 1:1 → chapter/position/type preserved → UI's call count == the client's → UI's cost == billed. Real Room DB for library *and* cache.
+- **Found while wiring, and it is a real cost bug:** the engine's `TranslationStats` is **not** the run's cost — `buildGlossary` bills one call *before* `translateBook` is entered, understating every book by a whole call. Caught only because the end-to-end test compared the UI's number against the **fake client's own counter** (3 vs 2) rather than against the engine's. Fixed by metering at the `LlmClient` boundary, which stays correct for any pass added later. **The Python CLI has the same shape → A12.**
+- **Device residual:** `WorkManager.enqueueUniqueWork` and the network constraint are not executed (`work-testing` is absent from the local Gradle cache and offline); real SAF picking, the Readium metadata extractor, multi-hour battery/doze behaviour, and any real provider call all remain device- or paid-gated.
+
+---
+
+### m4 follow-ups filed during the milestone
+
+#### A12 — The CLI under-reports run cost by the glossary call (1 pt)
+*Found by B7 on the Kotlin side; the Python CLI has the same shape.*
+- [ ] `build_glossary` bills before `translate_book` is entered, so a summary built from `TranslationStats` alone understates every book by one call. Meter at the client boundary, as B7 now does
+- **Verify:** `make test && make lint` green; a run whose glossary is uncached reports a total that includes the glossary call, asserted against the mocked client's own counter, mutation-proven.
+
+#### A11 — Re-measure the one null that A3's style table rests on (1 pt) — *needs go-ahead, ~€0.26*
+*A5's finding-12 fix means nulls recorded before it are unproven, not disproven. The bias is toward zero, so positives stand — but a **null** may have been a real effect.*
+- [ ] Re-run `sl_style_v1` vs `baseline_v1` on fluency post-A5 and confirm or revise A3's ECONOMY/sl table cell, which currently rests on a null (+0.05 [−0.10, +0.22]) produced by the defective harness
+- **Verify:** paired delta with cluster-bootstrapped CI recorded in `ledger.jsonl`; the table row confirmed or changed with the measurement cited.
 
 Full text in the spec §4. Two decisions stay open: **[OPEN-A]** Jsoup vs.
 hand-rolled tolerant parsing (decide at B2) and **[OPEN-D]** whether tablet
