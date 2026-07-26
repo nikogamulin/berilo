@@ -22,12 +22,16 @@ DOS epoch (1980-01-01), and entries are written in a fixed order
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 import zipfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from berilo.models import Book, ImageResource, Segment, SegmentType
+
+logger = logging.getLogger(__name__)
 
 # Namespace UUID used to derive a stable per-book dc:identifier (arbitrary
 # fixed constant, not looked up anywhere -- only its stability matters).
@@ -254,7 +258,11 @@ def _render_chapter_body(
     Images anchored to this chapter are emitted after the segment they
     follow (or at the top of the chapter when their anchor is ``None``).
     Images anchored to a list item are emitted after the whole ``<ul>``,
-    since a ``div`` may not sit between list items.
+    since a ``div`` may not sit between list items. An image whose anchor
+    segment is not rendered in this chapter (inconsistent anchor data) is
+    emitted at the END of the chapter with a warning rather than dropped:
+    a misplaced image is a defect, a vanished one is data loss
+    (review finding 15).
 
     Args:
         segments: One chapter's segments, in document order.
@@ -271,6 +279,7 @@ def _render_chapter_body(
     parts: list[str] = []
     first_heading_rendered = False
     pending_list: list[Segment] = []
+    emitted_image_ids: set[str] = set()
 
     def source_paragraph(segment: Segment) -> str:
         if source_by_id is None:
@@ -278,13 +287,38 @@ def _render_chapter_body(
         source = source_by_id[segment.id]
         return f'<p class="source">{_render_inline(source.text)}</p>'
 
-    def anchored_images(anchor: str | None) -> str:
-        if not image_anchors or images is None or image_hrefs is None:
+    def render_images(image_ids: Iterable[str]) -> str:
+        if images is None or image_hrefs is None:
             return ""
-        return "".join(
-            _render_image(images[image_id], image_hrefs[image_id])
-            for image_id in image_anchors.get(anchor, ())
+        rendered = []
+        for image_id in image_ids:
+            emitted_image_ids.add(image_id)
+            rendered.append(_render_image(images[image_id], image_hrefs[image_id]))
+        return "".join(rendered)
+
+    def anchored_images(anchor: str | None) -> str:
+        if not image_anchors:
+            return ""
+        return render_images(image_anchors.get(anchor, ()))
+
+    def orphaned_images() -> str:
+        """Emit this chapter's images whose anchor segment was never rendered."""
+        if not image_anchors:
+            return ""
+        orphans = [
+            image_id
+            for image_ids in image_anchors.values()
+            for image_id in image_ids
+            if image_id not in emitted_image_ids
+        ]
+        if not orphans:
+            return ""
+        logger.warning(
+            "Images %s are anchored to segments absent from their own chapter; "
+            "emitting them at the end of the chapter rather than dropping them",
+            ", ".join(orphans),
         )
+        return render_images(orphans)
 
     def flush_list() -> None:
         if not pending_list:
@@ -327,6 +361,7 @@ def _render_chapter_body(
         parts.append(anchored_images(segment.id))
 
     flush_list()
+    parts.append(orphaned_images())
     return "".join(parts)
 
 

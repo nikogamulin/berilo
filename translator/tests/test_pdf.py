@@ -21,7 +21,11 @@ from berilo.models import Book, Segment, SegmentType
 from berilo.normalize.pdf import (
     _dehyphenate,
     _is_caption,
+    _is_droppable,
+    _is_garbled_page_number,
     _is_ocr_gibberish,
+    _Line,
+    _strip_page_furniture,
     normalize_pdf,
 )
 from berilo.providers.base import CompletionResult, LLMClient
@@ -808,6 +812,148 @@ def test_world_ends_recto_wrap_and_header_garble_fixed() -> None:
     assert "signed on for a weeks" in para.text  # an earlier sentence of the same paragraph
     # BUG B: the garbled header page number "40OI1" (page 401) never appears.
     assert not any("40OI1" in seg.text for seg in book.segments)
+
+
+# --------------------------------------------------------------------------- #
+# Review finding 1: numeric single-token titles and lines. Two independent
+# drop paths, both keyed on token SHAPE alone with no evidence of the line's
+# role — so any content shaped like a folio or an endnote marker was destroyed.
+# --------------------------------------------------------------------------- #
+
+
+def _body_lines() -> list[tuple[float, float, str, float]]:
+    """Enough body-size prose that the median line size IS the body size.
+
+    A two-line fixture puts the median between body and heading size, so no
+    line is a font-size outlier and heading detection never fires.
+    """
+    return [
+        (
+            _LEFT_MARGIN,
+            160.0 + 16.0 * index,
+            f"Body prose line number {index} of the fixture.",
+            _BODY_SIZE,
+        )
+        for index in range(6)
+    ]
+
+
+@pytest.mark.parametrize("token", ["40OI1", "7O", "9QI", "I0O", "Il0", "419g", "XXV1", "1984"])
+def test_garbled_page_numbers_are_still_dropped(token: str) -> None:
+    """Every folio rendering measured in the OCR'd example PDF stays dropped.
+
+    These eight are the exact tokens the margin-band rule removes on *This Is
+    How They Tell Me the World Ends*; relaxing the rule must not resurrect any
+    of them, or that book's extraction — and its `book_hash` — moves.
+    """
+    assert _is_garbled_page_number(token)
+
+
+@pytest.mark.parametrize("token", ["COVID-19", "MiG-29", "9/11-era", "iPhone-13"])
+def test_content_bearing_tokens_are_not_page_numbers(token: str) -> None:
+    """The fix: a lone token carrying a real word is content, not a folio."""
+    assert not _is_garbled_page_number(token)
+
+
+def test_band_line_with_a_real_word_survives_the_furniture_strip() -> None:
+    """Drop path 1 (``_strip_page_furniture``): a band line is not a folio
+    merely because it contains a digit."""
+    band = [
+        _Line(text="COVID-19", x0=72.0, y0=40.0, size=8.0, page_index=0, in_band=True),
+        _Line(text="40OI1", x0=300.0, y0=40.0, size=8.0, page_index=0, in_band=True),
+    ]
+
+    kept = _strip_page_furniture(band, running_heads=set())
+
+    assert [line.text for line in kept] == ["COVID-19"]
+
+
+def test_band_uri_stamp_is_furniture() -> None:
+    """A bare URI in the margin band is scan provenance, not prose.
+
+    It carries real words, so the content test above would keep it; it is
+    dropped as its own furniture class instead (the archive.org stamp measured
+    in the OCR'd example PDF).
+    """
+    band = [
+        _Line(
+            text="https://archive.org/details/thisishowtheytelO000nico",
+            x0=72.0,
+            y0=40.0,
+            size=8.0,
+            page_index=0,
+            in_band=True,
+        )
+    ]
+
+    assert _strip_page_furniture(band, running_heads=set()) == []
+
+
+def test_heading_with_a_digit_bearing_title_survives(tmp_path: Path) -> None:
+    """Drop path 2 (heading admission): the category error, fixed.
+
+    ``_is_droppable`` is a BODY-block predicate — a lone digit-bearing token in
+    reflowed prose is an endnote marker. Applying it to a line
+    ``_looks_like_heading`` had already admitted silently deleted a chapter
+    titled "COVID-19".
+    """
+    page = [(_LEFT_MARGIN, 120.0, "COVID-19", _HEADING_SIZE), *_body_lines()]
+
+    book = normalize_pdf(_make_pdf(tmp_path, [page], name="numeric_heading.pdf"))
+
+    heading = _find_segment(book, "COVID-19")
+    assert heading.type == SegmentType.HEADING
+
+
+def test_purely_numeric_title_is_admitted_when_the_outline_declares_it(tmp_path: Path) -> None:
+    """A chapter genuinely titled "1984" carries no word at all.
+
+    Shape cannot tell it from a folio, so the document's OWN outline is the
+    evidence that admits it — structural evidence outranks a heuristic.
+    """
+    doc = fitz.open()
+    doc.new_page()
+    doc.new_page()
+    doc[0].insert_text((_LEFT_MARGIN, 120.0), "Title Page", fontsize=_BODY_SIZE)
+    doc[1].insert_text((_LEFT_MARGIN, 120.0), "1984", fontsize=_HEADING_SIZE)
+    for x, y, text, size in _body_lines():
+        doc[1].insert_text((x, y), text, fontsize=size)
+    doc.set_toc([[1, "Title Page", 1], [1, "1984", 2]])
+    path = tmp_path / "numeric_title.pdf"
+    doc.save(str(path))
+    doc.close()
+
+    book = normalize_pdf(path)
+
+    heading = _find_segment(book, "1984")
+    assert heading.type == SegmentType.HEADING
+    assert heading.chapter_title == "1984"
+
+
+def test_numeric_line_without_outline_backing_is_still_dropped(tmp_path: Path) -> None:
+    """The other side of the same rule: no outline entry, no admission.
+
+    Without this the large chapter-opening folio that illustrated books set at
+    heading size would mint a segment on every chapter, moving `book_hash` on
+    the example PDFs.
+    """
+    page = [(_LEFT_MARGIN, 120.0, "1984", _HEADING_SIZE), *_body_lines()]
+
+    book = normalize_pdf(_make_pdf(tmp_path, [page], name="numeric_no_outline.pdf"))
+
+    assert not any(segment.type == SegmentType.HEADING for segment in book.segments)
+
+
+@pytest.mark.parametrize("text", ["CINCUSAREUR.20", "p=17628.", "05:36:11", "68–69.", "#3160712,”"])
+def test_endnote_debris_blocks_are_still_dropped(text: str) -> None:
+    """The body-block rule is deliberately NOT relaxed.
+
+    Measured across both example PDFs: all 27 blocks ``_is_droppable`` removes
+    are citation/endnote debris of exactly this kind, and a content-aware
+    relaxation would resurrect four of them. Keeping this path strict is what
+    holds the two PDF baselines still.
+    """
+    assert _is_droppable(text)
 
 
 # --------------------------------------------------------------------------- #
