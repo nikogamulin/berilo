@@ -436,13 +436,16 @@ Two independent defects, either of which alone makes the feature unreachable:
 
 ### Track A — translator hardening
 
-#### A2 — Glossary in the cache key (3 pt) — *in progress*
+#### A2 — Glossary in the cache key (3 pt) ✅
 *Review findings 3 (HIGH), 9, 11. Promoted ahead of A1 on the €0 measurement above.*
-- [ ] The glossary's identity joins the translation cache key; `prompt_version` joins the glossary key; `_GLOSSARY_SYSTEM` and the sampling constants become versioned
-- [ ] Migration is crash-atomic across the DROP/RENAME boundary (`cache.py:190-202`)
-- [ ] T7's actual-cost query filters on `model` (`eval/runner.py:100-105`)
-- [ ] **Existing cache is not invalidated** — proven against a copy of the real ~10,936-row DB, rows byte-identical and still resolving
+- [x] The glossary's identity joins the translation cache key; `prompt_version` joins the glossary key; `_GLOSSARY_SYSTEM` and the sampling constants become versioned. **Both identities are derived, never declared** — `glossary_hash` hashes the rendered prompt block, `glossary_prompt_version` hashes the system prompt plus the sampling params actually used, so neither can drift from what the model saw
+- [x] Migration is crash-atomic — both migrations collapsed into one `BEGIN IMMEDIATE`
+- [x] T7's actual-cost query filters on `model` — **partial, see A7**
+- [x] **Existing cache is not invalidated** — proven, and independently re-proven by the Supervisor
+- [x] Ordering defect caught in review and fixed before landing: `to_prompt_block()` iterated dict insertion order, so two extractions of a semantically identical glossary keyed differently
 - **Verify:** `cd translator && make test && make lint` green, plus: the same segment under two glossaries stores two distinct rows; a glossary-prompt change causes re-translation rather than a €0 no-op (the defect's exact scenario, proven fixed); migration survives a simulated kill between DROP and RENAME; non-invalidation proven on a real-cache copy with row counts reported; every guard mutation-proven to fail without its fix.
+- **Verify run 2026-07-26 on merged `main`** (merge `90fa95a`): `python3 -m pytest tests/ -q` → **328 passed, 2 skipped** (307 baseline at `65e90f7`); **363 passed** on the merged tree with A1; black (48 files) + ruff clean. Non-invalidation re-run **by the Supervisor** against a fresh copy of the real cache: counts unchanged across all four tables (`translations` 13426, `glossaries` 6, `calls` 1551, `book_contexts` 0), **13426/13426 byte-identical**, **13426/13426 resolving under the runtime key**, idempotent over two opens. Order-independence confirmed: identical terms in two insertion orders now yield one identity. Mutation: reverting the sort turns exactly the two new tests red, the other 19 guards stay green. **€0.**
+- **Why the ordering fix had to land in this commit, measured:** all six glossaries in the real cache are stored out of sorted order, so landing unsorted would have written six `glossary_hash` values the sorted renderer could never reproduce — all 13,426 rows stranded behind a second migration on the only copy of ~€7 of paid translation. Free now; six-for-six breakage one commit later.
 
 #### A4 — Provider and cost correctness (2 pt) — *in progress*
 *Review findings 5, 6, 7, 18, 19, 20.*
@@ -452,13 +455,17 @@ Two independent defects, either of which alone makes the feature unreachable:
 - [ ] Anthropic raises `ContentPolicyError`; `"o"` prefix no longer swallows typos; empty memo is cached
 - **Verify:** `make test && make lint` green, one test per finding, each mutation-proven; the fallback-spend test asserts the printed € equals `stats.cost_eur`; the unknown-model test asserts the provider was never invoked.
 
-#### A1 — Extraction robustness (3 pt) — *in progress*
-*Review findings 1, 2, 15, 16, 17. Hardening against future inputs — both headline findings measured latent on the current corpus.*
-- [ ] Tolerant XHTML parsing; an unrecoverable document is **loud**, not a log line (`epub.py:652-656`)
-- [ ] The digit-token drop rule stops eating `"1984"`/`"COVID-19"` on both drop paths (`pdf.py:739`, `:835`)
-- [ ] Findings 15/16/17 fixed, or explicitly deferred with a written argument
-- [ ] The leniency rule written down precisely enough to reimplement in Kotlin (B2 mirrors it)
-- **Verify:** `make test && make lint` green; **the four-book `book_hash` table in the spec §5 is byte-for-byte unchanged** (a moved hash stops the story — it means a paid re-translation and is Niko's call); a synthetic EPUB with a bare `&nbsp;`, unclosed `<br>` and stray `&` keeps its content; an unrecoverable document raises a named error; `"1984"` survives both drop paths; every guard mutation-proven.
+#### A1 — Extraction robustness (3 pt) ✅ *(finding 17 split out to A8)*
+*Review findings 1, 2, 15, 16, 17. Hardening against future inputs — all three drop paths measured latent on the current corpus.*
+- [x] Tolerant XHTML parsing; an unrecoverable document raises `EpubParseError` **naming the document**. **Strict parse first**, so every well-formed document takes the identical old path — this is what holds `book_hash` still, and it is asserted by making the repair function *unreachable*, not by comparing output. TOC documents keep warn-and-degrade, asymmetry documented — they carry no content
+- [x] The digit rule is now **role-aware** rather than looser: a lone digit-bearing token in reflowed prose really is an artifact; the same token as a heading or a band line is not. Needed **three** sites, not the two the review names — the third, `_is_front_matter_title`, is a genuinely unreviewed instance (`_normalize_head_key` strips digits, so a chapter titled `1984` normalizes to the empty key and was classified untitled)
+- [x] Finding 15 — a cross-chapter anchor emits at chapter end with a warning rather than vanishing (a misplaced image is a defect; a vanished one is data loss). Finding 16 — reference-count-aware dedup, a no-op on the corpus (no book references any path exactly twice)
+- [x] The leniency rule written normatively above `_repair_xhtml` for B2 to mirror: strict parse → R0 decode fallback → R1 undeclared HTML5 entity → numeric ref → R2 bare `&` → `&amp;` → R3 unclosed void element → self-closing (quote-aware) → raise. Nothing else is repaired
+- [ ] **Finding 17 not landed — split to A8.** Collapsing continuation documents changes `chapter_index`, hence every segment id. Kaplan has 21 such documents and would go 47 chapters → ~26: a paid re-translation of at least two books
+- **Verify:** `make test && make lint` green; **the four-book `book_hash` table in the spec §5 is byte-for-byte unchanged**; a synthetic EPUB with a bare `&nbsp;`, unclosed `<br>` and stray `&` keeps its content; an unrecoverable document raises a named error; `"1984"` survives both drop paths; every guard mutation-proven.
+- **Verify run 2026-07-26 on merged `main`** (merge `fea323c`): `python3 -m pytest tests/ -q` → **340 passed, 2 skipped** (307 baseline); **363 passed** on the merged tree with A2; black + ruff clean. **HASH GATE PASS byte-for-byte, re-run independently by the Supervisor on the merged tree, on all six books** — the four EPUBs plus **two PDFs the agent baselined beyond its brief** (`8cf7c161…`/2450/41/83, `62ce823d…`/3229/34/0), because both have already-assembled `.sl.epub` artifacts that a source-side change would de-align. 11 mutations, 11 caught. **€0**, no `data/` copied into the worktree.
+- **The `_strip_page_furniture` probe** (the drop path my pre-flight did not cover): *Active Measures* has **0 band lines at all**; *World Ends* has 1483 band lines, 935 dropped, and **exactly 8 killed solely by the digit rule** — six OCR folios, one garbled roman numeral (`XXV1`), one archive.org provenance stamp. **0 genuine content lines lost.** Latent, like the other two paths.
+- **M3 initially passed, and that mattered:** the repairs are near-idempotent on valid markup, so an output-comparison test could never catch a leniency pass that always ran. Probing for a discriminator surfaced a real R3 defect — a literal `>` inside an attribute value ended the tag early and self-closed mid-attribute.
 
 #### A3 — Language-bound styles (3 pt)
 *Review findings 4 (HIGH), 14, 10. Blocked on A2 — both edit `translate.py`.*
@@ -478,6 +485,28 @@ Two independent defects, either of which alone makes the feature unreachable:
 #### A6 — Re-score Rubric T after Track A (1 pt)
 - [ ] Re-score one book and confirm no regression against the 88.0 [86.2, 89.9] baseline (`rubric_scores.jsonl`, commit `9697a90`)
 - **Verify:** `berilo eval "data/examples/The Revenge of Geography.sl.epub" --sample 40 --seed 42` — T not regressed beyond the CI. **Expected €0** if `book_hash` held per A1's gate; if it did not, this needs Niko's go-ahead first.
+
+#### A7 — `calls.prompt_version` so T7 charges one arm (1 pt)
+*Found by A2, out of its scope. Finding 11's fix is one column short.*
+- [ ] `calls` has no `prompt_version` column, so T7's cost sums every prompt version for a book/model/lang. **Confirmed in the real cache:** Kaplan (`f30cd8f3…`) holds both `baseline_v1` (1267 rows) and `revise_v1` (1267 rows), so evaluating either arm today charges it with both runs' spend
+- **Verify:** `make test && make lint` green; a book with two prompt versions in `calls` yields a T7 figure charging only the evaluated arm, mutation-proven.
+
+#### A8 — Continuation documents over-count chapters (2 pt)
+*Review finding 17, split out of A1 because it moves `book_hash`. **Needs Niko's go-ahead — it implies a paid re-translation.***
+- [ ] A chapter split across N XHTML files yields N distinct `chapter_index` values sharing one title (`epub.py:697-701` vs `:755`), so `chapter_count` over-counts and `chapter_index` is no longer 1:1 with `chapter_title`
+- [ ] **Measured continuation-document counts:** Kaplan **21**, Ember Spark **10**, New Rules 1, Sandworm 1. Kaplan's `chapter_count` over-counts by ~45% (47 → ~26)
+- [ ] Fixing changes `chapter_index` → `make_segment_id` → every hash → **paid re-translation of at least two books (~€1.45 each)**
+- **Verify:** hash delta reported at €0 first; then, only with explicit go-ahead, re-translate and re-score affected books with no Rubric T regression.
+
+#### A9 — `<br/>` joins words in EPUB extraction (1 pt)
+*Found by A1, out of scope, pre-existing — not introduced by the leniency pass.*
+- [ ] `First line<br/>second line.` normalizes to `First linesecond line.` — `_serialize_inline` unwraps `<br/>` with no separating space. A real word-joining defect in the canonical input format
+- **Verify:** `make test && make lint` green; a `<br/>`-separated pair round-trips with a space, mutation-proven; **`book_hash` reported before/after** — this changes segment text, so it may move hashes and needs the A8 treatment if it does.
+
+#### A10 — Housekeeping from the review (1 pt)
+- [ ] `berilo doctor` smoke-tests the provider *default* models, not `config.translation_model`/`judge_model` (`doctor.py:44-47`, and the review's own scope note) — it passes while the configured model is unpriced. No longer a billing bug after A4's pre-flight, but false confidence
+- [ ] `assemble.py` packages a twice-referenced figure's bytes twice (`_image_hrefs` keys href by position). Correct placement at a small size cost; no example book triggers it
+- **Verify:** `make test && make lint` green; `doctor` exercises the configured models; a twice-referenced figure yields one packaged payload with two references, both mutation-proven.
 
 ### Track B — on-device translation (Kotlin) — *not scheduled until Track A closes*
 

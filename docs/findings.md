@@ -428,3 +428,94 @@
   the text selection they read. There is no tap order that works, so the toast
   ("select something first") was the only reachable outcome and looked like a
   capture bug. Generalization in `CLAUDE.md` §9.
+- [2026-07-26] **A code review's severity ranking describes the code, not your
+  corpus.** The 2026-07-26 translator review ranked finding 1 first — *"real
+  books lose chapters today (numeric titles)"*. Probed against the real data at
+  €0 before scheduling anything: **0** occurrences on all three drop paths.
+  Finding 2 (malformed XHTML drops a spine document): 0 across all four source
+  EPUBs — 191 spine documents, all parse clean. Finding 1 heading admission: 0
+  lines simultaneously accepted by `_looks_like_heading` and killed by
+  `_is_droppable` in either PDF. Finding 1 band strip (`_strip_page_furniture`):
+  *Active Measures* has 0 band lines at all; *World Ends* has 1483, of which 935
+  are dropped and exactly **8** die solely to the digit rule — six OCR folios,
+  one garbled roman numeral (`XXV1`), one archive.org provenance stamp. **0
+  genuine content lines lost.** All correct robustness defects; none active.
+  Meanwhile finding 3 (glossary absent from the cache key), ranked second, was
+  firing continuously. Probes: `ET.fromstring` over every spine member resolved
+  through `_read_manifest`/`_read_spine` (note `_read_spine(opf_root, manifest)`
+  takes two args); `_looks_like_heading(s) and _is_droppable(s)` over raw lines.
+  Generalization in `CLAUDE.md` §9.
+- [2026-07-26] **A cache key derived from rendered text inherits the renderer's
+  ordering.** `Glossary.to_prompt_block()` iterated dict insertion order, and
+  the terms come from a model with no ordering contract — so the identity was
+  stable *within* a process (dicts are insertion-ordered; `PYTHONHASHSEED` is
+  irrelevant) yet unstable across *re-extractions*. Two semantically identical
+  glossaries would key differently and re-translate a whole book for nothing
+  (~€1.45 at the `revise_v1` default). The test is not "is the hash reproducible
+  here" but **"is it reproducible from a fresh derivation of the same content"**.
+  Sequencing corollary, and it was load-bearing: a fix that changes a derived key
+  is **free while writer and reader still move together**, and needs a second
+  migration the moment stored values exist. All six glossaries in the real cache
+  are stored out of sorted order, so landing unsorted would have stranded all
+  13,426 rows. Ordering defects in a key-deriving renderer must land in the same
+  commit as the key.
+- [2026-07-26] **The migration-verification recipe (generalizes S1.10).**
+  snapshot → migrate → open twice (idempotence) → assert (a) row count, (b)
+  per-row byte equality, **(c) resolution under the key the runtime computes**.
+  Clause (c) is the one that actually proves non-invalidation — row count alone
+  passes under a mutation that breaks resolution. Never open the real cache for
+  writing; copy first. Real cache as of 2026-07-26: **13,426 translations /
+  15.5 MB / 6 books**, 6 glossaries, 1551 calls, 0 book_contexts (earlier notes
+  saying 10,936 / 4.0 MB are stale). `sqlite3` CLI is **not installed** on this
+  box — use Python's `sqlite3` module.
+- [2026-07-26] **A near-idempotent transform cannot be mutation-tested by
+  comparing output.** Forcing every document through A1's XHTML recovery pass
+  passed every test, because R0–R3 leave valid markup alone — the very property
+  that makes recovery safe makes it invisible. The discriminating assertion is on
+  the **mechanism** (the repair function is unreachable for a well-formed
+  document), not the output. Reaching for one exposed a real defect: R3's
+  `[^<>]*` attribute scan ended the tag at a legal literal `>` inside an
+  attribute value and self-closed mid-attribute. When a guard's correct behaviour
+  is "changes nothing", assert that it did not **run**.
+- [2026-07-26] **`_normalize_head_key` strips digits, so a purely numeric title
+  normalizes to the empty key** — and every predicate keyed on "empty key ⇒ not
+  a real title" then silently classifies it as untitled. This is a third,
+  unreviewed instance of review finding 1, living in `_is_front_matter_title`;
+  the review named only two sites. When a normalization function discards a
+  character class, audit every predicate that reads its empty output as
+  "absent".
+- [2026-07-26] **Continuation-document counts, for review finding 17 (A8):**
+  Kaplan **21**, Ember Spark **10**, New Rules 1, Sandworm 1. Kaplan's
+  `chapter_count` over-counts by ~45% (47 → ~26). Fixing changes `chapter_index`
+  → `make_segment_id` → every hash, so it forces a paid re-translation of at
+  least two books. Do not fold it into an extraction story.
+- [2026-07-26] **Give an implementer its base SHA explicitly; "main" is often
+  wrong.** A2 rebased onto `main` (`b5527fe`) while the live work was on
+  `feat/lan-book-server` (`65e90f7`), so its branch lacked S1.15 and its "268
+  baseline" test count was not comparable to A4's 307. A4 independently found its
+  own worktree 2 commits behind and rebased. Extends the existing worktree rule:
+  the question is not "is the branch behind" but **"did any commit I am missing
+  touch a file in my footprint"** — check `git log --oneline -1 <file>` on both
+  branches for every file in scope. Also: the Bash tool's working directory
+  persists across calls, so a `cd translator` poisons later relative paths.
+- [2026-07-26] **Anthropic signals content-policy refusals two ways.** An HTTP
+  `BadRequestError` (analogous to OpenAI's `invalid_prompt`) **and** in-band via
+  `stop_reason="refusal"` on an otherwise-200 response — the latter is SDK-typed
+  in `anthropic==0.109.1`'s `Message.stop_reason`. A fallback that only wraps
+  `BadRequestError`, as review finding 18 prescribes, misses the in-band case
+  entirely. Anthropic's wording for the pre-generation BadRequest path is not
+  publicly documented the way OpenAI's code is, so any substring heuristic there
+  is unverified until a live refusal is observed.
+- [2026-07-26] **Making a silent failure loud can remove the recovery that was
+  handling it.** A4's fix for review finding 7 made providers raise
+  `EmptyCompletionError`/`TruncatedCompletionError` instead of returning `""`.
+  But `translate.py`'s batch ladder catches only `ValueError` (`:476`, `:487`)
+  and `ContentPolicyError` (`:414`, `:566`), and the raises happen inside
+  `client.complete()` at `:472`/`:483` — outside every handler. Previously `""`
+  → `parse_numbered_response` raises `ValueError` → strict retry → **per-segment
+  fallback**, which is precisely the right remedy for a truncation because one
+  segment per call is a far smaller prompt. After the fix that remedy is
+  unreachable and the run aborts mid-book; since the cache commits per batch, a
+  resume rebuilds the same oversized prompt and aborts again. **Before promoting
+  a silent degradation to an exception, find what was catching it and confirm
+  the new type lands in the same handler.**
