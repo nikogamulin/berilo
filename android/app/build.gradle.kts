@@ -235,10 +235,19 @@ dependencies {
 // Gradle test JVMs do not inherit -D from the launcher, hence the explicit forward.
 val exampleBooksProperty = "berilo.examples.dir"
 
+// B3: the real-book half of the EPUB *writer*'s byte-identity gate compares against archives
+// built by the Python CLI. Those hold copyrighted book text, so they are never committed either
+// and the tests skip without them.
+//   ./gradlew test -Dberilo.reference.epubs.dir=/abs/path/to/<slug>.reference.epub files
+val referenceEpubsProperty = "berilo.reference.epubs.dir"
+
 tasks.withType<Test>().configureEach {
     (System.getProperty(exampleBooksProperty) ?: System.getenv("BERILO_EXAMPLES_DIR"))
         ?.takeIf(String::isNotBlank)
         ?.let { systemProperty(exampleBooksProperty, it) }
+    (System.getProperty(referenceEpubsProperty) ?: System.getenv("BERILO_REFERENCE_EPUBS_DIR"))
+        ?.takeIf(String::isNotBlank)
+        ?.let { systemProperty(referenceEpubsProperty, it) }
 }
 
 // S2.10: JVM screenshot harness. `screenshots` clones testDebugUnitTest's fully-configured
