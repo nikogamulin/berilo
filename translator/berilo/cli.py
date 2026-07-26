@@ -196,6 +196,10 @@ def translate(
 
     cache = TranslationCache(cache_db or DEFAULT_CACHE_PATH)
     tracked_client = _CostTrackingClient(client)
+    # Wrap the fallback client too: a content-policy-refused batch is real spend
+    # against a second provider, and the printed total must include it (review
+    # finding 5) rather than silently under-reporting the run's actual cost.
+    tracked_fallback = _CostTrackingClient(fallback_client) if fallback_client is not None else None
     try:
         glossary = None
         if not no_glossary:
@@ -210,13 +214,16 @@ def translate(
             glossary=glossary,
             skip_segment_ids=skip_ids,
             on_progress=_on_progress,
-            fallback_client=fallback_client,
+            fallback_client=tracked_fallback,
             style=style,
+        )
+        total_cost_eur = tracked_client.total_cost_eur + (
+            tracked_fallback.total_cost_eur if tracked_fallback is not None else 0.0
         )
         _print_summary(
             latest.get("stats"),
             skip_back_matter=skip_back_matter,
-            total_cost_eur=tracked_client.total_cost_eur,
+            total_cost_eur=total_cost_eur,
             style=style,
         )
 

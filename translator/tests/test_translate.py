@@ -37,6 +37,7 @@ from berilo.translate import (
 _MARKER_RE = re.compile(r"\[\[(\d+)\]\]")
 _PREFIX = "SL::"
 _REVISED_PREFIX = "ED::"
+FAKE_ANTHROPIC_KEY = "test-anthropic-key-not-a-real-secret-0000000000"
 
 #: System prompts that identify an extra pass, taken from the registry itself
 #: so the fakes classify calls exactly rather than by guessing at wording.
@@ -181,6 +182,13 @@ class BrokenClient(MismatchClient):
 
     def _single_response(self, prompt: str) -> CompletionResult:
         return self._result("")
+
+
+class _EmptyBookContextClient(FakeLLMClient):
+    """Book-context call returns an empty memo; everything else is normal."""
+
+    def _book_context_response(self) -> str:
+        return ""
 
 
 class _KillSwitch(Exception):
@@ -821,6 +829,30 @@ def test_book_context_memo_reaches_the_single_segment_fallback() -> None:
     assert all("Reportorial nonfiction" in call["prompt"] for call in singles)
 
 
+def test_empty_book_context_memo_is_cached_and_not_rebilled_on_resume() -> None:
+    """review finding 20: an empty memo must still be cached.
+
+    Without the fix, only a non-empty memo is stored, so a killed-and-resumed
+    run repeats the derivation call on every resume — contradicting the
+    "resumed run neither re-bills the memo call" guarantee.
+    """
+    book = _paragraph_book(2)
+    style = get_style("book_context_v1")
+    cache = _memory_cache()
+    client = _EmptyBookContextClient()
+
+    translate_book(book, client=client, target_lang="sl", cache=cache, batch_size=2, style=style)
+    assert client.book_context_calls == 1
+
+    # The empty memo must be a cache HIT (row exists), not merely absent.
+    cached = cache.get_book_context(book_hash(book), "gpt-5-mini", "sl", "book_context_v1")
+    assert cached == ""
+
+    resumed = _EmptyBookContextClient()
+    translate_book(book, client=resumed, target_lang="sl", cache=cache, batch_size=2, style=style)
+    assert resumed.book_context_calls == 0, "resumed run must not re-derive a cached empty memo"
+
+
 def test_baseline_style_asks_for_no_extra_passes() -> None:
     """The default path is unchanged: no memo call, no editor call."""
     book = _paragraph_book(4)
@@ -955,6 +987,81 @@ def test_cli_skip_back_matter_reports_and_passes_through(monkeypatch, epub_build
     assert all(not s.text.startswith(_PREFIX) for s in index_segments)
     story_segments = [s for s in book.segments if s.chapter_title == "Chapter One"]
     assert any(s.text.startswith(_PREFIX) for s in story_segments)
+
+
+def test_cli_prints_fallback_spend_in_the_total(
+    monkeypatch: pytest.MonkeyPatch, epub_builder
+) -> None:
+    """review finding 5: a content-policy fallback's spend must reach the printed total.
+
+    Before the fix, ``_CostTrackingClient`` wrapped only the primary client, so
+    a batch retried via the fallback provider was real spend absent from the
+    CLI's "€ total" line. The printed total must equal ``stats.cost_eur``,
+    computed independently here via a direct ``translate_book`` call against
+    equivalent fresh clients/cache.
+    """
+    import berilo.assemble as assemble_module
+    import berilo.providers as providers_module
+    from berilo.normalize import normalize
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_ANTHROPIC_KEY)
+
+    def _fake_create_client(model, config):
+        if model == "claude-haiku-4-5":
+            return FakeLLMClient(model=model)
+        return _PolicyRefusingClient(model=model)
+
+    def _fake_build_epub(book, output_path, *, bilingual=False, source_book=None):
+        return output_path
+
+    monkeypatch.setattr(providers_module, "create_client", _fake_create_client)
+    monkeypatch.setattr(assemble_module, "build_epub", _fake_build_epub, raising=False)
+
+    epub = _write_epub(None, epub_builder)
+
+    # Independently compute the total translate_book actually spends against
+    # equivalent fresh clients/cache — this is what the CLI-printed total must
+    # equal once the fallback client's spend is included.
+    book = normalize(str(epub))
+    captured_stats: dict = {}
+    translate_book(
+        book,
+        client=_PolicyRefusingClient(model="gpt-5-mini"),
+        target_lang="sl",
+        cache=_memory_cache(),
+        glossary=None,
+        fallback_client=FakeLLMClient(model="claude-haiku-4-5"),
+        on_progress=lambda stats: captured_stats.__setitem__("stats", stats),
+        style=get_style("baseline_v1"),
+    )
+    expected_cost = captured_stats["stats"].cost_eur
+    assert expected_cost > 0, "the fallback batch must have real, nonzero cost"
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "translate",
+                str(epub),
+                "--model",
+                "gpt-5-mini",
+                "--to",
+                "sl",
+                "--yes",
+                "--no-glossary",
+                "--style",
+                "baseline_v1",
+                "--cache-db",
+                "cache.db",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    match = re.search(r"€([\d.]+) total", result.output)
+    assert match is not None, result.output
+    printed_total = float(match.group(1))
+    assert printed_total == pytest.approx(expected_cost, abs=1e-4)
 
 
 # --------------------------------------------------------------------------

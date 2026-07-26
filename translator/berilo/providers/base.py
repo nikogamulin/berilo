@@ -71,3 +71,26 @@ class ContentPolicyError(Exception):
     route the affected batch to a fallback provider; the error is not
     transient and must never be blindly retried against the same provider.
     """
+
+
+class EmptyCompletionError(Exception):
+    """A provider billed a call but returned no completion text.
+
+    Raised when a response carries no usable text despite reporting
+    non-zero tokens and cost — e.g. a reasoning model exhausting its token
+    budget on hidden reasoning, or a response whose content blocks contain
+    no text block at all. Segment integrity (CLAUDE.md §2) requires this be
+    loud; a silently empty, billed translation must never be cached or
+    written into the output book.
+    """
+
+
+class TruncatedCompletionError(Exception):
+    """A provider cut a completion off before it finished, still billed.
+
+    Raised when the response's stop/finish reason reports that the token
+    budget was exhausted mid-generation (OpenAI ``finish_reason="length"``,
+    Anthropic ``stop_reason="max_tokens"``) — indistinguishable from a
+    complete response without checking that field. A partial batch
+    translation must never be trusted silently.
+    """

@@ -642,6 +642,23 @@ def build_book_context(
     memo = result.text.strip()
     if not memo:
         logger.warning("Book-context memo came back empty; translating without it.")
+        # Cache the empty result too (not just non-empty memos below): otherwise a
+        # killed-and-resumed run repeats this derivation call on every resume,
+        # contradicting the "never re-bills the memo call" guarantee (finding 20).
+        if cache is not None:
+            cache.store_book_context(
+                bhash,
+                model_name,
+                target_lang,
+                style.version,
+                memo,
+                CallRecord(
+                    kind="book_context",
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    cost_eur=result.cost_eur,
+                ),
+            )
         return None, result
 
     logger.info("Book-context memo derived (%d chars).", len(memo))

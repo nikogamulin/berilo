@@ -26,10 +26,13 @@ MAX_RETRIES = 5
 BASE_DELAY_S = 1.0
 
 # Model-name prefixes routed to each provider. Anthropic is checked first
-# since its prefix is unambiguous; OpenAI prefixes (gpt-*, o*) are checked
-# second.
+# since its prefix is unambiguous; OpenAI prefixes are checked second. The
+# reasoning-model prefixes are spelled out ("o1", "o3", "o4") rather than a
+# bare "o" — a bare "o" would match any typo starting with that letter (e.g.
+# "opus-4", "omni") and misroute it to OpenAI instead of failing loudly as
+# unrecognized.
 _ANTHROPIC_MODEL_PREFIXES = ("claude-",)
-_OPENAI_MODEL_PREFIXES = ("gpt-", "o")
+_OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4")
 
 _T = TypeVar("_T")
 
@@ -48,10 +51,16 @@ def create_client(model: str, config: Config) -> LLMClient:
         A ready-to-use :class:`~berilo.providers.base.LLMClient`.
 
     Raises:
-        ValueError: If ``model`` doesn't match a known provider prefix, or the
-            API key required to serve it is not configured.
+        ValueError: If ``model`` doesn't match a known provider prefix, the
+            API key required to serve it is not configured, or ``model`` has
+            no entry in the pricing table (checked before any client is
+            constructed, so an unpriced model never reaches — and is never
+            billed by — the API).
     """
     if model.startswith(_ANTHROPIC_MODEL_PREFIXES):
+        from berilo.providers.pricing import require_known_model
+
+        require_known_model(model)
         if not config.anthropic_api_key:
             raise ValueError(
                 f"Model '{model}' requires ANTHROPIC_API_KEY to be set (in .env or "
@@ -62,6 +71,9 @@ def create_client(model: str, config: Config) -> LLMClient:
         return AnthropicClient(api_key=config.anthropic_api_key, model=model)
 
     if model.startswith(_OPENAI_MODEL_PREFIXES):
+        from berilo.providers.pricing import require_known_model
+
+        require_known_model(model)
         if not config.openai_api_key:
             raise ValueError(
                 f"Model '{model}' requires OPENAI_API_KEY to be set (in .env or "
@@ -76,7 +88,7 @@ def create_client(model: str, config: Config) -> LLMClient:
         )
 
     raise ValueError(
-        f"Unrecognized model '{model}': expected an OpenAI model (gpt-*, o*) "
+        f"Unrecognized model '{model}': expected an OpenAI model (gpt-*, o1*/o3*/o4*) "
         "or an Anthropic model (claude-*)."
     )
 
