@@ -50,11 +50,16 @@
     <string name="reader_dark_theme">Dark theme</string>
     <string name="reader_open_failed">This book could not be opened. The file may be missing or damaged.</string>
     <string name="reader_define">Define</string>
-    <string name="reader_no_selection">Select a word first, then tap Define.</string>
+    <!-- S2.12: these actions now fire from the text selection itself, so an empty selection
+         is a lost one (the popup closed under us), not a user who forgot to select. -->
+    <string name="reader_no_selection">Selection lost — select the text again.</string>
     <string name="reader_interpret">Interpret</string>
     <string name="reader_highlight">Highlight</string>
     <string name="reader_note">Note</string>
     <string name="reader_notebook">Notebook</string>
+    <string name="reader_copy">Copy</string>
+    <string name="reader_copied">Copied</string>
+    <string name="reader_selection_clip_label">Passage</string>
 
     <string name="dictionary_loading">Looking up…</string>
     <string name="dictionary_error_network">You\'re offline — dictionary needs a connection.</string>

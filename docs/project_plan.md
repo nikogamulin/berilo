@@ -159,6 +159,39 @@ normalizers and the assembler.*
   behind 45 `<img>` references; the rebuild emits 17 files / 17 references, so
   repeated references collapse to one — acceptable, but not byte-parity.
 
+### S1.15 — LAN book server: hand books to the tablet (2 pt)
+*Requested by Niko 2026-07-26: getting a translated EPUB onto the Samsung
+tablet meant USB or a cloud round-trip, and the latter is exactly what
+CLAUDE.md §2 forbids for book files. Design:
+[`docs/plans/2026-07-26-lan-book-server.md`](plans/2026-07-26-lan-book-server.md).*
+- [x] `berilo serve [--dir] [--port] [--host] [--no-qr]`: scans a directory of
+      EPUBs, prints a tokenized LAN URL plus a terminal QR code, serves until
+      Ctrl-C; falls back to a free port when the default one is busy
+- [x] `berilo/serve/{catalog,page,server}.py` — catalog labelled from OPF
+      metadata (not filenames), self-contained HTML page per
+      `design_guidelines.md`, stdlib `ThreadingHTTPServer`
+- [x] Per-run random token on both routes, compared with `compare_digest`;
+      wrong/missing token is a 404, never a 401; traversal structurally
+      impossible (ids are catalog lookups, never path components)
+- [x] `normalize/epub.py`: public `read_epub_metadata()` so labelling a file
+      does not require the full segment walk
+- [x] Real-data fixes: books sharing a title are disambiguated by filename
+      stem; the language suffix is not appended when the title already carries
+      the tag
+- [ ] **Residual (Niko, on the tablet):** scan the QR, download a book, import
+      it in Berilo, confirm it opens
+- **Verify:** offline — `cd translator && make test && make lint` green, with
+  tests covering the token gate on both routes, a byte-identical download, the
+  RFC 5987 filename header, and traversal attempts. Live — from the Samsung
+  tablet on the same Wi-Fi: scan the QR, the catalog page renders, one book
+  downloads and imports into Berilo and opens.
+- **Verify run 2026-07-26:** offline — **306 passed**, black + ruff clean.
+  Measured on this box at €0 (no API path touched): server bound
+  `192.168.120.8:8577`, catalog listed 12 EPUBs from `data/examples`, page
+  returned 200 with the token and **404 with none and with a wrong one**,
+  `The New Rules of War.sl.epub` downloaded md5-identical to the file on disk
+  (`b76dfbbf…`, 248663 B) and `zipfile.is_zipfile` true. Tablet leg not run.
+
 ---
 
 ## Phase 2 — Android reader (milestone `m2`) — target: Rubric R ≥ 85 on Boox
@@ -297,6 +330,57 @@ scores contrast on e-ink and OLED).*
   re-verified: 5 runs, all 10 pairwise comparisons identical.
   `ThemeContrastTest` now enumerates all 48 roles as a permanent guard and was
   proven to fail without the fix (catching `#EADDFF` and `#4F378B` by name).
+
+### S2.12 — Make the selection → highlight/note path reachable (3 pt) — code landed, device residual
+*Reported from the device 2026-07-26: "when I select a passage I can't save the
+highlight or create a note — I only get the actions inherited from the system;
+share offers Zotero, Quick Share…". S2.6 landed the storage, the editor and the
+decorations; nothing ever connected a live text selection to them.*
+
+Two independent defects, either of which alone makes the feature unreachable:
+
+- [x] **The selection popup is the platform's, not Berilo's.**
+      `ReaderActivity.openBookAndAttachNavigator()` calls
+      `createFragmentFactory(initialLocator, null, preferences)` with no
+      `EpubNavigatorFragment.Configuration`, so `selectionActionModeCallback`
+      stays `null` and `R2BasicWebView.startActionMode` falls through to the
+      platform menu (Copy / Share / Web search / every `PROCESS_TEXT` app
+      installed — hence Zotero). Fix: supply a `Configuration` whose
+      `selectionActionModeCallback` builds Berilo's own action set, and read the
+      selection *before* finishing the mode (finishing clears it).
+- [x] **Highlight/Note/Define lived only in chrome that cannot coexist with a
+      selection.** Those four `TextButton`s sit in the reader top bar, which is
+      hidden while reading; revealing it costs a tap on the WebView, and that tap
+      drops the selection — so `navigator.currentSelection()` was always `null`
+      by the time `captureHighlightTarget()` ran and every action short-circuited
+      to the "select something first" toast. There was no ordering of taps that
+      worked. Fix by CLASS: selection-dependent actions belong on the selection,
+      not in chrome; the top bar keeps only what works without one.
+- [x] **Third-order consequence:** the chrome `ComposeView` — which hosts the
+      annotation editor, dictionary and interpretation sheets — is `GONE`
+      whenever `chromeVisible` is false. An action fired from a selection with
+      chrome hidden would therefore have persisted state into an invisible view.
+      Its visibility must be driven by "chrome shown **or** any sheet open".
+- **Verify:** `./gradlew test assembleDebug` green with no regression on the 422
+  baseline; on the Boox — long-press a passage → Berilo's own bar appears with
+  Highlight / Note / Define / Interpret / Copy and no system entries; Highlight →
+  a colour → the passage stays tinted after a page turn and appears in the
+  notebook; Note → text → Save → same, with the note body; Define/Interpret open
+  their sheets with chrome hidden; Copy puts the passage on the clipboard.
+- **Verify run 2026-07-26 (offline half, on `main` + this change):** `./gradlew
+  test assembleDebug lintDebug` green — **536 JVM tests, 0 failures** (292 debug
+  incl. 26 skipped screenshot tests + 244 release) against a **492** baseline
+  measured on the stashed tree the same session; +44 is the 22 new tests × both
+  variants, so nothing regressed. `screenshots` 26/26; `reader_chrome_*` shows
+  the top bar down to Chapters | title | Interpret / Notebook / Text settings,
+  with the S2.11 title-ellipsis behaviour intact at 411 dp and all three actions
+  fitting at Boox's 990 dp. The two guards were **proven to fail without the
+  fix** by mutation: deleting `selectionActionModeCallback` from
+  `beriloNavigatorConfiguration` and `menu.clear()` from the callback failed
+  exactly the two tests written for them.
+- **Device residual (needs the Boox — no tablet attached, no emulator on this
+  box, `docs/findings.md` 2026-07-25):** the whole Verify line above, plus R5's
+  scripted 10-action sequence, which S2.6 never had a reachable path to run.
 
 ## Phase 3 — Cloud sync & web review (milestone `m3`) — target: Rubric S ≥ 85
 > Lives in **private repo `berilo-cloud`**; this repo only gains the app-side
