@@ -1,8 +1,12 @@
 package app.berilo.reader.reader
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.view.ActionMode
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
@@ -34,13 +38,13 @@ import app.berilo.reader.annotations.HighlightViewModel
 import app.berilo.reader.annotations.NotebookActivity
 import app.berilo.reader.annotations.toComposeColor
 import app.berilo.reader.dictionary.DictionaryViewModel
-import app.berilo.reader.dictionary.SelectionContext
 import app.berilo.reader.dictionary.buildSelectionContext
 import app.berilo.reader.interpretation.InterpretationViewModel
 import app.berilo.reader.interpretation.resolveInterpretationPassage
 import app.berilo.reader.ui.theme.BeriloTheme
 import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.readium.r2.navigator.Decoration
@@ -80,7 +84,8 @@ private const val HIGHLIGHT_DECORATION_GROUP = "highlights"
  * `currentLocator` is encoded back and debounce-persisted through the ViewModel;
  * the TOC is mapped by [TocMapper]; a tap toggles the chrome via a Readium
  * [InputListener]; chapter taps call `navigator.go(link)`; [PerfLog] brackets
- * programmatic turns.
+ * programmatic turns; a text selection raises Berilo's own action bar through
+ * [beriloNavigatorConfiguration] and dispatches to [onSelectionAction].
  */
 @OptIn(ExperimentalReadiumApi::class)
 class ReaderActivity : FragmentActivity() {
@@ -135,11 +140,20 @@ class ReaderActivity : FragmentActivity() {
         val chrome = findViewById<ComposeView>(R.id.reader_chrome)
         chrome.setContent { ReaderChrome() }
 
-        // The overlay is only hittable while chrome is shown, so the navigator's
-        // WebView receives touches during reading.
+        // The overlay is only hittable while something is actually shown in it, so the
+        // navigator's WebView receives touches (including long-press-to-select) during
+        // reading. S2.12: "something" is no longer just the chrome bars — the annotation
+        // editor and the two LLM sheets now open from the text selection, with the bars
+        // hidden, and would otherwise render inside a GONE view. See [readerOverlayVisible].
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.chromeVisible.collect { visible -> chrome.isVisible = visible }
+                combine(
+                    viewModel.chromeVisible,
+                    dictionaryViewModel.uiState,
+                    interpretationViewModel.uiState,
+                    highlightViewModel.editorState,
+                    ::readerOverlayVisible,
+                ).collect { visible -> chrome.isVisible = visible }
             }
         }
 
@@ -179,8 +193,16 @@ class ReaderActivity : FragmentActivity() {
         val preferences = viewModel.preferences.value.toEpubPreferences()
         val navigatorFactory = EpubNavigatorFactory(publication)
 
+        // S2.12: `configuration` is what makes text selection usable. Left at its default,
+        // `selectionActionModeCallback` is null and R2BasicWebView falls straight through to
+        // WebView.startActionMode — the platform bar (Copy / Share / Web search / every
+        // installed PROCESS_TEXT app), with no way to reach Highlight or Note.
         supportFragmentManager.fragmentFactory =
-            navigatorFactory.createFragmentFactory(initialLocator, null, preferences)
+            navigatorFactory.createFragmentFactory(
+                initialLocator = initialLocator,
+                initialPreferences = preferences,
+                configuration = beriloNavigatorConfiguration(::onSelectionAction),
+            )
         supportFragmentManager.beginTransaction()
             .replace(R.id.reader_container, EpubNavigatorFragment::class.java, Bundle(), NAVIGATOR_TAG)
             .commitNow()
@@ -269,82 +291,100 @@ class ReaderActivity : FragmentActivity() {
     }
 
     /**
-     * "Define" tap handler: captures the navigator's current text selection (device/WebView
-     * territory — the pure sentence-reconstruction logic in [buildSelectionContext] is unit
-     * tested separately) and starts a lookup, or tells the user to select a word first.
+     * Runs one [SelectionAction] picked from Berilo's selection popup (S2.12).
+     *
+     * Ordering is the whole point of this function. `ActionMode.finish()` clears the WebView
+     * selection, and `currentSelection()` is a suspending round trip through the JS bridge —
+     * so the selection is read *first*, the bar dismissed second, and the action run against
+     * the captured [Locator]. Doing it the other way round reproduces exactly the S2.6 defect
+     * this story fixes: a handler that always sees `null` and toasts instead of acting.
      */
-    private fun onDefineSelectionClicked() {
+    private fun onSelectionAction(action: SelectionAction, mode: ActionMode) {
         lifecycleScope.launch {
-            val selection = captureSelection()
-            if (selection == null) {
-                Toast.makeText(this@ReaderActivity, R.string.reader_no_selection, Toast.LENGTH_SHORT).show()
-            } else {
-                dictionaryViewModel.lookup(selection)
-            }
-        }
-    }
-
-    /** Reads the current selection off the Readium navigator, if any. */
-    private suspend fun captureSelection(): SelectionContext? {
-        val text = navigator?.currentSelection()?.locator?.text ?: return null
-        return buildSelectionContext(text.before.orEmpty(), text.highlight.orEmpty(), text.after.orEmpty())
-    }
-
-    /**
-     * "Interpret" tap handler: unlike [onDefineSelectionClicked], sends the WHOLE current
-     * selection (a passage/paragraph, not a single word) — no sentence reconstruction. Falls
-     * back to the currently visible locator's `text.highlight` when nothing is selected, so a
-     * long-press-free tap still interprets the page in view; if neither has text, tells the
-     * user to select something.
-     */
-    private fun onInterpretSelectionClicked() {
-        lifecycleScope.launch {
-            val selectionHighlight = navigator?.currentSelection()?.locator?.text?.highlight
-            val visibleHighlight = navigator?.currentLocator?.value?.text?.highlight
-            val passage = resolveInterpretationPassage(selectionHighlight, visibleHighlight)
-            val bookTitle = viewModel.book.value?.title.orEmpty()
-            if (passage == null) {
-                Toast.makeText(this@ReaderActivity, R.string.interpretation_no_selection, Toast.LENGTH_SHORT).show()
-            } else {
-                interpretationViewModel.interpret(passage, bookTitle)
+            val locator = navigator?.currentSelection()?.locator
+            mode.finish()
+            navigator?.clearSelection()
+            when (action) {
+                SelectionAction.HIGHLIGHT -> beginAnnotation(locator, withNote = false)
+                SelectionAction.NOTE -> beginAnnotation(locator, withNote = true)
+                SelectionAction.DEFINE -> define(locator)
+                SelectionAction.INTERPRET -> interpret(locator?.text?.highlight)
+                SelectionAction.COPY -> copyToClipboard(locator?.text?.highlight)
             }
         }
     }
 
     /**
-     * "Highlight" tap handler: captures the navigator's current selection as a full [Locator]
-     * (not just word/sentence text, unlike [captureSelection] — a highlight needs the whole
-     * anchor position for [applyHighlightDecorations] and the notebook's jump-back) and opens
-     * the color picker, or tells the user to select something first.
+     * Opens the color picker ([withNote] false) or the note editor ([withNote] true) for
+     * [locator]. A highlight needs the whole anchor position, not just the selected text —
+     * [applyHighlightDecorations] re-renders from it and the notebook jumps back to it.
      */
-    private fun onHighlightSelectionClicked() {
-        lifecycleScope.launch {
-            val target = captureHighlightTarget()
-            if (target == null) {
-                Toast.makeText(this@ReaderActivity, R.string.reader_no_selection, Toast.LENGTH_SHORT).show()
-            } else {
-                highlightViewModel.beginHighlight(target.text, target.locatorJson, target.chapterTitle)
-            }
+    private fun beginAnnotation(locator: Locator?, withNote: Boolean) {
+        val target = highlightTarget(locator)
+        if (target == null) {
+            toastSelectionLost()
+            return
+        }
+        if (withNote) {
+            highlightViewModel.beginNote(target.text, target.locatorJson, target.chapterTitle)
+        } else {
+            highlightViewModel.beginHighlight(target.text, target.locatorJson, target.chapterTitle)
         }
     }
 
-    /** "Note" tap handler: same capture as [onHighlightSelectionClicked], opens the note
-     * editor instead of the plain color picker. */
-    private fun onNoteSelectionClicked() {
-        lifecycleScope.launch {
-            val target = captureHighlightTarget()
-            if (target == null) {
-                Toast.makeText(this@ReaderActivity, R.string.reader_no_selection, Toast.LENGTH_SHORT).show()
-            } else {
-                highlightViewModel.beginNote(target.text, target.locatorJson, target.chapterTitle)
-            }
+    /**
+     * Looks up the selected word (the pure sentence-reconstruction logic in
+     * [buildSelectionContext] is unit tested separately), or reports a lost selection.
+     */
+    private fun define(locator: Locator?) {
+        val text = locator?.text
+        val selection =
+            text?.let { buildSelectionContext(it.before.orEmpty(), it.highlight.orEmpty(), it.after.orEmpty()) }
+        if (selection == null) {
+            toastSelectionLost()
+        } else {
+            dictionaryViewModel.lookup(selection)
         }
     }
 
-    /** Reads the current selection's full [Locator] off the Readium navigator, if any —
-     * `null` when nothing is selected. */
-    private suspend fun captureHighlightTarget(): HighlightTarget? {
-        val locator = navigator?.currentSelection()?.locator ?: return null
+    /**
+     * Interprets [selectionHighlight] — unlike [define], the WHOLE passage, with no sentence
+     * reconstruction. Falls back to the currently visible locator's `text.highlight` when it
+     * is null, which is what the chrome's "Interpret" button relies on to interpret the page
+     * in view with nothing selected.
+     */
+    private fun interpret(selectionHighlight: String?) {
+        val visibleHighlight = navigator?.currentLocator?.value?.text?.highlight
+        val passage = resolveInterpretationPassage(selectionHighlight, visibleHighlight)
+        if (passage == null) {
+            Toast.makeText(this, R.string.interpretation_no_selection, Toast.LENGTH_SHORT).show()
+        } else {
+            interpretationViewModel.interpret(passage, viewModel.book.value?.title.orEmpty())
+        }
+    }
+
+    /** Puts the selected passage on the clipboard — the one platform action worth keeping
+     * from the bar S2.12 replaced. */
+    private fun copyToClipboard(text: String?) {
+        if (text.isNullOrBlank()) {
+            toastSelectionLost()
+            return
+        }
+        val clipboard = getSystemService(ClipboardManager::class.java) ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.reader_selection_clip_label), text))
+        // Android 13 shows its own copy confirmation; a second toast would double it.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            Toast.makeText(this, R.string.reader_copied, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun toastSelectionLost() {
+        Toast.makeText(this, R.string.reader_no_selection, Toast.LENGTH_SHORT).show()
+    }
+
+    /** The annotation target [locator] anchors, or `null` when it carries no selected text. */
+    private fun highlightTarget(locator: Locator?): HighlightTarget? {
+        if (locator == null) return null
         val text = locator.text.highlight?.trim().orEmpty()
         if (text.isEmpty()) return null
         return HighlightTarget(text = text, locatorJson = LocatorCodec.encode(locator), chapterTitle = locator.title)
@@ -445,12 +485,13 @@ class ReaderActivity : FragmentActivity() {
                 onMarginsWider = viewModel::increaseMargins,
                 onEinkModeChange = viewModel::setEinkMode,
                 onDarkThemeChange = viewModel::setDarkTheme,
-                onDefineSelection = ::onDefineSelectionClicked,
                 onDismissDictionary = dictionaryViewModel::dismiss,
-                onInterpretSelection = ::onInterpretSelectionClicked,
+                // S2.12: the only selection action that survives in the chrome, because it is
+                // the only one that works without a selection — it falls back to the visible
+                // page. Define/Highlight/Note moved onto the selection popup, where the
+                // selection they need is still alive.
+                onInterpretVisiblePage = { interpret(selectionHighlight = null) },
                 onDismissInterpretation = interpretationViewModel::dismiss,
-                onHighlightSelection = ::onHighlightSelectionClicked,
-                onNoteSelection = ::onNoteSelectionClicked,
                 onOpenNotebook = ::onOpenNotebookClicked,
                 onAnnotationColorSelected = highlightViewModel::confirmColor,
                 onAnnotationNoteColorChanged = highlightViewModel::onNoteColorChanged,

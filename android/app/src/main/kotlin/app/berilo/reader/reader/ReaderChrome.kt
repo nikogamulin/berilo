@@ -53,9 +53,10 @@ private val ChapterTitleMinWidth = 72.dp
  * rendering surface — it holds no reading surface of its own.
  *
  * Deference (design_guidelines.md §1): the chrome is absent while reading; the
- * host makes this overlay visible only when [ReaderChromeState.chromeVisible] is
- * true (a Readium tap toggles it). When shown, a tap on the scrim (anywhere not
- * on a control) dismisses it again.
+ * host makes this overlay visible when [ReaderChromeState.chromeVisible] is true
+ * (a Readium tap toggles it) or when one of the sheets below is open (S2.12 —
+ * see `readerOverlayVisible`). When shown, a tap on the scrim (anywhere not on a
+ * control) dismisses it again — see [scrimTapAction] for the one exception.
  */
 @Composable
 fun ReaderChromeOverlay(
@@ -70,7 +71,12 @@ fun ReaderChromeOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .clickable(
-                    onClick = actions.onToggleChrome,
+                    onClick = {
+                        when (scrimTapAction(state.chromeVisible, state.annotationEditorState)) {
+                            ScrimTap.TOGGLE_CHROME -> actions.onToggleChrome()
+                            ScrimTap.DISMISS_ANNOTATION_EDITOR -> actions.onDismissAnnotationEditor()
+                        }
+                    },
                     indication = null,
                     interactionSource = tapSource,
                 ),
@@ -80,10 +86,7 @@ fun ReaderChromeOverlay(
             ReaderTopBar(
                 chapterTitle = state.chapterTitle,
                 onChaptersClick = actions.onOpenChapters,
-                onDefineClick = actions.onDefineSelection,
-                onInterpretClick = actions.onInterpretSelection,
-                onHighlightClick = actions.onHighlightSelection,
-                onNoteClick = actions.onNoteSelection,
+                onInterpretClick = actions.onInterpretVisiblePage,
                 onNotebookClick = actions.onOpenNotebook,
                 onSettingsClick = actions.onOpenSettings,
                 modifier = Modifier.align(Alignment.TopCenter),
@@ -111,17 +114,16 @@ fun ReaderChromeOverlay(
                 )
         }
 
-        // Hosts the LLM dictionary (S2.4): a "Define" tap in the top bar captures the
-        // navigator's current text selection and drives this state via DictionaryViewModel.
+        // Hosts the LLM dictionary (S2.4): "Define" on the selection popup drives this state
+        // via DictionaryViewModel.
         DictionarySheet(uiState = state.dictionaryState, onDismiss = actions.onDismissDictionary)
 
-        // Hosts paragraph interpretation (S2.5): an "Interpret" tap in the top bar sends the
-        // whole current selection (or the visible locator's text as a fallback) and drives
-        // this state via InterpretationViewModel.
+        // Hosts paragraph interpretation (S2.5): "Interpret" — on the selection popup, or in
+        // the top bar for the page in view — drives this state via InterpretationViewModel.
         InterpretationSheet(uiState = state.interpretationState, onDismiss = actions.onDismissInterpretation)
 
-        // Hosts highlight/note creation (S2.6): "Highlight"/"Note" taps in the top bar capture
-        // the navigator's current selection and drive this state via HighlightViewModel.
+        // Hosts highlight/note creation (S2.6): "Highlight"/"Note" on the selection popup
+        // drive this state via HighlightViewModel.
         AnnotationEditorHost(
             state = state.annotationEditorState,
             actions =
@@ -141,10 +143,7 @@ fun ReaderChromeOverlay(
 private fun ReaderTopBar(
     chapterTitle: String,
     onChaptersClick: () -> Unit,
-    onDefineClick: () -> Unit,
     onInterpretClick: () -> Unit,
-    onHighlightClick: () -> Unit,
-    onNoteClick: () -> Unit,
     onNotebookClick: () -> Unit,
     onSettingsClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -169,32 +168,24 @@ private fun ReaderTopBar(
                     .widthIn(min = ChapterTitleMinWidth)
                     .padding(horizontal = 8.dp),
             )
-            // Horizontally scrollable so the growing action set (S2.6 adds Highlight/Note/
-            // Notebook to Define/Interpret/Settings) never clips the chapter title above.
+            // Horizontally scrollable so the action set never clips the chapter title above.
             //
             // S2.11: the action row MUST carry a weight. Without one it is measured at its
             // unconstrained preferred width before the weighted title gets any space, so at
-            // phone width (411 dp) the six buttons consumed the row and the title collapsed
+            // phone width (411 dp) the buttons consumed the row and the title collapsed
             // to zero width — it vanished outright rather than ellipsising, despite
             // TextOverflow.Ellipsis. `fill = false` lets the row take less than its share
-            // when the buttons already fit (unchanged at Boox's 990 dp).
+            // when the buttons already fit (unchanged at Boox's 990 dp). S2.12 cut the row
+            // from six buttons to three, which relieves the pressure but does not remove the
+            // constraint — the weight stays.
             Row(
                 modifier = Modifier
                     .weight(1f, fill = false)
                     .horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TextButton(onClick = onDefineClick) {
-                    Text(stringResource(R.string.reader_define))
-                }
                 TextButton(onClick = onInterpretClick) {
                     Text(stringResource(R.string.reader_interpret))
-                }
-                TextButton(onClick = onHighlightClick) {
-                    Text(stringResource(R.string.reader_highlight))
-                }
-                TextButton(onClick = onNoteClick) {
-                    Text(stringResource(R.string.reader_note))
                 }
                 TextButton(onClick = onNotebookClick) {
                     Text(stringResource(R.string.reader_notebook))
@@ -398,12 +389,12 @@ data class ReaderChromeActions(
     val onMarginsWider: () -> Unit,
     val onEinkModeChange: (Boolean) -> Unit,
     val onDarkThemeChange: (Boolean) -> Unit,
-    val onDefineSelection: () -> Unit = {},
     val onDismissDictionary: () -> Unit = {},
-    val onInterpretSelection: () -> Unit = {},
+    /** Interprets the page currently in view. S2.12: Define/Highlight/Note left the chrome
+     * because they need a live text selection, which cannot exist while the chrome is up;
+     * they live on the selection popup now. Interpret stays because it has a page fallback. */
+    val onInterpretVisiblePage: () -> Unit = {},
     val onDismissInterpretation: () -> Unit = {},
-    val onHighlightSelection: () -> Unit = {},
-    val onNoteSelection: () -> Unit = {},
     val onOpenNotebook: () -> Unit = {},
     val onAnnotationColorSelected: (HighlightColor) -> Unit = {},
     val onAnnotationNoteColorChanged: (HighlightColor) -> Unit = {},

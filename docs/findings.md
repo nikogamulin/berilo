@@ -404,3 +404,27 @@
   `app/build/test-results/testDebugUnitTest/TEST-*.xml` for real
   tests/failures/errors counts — same "passed must never mean nothing ran" rule
   already recorded for Roborazzi.
+- [2026-07-26] **Readium selection actions are opt-in, and omitting them fails
+  silently as the platform's popup.** `EpubNavigatorFragment.Configuration
+  .selectionActionModeCallback` defaults to `null`, and
+  `R2BasicWebView.startActionMode` then falls through to `WebView
+  .startActionMode` — so a long-press shows Android's own bar (Copy, Share,
+  Web search, and every installed `PROCESS_TEXT` handler: Zotero, Quick Share)
+  and **nothing anywhere errors, warns, or fails a test**. S2.6 shipped
+  highlights, notes, the editor, the notebook and the decoration renderer with
+  no way to reach any of them for two months. Pass a `Configuration` to
+  `createFragmentFactory(initialLocator =, initialPreferences =,
+  configuration =)`; `decorationTemplates` still defaults to
+  `HtmlDecorationTemplates.defaultTemplates()` (verified in the 3.1.2 bytecode),
+  so supplying a `Configuration` does not cost the highlight rendering.
+  Readium wraps the callback in `Callback2Wrapper`, so `onGetContentRect`
+  positioning still works. **`ActionMode.finish()` clears the WebView selection
+  and `currentSelection()` is a suspending JS round trip — read the selection
+  first, finish the bar second.**
+- [2026-07-26] Verifying a UI affordance that "does nothing": before debugging
+  the handler, check the affordance is *reachable in the state it requires*.
+  Berilo's Highlight/Note/Define buttons were correct code that could never run
+  — they lived in chrome revealed by a tap on the WebView, and that tap destroys
+  the text selection they read. There is no tap order that works, so the toast
+  ("select something first") was the only reachable outcome and looked like a
+  capture bug. Generalization in `CLAUDE.md` §9.
