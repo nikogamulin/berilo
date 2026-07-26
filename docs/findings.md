@@ -645,3 +645,44 @@
   rather than leaving it to be discovered later. Adding the table is a B4-shaped
   change (entity + migration) and is required before any book-context style
   reaches the device.
+
+- [2026-07-27] **EPUB byte-identity is `source_path`-dependent, so "the tablet's
+  file equals the workstation's" is unachievable by construction.**
+  `assemble.py:374-377` seeds the `dc:identifier` UUID5 on
+  `berilo:{source_path}:{title}:{language}`. Measured on *The New Rules of War*,
+  same `Book`, only the path varying:
+  `/home/niko/workspace/berilo/data/examples/…` -> `85e89f18…` / 2 652 144 B ·
+  `data/examples/…` -> `3ff13117…` / 2 652 144 B ·
+  `../data/examples/…` -> `16f34b3e…` / 2 652 142 B ·
+  `/data/user/0/app.berilo.reader/files/books/….epub` -> `5b320784…` / 2 652 145 B.
+  The length moves too, because `content.opf` is DEFLATED and a different UUID
+  compresses differently. **Consequence:** the device stores books at
+  `filesDir/books/<sha256>.epub` and the workstation at `data/examples/<name>`,
+  so the same book translated on both yields a different `dc:identifier` *and* a
+  different file sha256 — and `BookImporter` dedupes on exactly that sha256
+  (`BookImporter.kt:73`), so it imports as two separate books. B3's gate remains
+  correct and valuable as a **writer-fidelity** test (same `Book` in, same bytes
+  out, across languages); it is not, and cannot be, a cross-device guarantee.
+  Fixing it means reseeding the identifier on something path-free such as
+  `book_hash`, which changes `dc:identifier` for every EPUB already produced.
+  Filed as B8.
+- [2026-07-27] **A surviving mutation is a claim about your tests, not your
+  code.** Both of B3's survivors were rules the corpus happened not to
+  discriminate: whole-segment escaping coincides with per-tag escaping unless a
+  *valid* pair precedes the bad tag, and first-appearance chapter ordering
+  coincides with sorted ordering on anything `normalize_epub` emits. Each was one
+  synthetic case away from being caught. **Reach for "equivalent mutation" only
+  after constructing the input that would distinguish the two behaviours and
+  finding it impossible** — B5 correctly claimed one equivalent mutant by that
+  standard; B3 correctly rejected two.
+- [2026-07-27] **`java.util.zip.ZipOutputStream` cannot byte-match Python's
+  `zipfile`.** Three header fields differ on every archive — extract-version 10
+  vs 20 on STORED entries, create-system 0 (MS-DOS) vs 3 (Unix), external
+  attributes 0 vs `0o600 << 16` — and it sets general-purpose bit 3 with a
+  trailing data descriptor on any DEFLATED entry whose size was not pre-declared,
+  which Python never does on a seekable file. Hand-write the headers. The
+  *compressed payload* is the easy part: `Deflater(DEFAULT_COMPRESSION,
+  nowrap=true)` is byte-identical to `zlib.compressobj(-1, DEFLATED, -15)` (both
+  sides zlib 1.2.11). Generalization: **when porting a stdlib zip writer for
+  byte-identity, compression is rarely what breaks — it is the metadata each
+  stdlib considers its own to fill in.**

@@ -588,9 +588,26 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **Deliberate divergence:** `TranslationStats` is immutable, unlike Python's mutable dataclass — B7 renders it in Compose, and a mutated object handed to the UI would compare equal to itself and never recompose.
 - **Reported, not fixed:** B4 shipped no `book_contexts` table, so the per-book style memo cannot persist on device. Inert today (no `DEVICE`-resolvable style declares a `bookContextSystem`) and asserted as such rather than left to be discovered. Required before any book-context style reaches the device. Also: `TARGET_EXPANSION = 1.1` is a Slovenian assumption applied to every language, ported as-is and pinned so it cannot drift from the CLI.
 
-#### Remaining (2 stories, 8 pt)
-**B3** EPUB writer (5, *in progress*) · **B7** import → estimate → confirm →
-WorkManager → progress UI (3).
+#### B3 — Deterministic Kotlin EPUB writer (5 pt) ✅
+*Ports `assemble.py`. [OPEN-D] resolved toward byte-identity — see the correction below.*
+- [x] Chapter grouping, body rendering, the inline subset with whole-segment escape fallback, image placement, OPF/nav/chapter/CSS, bilingual mode with 1:1 alignment validation
+- [x] Hand-written ZIP headers, hand-rolled RFC 4122 UUID v5
+- [x] `CAPTION`/`OTHER` class tags and `<div class="figure">` preserved deliberately — the agent confirmed why: `EpubReader` recovers those types from `p.caption`/`p.other`, and a real `<figure>` would mint a **new** CAPTION segment on rebuild, shifting every later `position` and id and the whole `bookHash`, so a paid book would stop resolving against its own cache
+- **Verify:** `./gradlew test assembleDebug` green; byte-identity against Python's `build_epub` on real books with both sha256 reported; round-trip type stability; UUID5 matches `uuid.uuid5`; STORED entries carry correct CRC-32 and size, `mimetype` first and uncompressed; inline escape rules; orphan-anchor image emitted not dropped; real-book tests skip without `data/`; mutation-proven.
+- **Verify run 2026-07-27 on merged `main`:** **982 JVM tests** (515 debug incl. 30 skipped + 467 release), 0 failures, from a **776** in-worktree baseline confirmed with `git stash -u`. **20 mutations, 20 caught.** **€0.** Byte-identity **Supervisor-verified**: the claimed digest for *The New Rules of War* (`85e89f18…`, 2 652 144 B) reproduces exactly from Python's `build_epub` given the same absolute source path.
+- **The real porting trap was not the CRC.** `java.util.zip.ZipOutputStream` cannot byte-match Python's `zipfile` at all — three header fields differ on every archive (extract-version 10 vs 20 on STORED, create-system 0 vs 3, external attributes 0 vs `0o600 << 16`), plus flag-3 data descriptors on DEFLATED entries of undeclared size. Hence hand-written headers. The deflate payload agreed out of the box.
+- **Two mutations initially survived and were closed rather than declared equivalent** — whole-segment escaping coincides with per-tag escaping unless a *valid* pair precedes the bad tag, and first-appearance chapter order coincides with sorted order on anything `normalize_epub` emits. Each was one synthetic case away from being caught.
+
+#### B8 — The EPUB identifier is path-dependent (2 pt) — *needs Niko's decision*
+*Found while Supervisor-verifying B3's byte-identity claim. It invalidates part of the [OPEN-D] resolution.*
+- [ ] `assemble.py:374-377` seeds the `dc:identifier` UUID5 on `berilo:{source_path}:{title}:{language}`. Measured on one book, same `Book`, only the path varying: absolute → `85e89f18…`/2 652 144 B · repo-relative → `3ff13117…`/2 652 144 B · `../`-relative → `16f34b3e…`/2 652 142 B · a device path → `5b320784…`/2 652 145 B. The length moves too, because `content.opf` is DEFLATED
+- [ ] **Consequence:** the device stores books at `filesDir/books/<sha256>.epub`, the workstation at `data/examples/<name>` — so the same book translated on both gets a different `dc:identifier` **and** a different file sha256, and `BookImporter` dedupes on exactly that sha256 (`BookImporter.kt:73`). It imports as **two separate books**, which also affects Phase-3 sync
+- [ ] **B3's gate stays correct** as a *writer-fidelity* test (same `Book` in → same bytes out, across languages). It is not, and cannot be, a cross-device guarantee
+- [ ] **Decision required:** reseed the identifier on something path-free such as `book_hash` — which changes `dc:identifier` for every EPUB already produced — or accept per-device identifiers and dedupe on `book_hash` instead of file bytes
+- **Verify:** the same `Book` written from two different `source_path` values produces byte-identical output, mutation-proven; existing translated EPUBs' identifiers reported before/after so the blast radius is known before anything ships.
+
+#### Remaining (1 story, 3 pt)
+**B7** import → estimate → confirm → WorkManager → progress UI (3).
 
 Full text in the spec §4. Two decisions stay open: **[OPEN-A]** Jsoup vs.
 hand-rolled tolerant parsing (decide at B2) and **[OPEN-D]** whether tablet

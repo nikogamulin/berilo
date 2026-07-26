@@ -291,7 +291,16 @@ further, independent reason Track A must close before B1 freezes the fixtures.
 
 - **[OPEN-A]** Jsoup dependency vs. hand-rolled `XmlPullParser` recovery for
   lenient XHTML. Decide at B2 — Track B, not yet scheduled.
-- **[OPEN-D]** Does the tablet-produced EPUB need to be byte-identical to the
-  workstation's for the same book+model+style? §3.2 makes the *segments*
-  identical; byte-identity additionally requires the writer to match
-  `assemble.py` exactly. Decide at B3 — Track B, not yet scheduled.
+- **[OPEN-D] → RESOLVED, then PARTLY INVALIDATED by measurement (2026-07-27).**
+  Resolved toward requiring byte-identity, on the reasoning that `assemble.py` is
+  deterministic by construction so the gate would be free and would catch any
+  drift. B3 achieved it and it is Supervisor-verified. **But verifying the claim
+  showed the premise was wrong:** `dc:identifier` is a UUID5 seeded on
+  `berilo:{source_path}:{title}:{language}`, so output depends on the file's
+  path. The device stores books at `filesDir/books/<sha256>.epub` and the
+  workstation at `data/examples/<name>`, so **the tablet and the workstation can
+  never produce identical bytes for the same book** — and since `BookImporter`
+  dedupes on the file's sha256, the same book translated on both imports twice.
+  B3's gate remains correct and valuable as a **writer-fidelity** test; it is not
+  a cross-device guarantee, and the spec should never have implied one. The fix
+  and the decision it needs are story **B8**.
