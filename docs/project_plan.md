@@ -514,17 +514,38 @@ Two independent defects, either of which alone makes the feature unreachable:
 - [ ] `assemble.py` packages a twice-referenced figure's bytes twice (`_image_hrefs` keys href by position). Correct placement at a small size cost; no example book triggers it
 - **Verify:** `make test && make lint` green; `doctor` exercises the configured models; a twice-referenced figure yields one packaged payload with two references, both mutation-proven.
 
-### Track B — on-device translation (Kotlin) — *not scheduled until Track A closes*
+### Track B — on-device translation (Kotlin)
 
-Seven stories, 26 pt: **B1** core port + cross-language golden fixtures (3, gates
-the rest) · **B2** lenient EPUB reader (5) · **B3** EPUB writer (5) · **B4** Room
-v6 translation cache (3) · **B5** translate engine (5) · **B6** Kotlin provider
-hardening (2) · **B7** import → estimate → confirm → WorkManager → progress UI (3).
+> **Sequencing correction, 2026-07-26:** Track B was initially deferred whole,
+> but B1 splits — its identity half is gated by **A1** (landed) and only its
+> prompt-registry half by A3. **B6** is gated by **A4** (landed). Both started
+> as soon as their gates cleared rather than waiting for all of Track A.
 
-Full text in the spec §4. Two decisions stay open and are not needed until then:
-**[OPEN-A]** Jsoup vs. hand-rolled tolerant parsing (decide at B2) and
-**[OPEN-D]** whether tablet output must be byte-identical to workstation output
-(decide at B3).
+#### B6 — Kotlin provider hardening (2 pt) ✅
+*Review findings 6, 7, 18, ported from the **corrected** Python — the reason Track A went first.*
+- [x] `requireKnownModel` pre-flights inside `createLlmClient`, **before** either client is constructed (`Pricing.kt:41-42` previously threw *after* the response was billed)
+- [x] Content-less and truncated responses are representable failures (`EMPTY_COMPLETION`/`TRUNCATED_COMPLETION`) **carrying the already-billed `LlmResult`** — deliberately not a design B5 must undo. The Python version of this fix was bounced for making the failure loud in a way that removed the recovery handling it; here the failure carries its cost so B5's ladder can degrade rather than abort
+- [x] Content-policy signal added (Kotlin had none): **both** the HTTP 400 body and Anthropic's in-band `stop_reason="refusal"` on an otherwise-200 response — the case A4 found that the review's prescribed `BadRequestError` wrapper misses
+- [x] Backoff: one fixed 1000 ms retry → the Python ladder (up to 5 retries, `base*2^(n-1)+jitter`, honouring `Retry-After`). One retry is thin for a ~162-call on-device book
+- **Verify:** `./gradlew test assembleDebug` green with no regression on 536, plus: an unknown model fails before any HTTP request (**zero** MockWebServer requests); empty and truncated responses surface distinctly carrying billed tokens and cost; both Anthropic refusal paths raise content-policy; `Retry-After` honoured on virtual time; no error message contains a body or key substring; every guard mutation-proven.
+- **Verify run 2026-07-26 on merged `main`:** **580 JVM tests** (314 debug incl. 26 skipped screenshot + 266 release), **0 failures**, up from 536. Android Lint clean on touched files. Secret scan clean; Supervisor-confirmed that `LlmHttp.kt:145-148` interpolates only a provider label and HTTP code — never a body. **€0.**
+- **Known gap, reported not fixed — filed to B7.** `createLlmClient` is **not** the sole construction route the way Python's `create_client` is: `SettingsViewModel.kt:60-61` builds `OpenAiClient`/`AnthropicClient` directly for the key-test feature. Supervisor-verified. Harmless today because those models are hardcoded constants always in the pricing table, but any future direct site with a user-supplied model reopens finding 6 in Kotlin specifically. **B7 must also fix `SettingsViewModel.persistCurrentState()` (`:132-142`), which drops `dictionaryModel`/`interpretationModel` on every save and would inherit `translationModel`.**
+
+#### B1a — Kotlin identity + cross-language golden fixtures (3 pt) — *in progress*
+*The story that makes the §3.2 invariant provable rather than asserted. Gated by A1 (landed); fixtures generated from post-A1 Python.*
+- [ ] Kotlin segment model, `makeSegmentId`/`bookHash`/`segmentHash` byte-exact against Python, `Book` JSON round-trip
+- [ ] Golden fixtures per example book, **containing no book text** — `data/` is gitignored for copyright and the fixtures are committed, so they carry only derived identity (hashes, counts, ordered segment-id list)
+- [ ] Fixture format designed so B2 can drop in the real reader and tighten to a full round trip without changing the format
+- **Verify:** both suites green; the four fixtures regenerate byte-identically and reproduce the §5 table; `makeSegmentId` matches Python on non-ASCII (č/š/ž), whitespace and empty cases; `bookHash` reproduces each fixture; mutation-proven; **no committed fixture contains book text**, asserted programmatically.
+
+#### Remaining (5 stories, 21 pt) — *not scheduled*
+**B1b** prompt registry (blocked on A3) · **B2** lenient EPUB reader (5) ·
+**B3** EPUB writer (5) · **B4** Room v6 translation cache (3) · **B5** translate
+engine (5) · **B7** import → estimate → confirm → WorkManager → progress UI (3).
+
+Full text in the spec §4. Two decisions stay open: **[OPEN-A]** Jsoup vs.
+hand-rolled tolerant parsing (decide at B2) and **[OPEN-D]** whether tablet
+output must be byte-identical to workstation output (decide at B3).
 
 ---
 
