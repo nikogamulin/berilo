@@ -11,6 +11,7 @@ import app.berilo.reader.settings.EncryptedKeyValueStore
 import app.berilo.reader.settings.SettingsRepository
 import app.berilo.reader.store.db.AppDatabase
 import app.berilo.reader.store.db.MIGRATION_4_5
+import app.berilo.reader.store.db.MIGRATION_5_6
 import app.berilo.reader.store.importer.BookImporter
 import app.berilo.reader.store.importer.ReadiumMetadataExtractor
 import app.berilo.reader.store.repository.BookRepository
@@ -44,8 +45,10 @@ class AppContainer(app: Application) {
             // across the S2.4 bump to version 2 (adds dictionary_entries), the S2.5 bump to
             // version 3 (adds interpretation_entries), and the S2.6 bump to version 4 (adds
             // highlights). Version 5 is different: S2.11 put builds on a device, so 4 -> 5
-            // carries a real migration and highlights/notes survive it.
-            .addMigrations(MIGRATION_4_5)
+            // carries a real migration and highlights/notes survive it. 5 -> 6 (B4) is likewise
+            // real: it adds the on-device translation cache, and paid translation work must
+            // never be destructively migrated away.
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 

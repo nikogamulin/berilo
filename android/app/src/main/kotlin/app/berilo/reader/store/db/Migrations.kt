@@ -55,3 +55,50 @@ val MIGRATION_4_5 =
             )
         }
     }
+
+/**
+ * Schema 5 -> 6 (B4): adds the on-device translation cache — the Kotlin mirror of
+ * `translator/berilo/cache.py`'s `translations`, `glossaries` and `calls` tables.
+ *
+ * Purely additive, unlike [MIGRATION_4_5]: nothing on the device has ever written a translation,
+ * so there is no existing data to backfill or transform — three `CREATE TABLE` statements are
+ * the whole migration. The `translations` primary key matches `cache.py`'s six-column key
+ * exactly (`book_hash, segment_hash, model, lang, prompt_version, glossary_hash`), so the same
+ * segment translated under two different glossaries occupies two distinct rows.
+ */
+val MIGRATION_5_6 =
+    object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS translations (
+                    bookHash TEXT NOT NULL, segmentHash TEXT NOT NULL, model TEXT NOT NULL,
+                    lang TEXT NOT NULL, promptVersion TEXT NOT NULL, glossaryHash TEXT NOT NULL,
+                    text TEXT NOT NULL, costEur REAL NOT NULL, createdAt INTEGER NOT NULL,
+                    PRIMARY KEY(bookHash, segmentHash, model, lang, promptVersion, glossaryHash)
+                )
+                """
+                    .trimIndent(),
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS glossaries (
+                    bookHash TEXT NOT NULL, model TEXT NOT NULL, lang TEXT NOT NULL,
+                    promptVersion TEXT NOT NULL, termsJson TEXT NOT NULL, createdAt INTEGER NOT NULL,
+                    PRIMARY KEY(bookHash, model, lang, promptVersion)
+                )
+                """
+                    .trimIndent(),
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS calls (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, bookHash TEXT NOT NULL, model TEXT NOT NULL,
+                    lang TEXT NOT NULL, kind TEXT NOT NULL, inputTokens INTEGER NOT NULL,
+                    outputTokens INTEGER NOT NULL, costEur REAL NOT NULL, createdAt INTEGER NOT NULL
+                )
+                """
+                    .trimIndent(),
+            )
+        }
+    }
