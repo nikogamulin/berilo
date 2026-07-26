@@ -473,13 +473,17 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **The `_strip_page_furniture` probe** (the drop path my pre-flight did not cover): *Active Measures* has **0 band lines at all**; *World Ends* has 1483 band lines, 935 dropped, and **exactly 8 killed solely by the digit rule** — six OCR folios, one garbled roman numeral (`XXV1`), one archive.org provenance stamp. **0 genuine content lines lost.** Latent, like the other two paths.
 - **M3 initially passed, and that mattered:** the repairs are near-idempotent on valid markup, so an output-comparison test could never catch a leniency pass that always ran. Probing for a discriminator surfaced a real R3 defect — a literal `>` inside an attribute value ended the tag early and self-closed mid-attribute.
 
-#### A3 — Language-bound styles (3 pt)
-*Review findings 4 (HIGH), 14, 10. Blocked on A2 — both edit `translate.py`.*
-- [ ] Styles declare their target languages; `revise_v1` is `sl`-only; a generic two-pass style covers other targets; a style/target mismatch is a loud refusal, not a silent contradiction
-- [ ] The resolution table expresses "default differs by execution context" — single-pass is the on-device default per Niko 2026-07-26, revise stays the workstation default
-- [ ] `[[n]]` markers anchored so a marker inside translated prose stops forcing needless strict retries (`translate.py:299-304`)
-- [ ] `context_pairs=0` disables rolling context instead of feeding the whole book (`translate.py:763-766`)
+#### A3 — Language-bound styles (3 pt) ✅
+*Review findings 4 (HIGH), 14, 10. The last port-blocking Python story.*
+- [x] Styles declare `target_langs`; `revise_v1` is `sl`-only; `revise_generic_v1` covers other targets; a mismatch is a **loud, actionable refusal** naming the style, its languages, the request, and the style that would have run
+- [x] Resolution is a table keyed `(tier, language)`. **Execution context sets the default tier only** — workstation → two-pass, device → single-pass per Niko 2026-07-26. B7's "higher quality, ~2× cost" toggle overrides the *tier*; it never falsifies the context
+- [x] `[[n]]` markers anchored to line starts, **with the historical unanchored scan kept as a second attempt** so the change is cost-monotone: it can only remove retries, never add one for a model that replies on one line
+- [x] `context_pairs<=0` disables rolling context instead of feeding every prior pair into each batch
 - **Verify:** `make test && make lint` green; `--to de` does not run a Slovenian editor pass; a translation containing a literal `[[2]]` does not trigger a strict retry; `context_pairs=0` produces no context block; every guard mutation-proven.
+- **Verify run 2026-07-26 on merged `main`:** **428 passed** on the merged tree (377 in-worktree baseline), black (50 files) + ruff clean. CLI evidence: `--style revise_v1 --to de` refuses with an actionable message and prints **no estimate**; `--to de` resolves `revise_generic_v1`; `--to sl` still resolves `revise_v1`. **8 mutations, 8 caught.** Hash gate re-run: all six books unchanged. **€0.**
+- **Non-invalidation proven at both base and HEAD** against a copy of the real cache: 13426/13426 byte-identical and resolving, `baseline_v1` and `revise_v1` prompt digests unmoved. The *mechanism*, not just the number: `target_langs` never reaches the model, so it sits outside both `version` and `prompt_digest` — and mutation M8, which folds it into the digest, turns the pinning test red. That mutation is what stops the exclusion eroding later.
+- **The ECONOMY/sl cell is `baseline_v1`, not `sl_style_v1`,** on the E2 bake-off evidence (ledger 2026-07-25): the Slovenian contract without the editor pass measured null on fluency (+0.05 [−0.10, +0.22]), so a single-pass run gains nothing by paying for its extra prompt tokens. A judgement call — one table row to reverse.
+- **Reported, not fixed:** `prompts.DEFAULT`/`DEFAULT_STYLE_NAME` still point at `revise_v1` and are now a language-blind shortcut past the table (guarded by `ensure_supports`, but worth deleting once B1b is written against `resolve_style`). `estimate_cost`'s `TARGET_EXPANSION = 1.1` is documented as a Slovenian assumption but applies to every target — now reachable via `--to de`. → A5/A7.
 
 #### A5 — Experiment and eval edges (2 pt)
 *Review findings 8, 12, 13.*
@@ -531,12 +535,17 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **Verify run 2026-07-26 on merged `main`:** **580 JVM tests** (314 debug incl. 26 skipped screenshot + 266 release), **0 failures**, up from 536. Android Lint clean on touched files. Secret scan clean; Supervisor-confirmed that `LlmHttp.kt:145-148` interpolates only a provider label and HTTP code — never a body. **€0.**
 - **Known gap, reported not fixed — filed to B7.** `createLlmClient` is **not** the sole construction route the way Python's `create_client` is: `SettingsViewModel.kt:60-61` builds `OpenAiClient`/`AnthropicClient` directly for the key-test feature. Supervisor-verified. Harmless today because those models are hardcoded constants always in the pricing table, but any future direct site with a user-supplied model reopens finding 6 in Kotlin specifically. **B7 must also fix `SettingsViewModel.persistCurrentState()` (`:132-142`), which drops `dictionaryModel`/`interpretationModel` on every save and would inherit `translationModel`.**
 
-#### B1a — Kotlin identity + cross-language golden fixtures (3 pt) — *in progress*
-*The story that makes the §3.2 invariant provable rather than asserted. Gated by A1 (landed); fixtures generated from post-A1 Python.*
-- [ ] Kotlin segment model, `makeSegmentId`/`bookHash`/`segmentHash` byte-exact against Python, `Book` JSON round-trip
-- [ ] Golden fixtures per example book, **containing no book text** — `data/` is gitignored for copyright and the fixtures are committed, so they carry only derived identity (hashes, counts, ordered segment-id list)
-- [ ] Fixture format designed so B2 can drop in the real reader and tighten to a full round trip without changing the format
+#### B1a — Kotlin identity + cross-language golden fixtures (3 pt) ✅
+*Makes the §3.2 invariant provable rather than asserted. Gated by A1 (landed); fixtures generated from post-A1 Python.*
+- [x] Kotlin segment model, `makeSegmentId`/`bookHash`/`segmentHash` byte-exact against Python, `Book` JSON round-trip. No new dependency (`MessageDigest`, `Base64`)
+- [x] Golden fixtures per example book, **containing no book text**
+- [x] Fixture format designed so B2 tightens to a full round trip without changing it
 - **Verify:** both suites green; the four fixtures regenerate byte-identically and reproduce the §5 table; `makeSegmentId` matches Python on non-ASCII (č/š/ž), whitespace and empty cases; `bookHash` reproduces each fixture; mutation-proven; **no committed fixture contains book text**, asserted programmatically.
+- **Verify run 2026-07-26 on merged `main`:** Android **628 JVM tests** (338 debug incl. 26 skipped screenshot + 290 release), 0 failures, from a 536 baseline; Python **428 passed**; lint clean both sides. Fixtures regenerate byte-identically and reproduce all four §5 rows. **3 mutations, 3 caught** (id separator, strip, book-hash join). **€0.**
+- **Byte-exactness defect found and fixed — it would have been silent.** Python's `str.strip()` removes **29** code points; the JVM's `isWhitespace|isSpaceChar` covers **28**. The sole divergence is **U+0085 NEXT LINE** — category `Cc`, so neither predicate matches, and it is above U+0020 so `trim()` leaves it. Any segment padded with it would hash differently in the two languages and break the invariant with no error. `Identity.kt` carries its own `pythonStrip()` with the set hard-coded, which also immunizes the hash against a JDK Unicode-version bump. **Supervisor-verified in both runtimes** (Python set = 29, contains U+0085; JVM set = 28, `trim()` does not remove it).
+- **Copyright discipline, Supervisor-audited.** Across all four real-book fixtures the *complete* set of non-digest, non-image-id strings is `{blockquote, heading, list_item, paragraph, epub, image/jpeg, four slugs, en|eng|en-US|EN-GB}` — nothing with more than two words. Filenames are recorded as slugs, never the on-disk names, which carry download provenance.
+- **The gate recomputes rather than compares:** `assertMatchesFixture` takes a `Book` and derives every id from `(chapterIndex, position, text)`, so ids copied from elsewhere cannot pass. `segment_hash` is in the fixture deliberately — it is the actual translation-cache key, so B2/B4 can prove cache-row agreement on real text without a second fixture; `data_sha1` does the same for B3.
+- **Reported, not fixed:** `Book.language` is raw OPF soup across the corpus (`en-US`, `en`, `eng`, `EN-GB`). A3's `normalize_lang` handles this on the Python side; **B7 must use the same rule** or Ember Spark's `EN-GB` and Sandworm's `eng` will refuse against a `--to`-derived tag. Also: `android/` has **no ktlint or spotless** — "lint clean" for Kotlin here means the compiler plus Android Lint only.
 
 #### Remaining (5 stories, 21 pt) — *not scheduled*
 **B1b** prompt registry (blocked on A3) · **B2** lenient EPUB reader (5) ·
