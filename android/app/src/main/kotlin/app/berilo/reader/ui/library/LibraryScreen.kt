@@ -112,6 +112,9 @@ fun LibraryScreen(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    // B7: the entry point to on-device translation. Defaulted so the existing library tests,
+    // which are about the grid and its states, keep constructing this screen unchanged.
+    onOpenTranslate: () -> Unit = {},
 ) {
     var pendingDelete by remember { mutableStateOf<Book?>(null) }
 
@@ -121,6 +124,12 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.library_title)) },
                 actions = {
+                    IconButton(onClick = onOpenTranslate) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_translate),
+                            contentDescription = stringResource(R.string.translate_library_cd),
+                        )
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.library_settings_cd))
                     }
