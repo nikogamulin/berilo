@@ -67,6 +67,38 @@ fun String.pythonStrip(): String {
 }
 
 /**
+ * Collapse every run of Python-whitespace to a single space, then [pythonStrip] the result.
+ *
+ * This is `re.sub(r"\s+", " ", text).strip()`, which is how `normalize_epub` turns a block
+ * element's serialized content into `Segment.text` — and therefore part of the segment id.
+ * Kotlin's `Regex("\\s+")` will not do: the JVM's `\s` is the six ASCII whitespace characters,
+ * so a non-breaking space or a U+2028 inside a paragraph would survive here and be collapsed
+ * in Python, giving the same paragraph two different digests.
+ *
+ * The trailing [pythonStrip] is belt-and-braces rather than load-bearing: after the collapse
+ * the only whitespace left is U+0020, so Kotlin's `trim()` would do the same thing here (it is
+ * Unicode-aware, unlike Java's `String.trim()`, which cuts everything below U+0021). It stays
+ * because the pairing is the invariant — change the collapse and the strip still holds.
+ *
+ * @return The text with internal whitespace runs collapsed and the ends stripped.
+ */
+fun String.pythonCollapseWhitespace(): String {
+    val collapsed = StringBuilder(length)
+    var inWhitespace = false
+    for (character in this) {
+        if (character in PYTHON_WHITESPACE) {
+            inWhitespace = true
+        } else {
+            if (inWhitespace) collapsed.append(' ')
+            inWhitespace = false
+            collapsed.append(character)
+        }
+    }
+    if (inWhitespace) collapsed.append(' ')
+    return collapsed.toString().pythonStrip()
+}
+
+/**
  * Derive a stable content-hash id for a segment.
  *
  * Mirrors `berilo.models.make_segment_id`: sha1 of the UTF-8 encoding of

@@ -228,6 +228,19 @@ dependencies {
     debugImplementation(libs.roborazzi.compose)
 }
 
+// B2: the cross-language EPUB identity tests read the real example books in place. `data/` is
+// gitignored (copyrighted books) and absent from CI and from every agent worktree, so the
+// directory is never hardcoded: it is passed in and the tests skip (JUnit `Assume`) without it.
+//   ./gradlew test -Dberilo.examples.dir=/abs/path/to/data/examples
+// Gradle test JVMs do not inherit -D from the launcher, hence the explicit forward.
+val exampleBooksProperty = "berilo.examples.dir"
+
+tasks.withType<Test>().configureEach {
+    (System.getProperty(exampleBooksProperty) ?: System.getenv("BERILO_EXAMPLES_DIR"))
+        ?.takeIf(String::isNotBlank)
+        ?.let { systemProperty(exampleBooksProperty, it) }
+}
+
 // S2.10: JVM screenshot harness. `screenshots` clones testDebugUnitTest's fully-configured
 // classpath/resources (merged Android resources, Robolectric jars — see testOptions.unitTests
 // above) so string/drawable resources resolve, but runs only the screenshot package and always
