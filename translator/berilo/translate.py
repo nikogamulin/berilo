@@ -48,7 +48,7 @@ from berilo.cache import (
     book_hash,
     segment_hash,
 )
-from berilo.glossary import Glossary
+from berilo.glossary import Glossary, glossary_identity
 from berilo.models import Book, Segment
 from berilo.prompts import BASELINE, TranslationStyle
 from berilo.providers.base import CompletionResult, ContentPolicyError, LLMClient
@@ -714,7 +714,10 @@ def translate_book(
         client: LLM client for translation calls (its ``model`` keys the cache).
         target_lang: Target language code (e.g. ``"sl"``).
         cache: Translation cache for resumability and accounting.
-        glossary: Optional glossary injected into every batch prompt.
+        glossary: Optional glossary injected into every batch prompt. Its
+            identity participates in the cache key, so translating the same
+            book under different terms re-translates instead of serving text
+            produced under the old ones.
         batch_size: Maximum consecutive segments per completion.
         context_pairs: Number of previous source/target pairs used as context.
         skip_segment_ids: Segment IDs to pass through untranslated.
@@ -739,6 +742,9 @@ def translate_book(
     bhash = book_hash(book)
     skip = set(skip_segment_ids)
     prompt_version = style.version
+    # The glossary is prompt input like the style is, so it keys the cache too:
+    # a changed glossary must re-translate, never re-serve (CLAUDE.md §9).
+    ghash = glossary_identity(glossary)
     stats = TranslationStats(total_segments=len(book.segments))
 
     book_context, context_result = build_book_context(
@@ -781,7 +787,7 @@ def translate_book(
             continue
 
         shash = segment_hash(segment.text)
-        cached = cache.get_translation(bhash, shash, model, target_lang, prompt_version)
+        cached = cache.get_translation(bhash, shash, model, target_lang, prompt_version, ghash)
         if cached is not None:
             output.append(replace(segment, text=cached))
             _remember(segment.text, cached)
@@ -801,7 +807,7 @@ def translate_book(
                 break
             if (
                 cache.get_translation(
-                    bhash, segment_hash(candidate.text), model, target_lang, prompt_version
+                    bhash, segment_hash(candidate.text), model, target_lang, prompt_version, ghash
                 )
                 is not None
             ):
@@ -839,6 +845,7 @@ def translate_book(
             ],
             call,
             prompt_version,
+            ghash,
         )
 
         for seg, text in zip(batch, translations):

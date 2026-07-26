@@ -8,17 +8,27 @@ terminology stays consistent across chunk boundaries (``docs/project_spec.md``
 but still decline, so the model is instructed to record the *base* form only.
 
 The glossary is memoized in the translation cache keyed on
-``(book_hash, model, lang)`` — it is built at most once per book/model/lang.
+``(book_hash, model, lang, prompt_version)`` — it is built at most once per
+book/model/lang *and glossary-prompt identity*. That last component is
+:func:`glossary_prompt_version`, **derived** from the extraction prompt and the
+sampling parameters rather than declared by hand: without it, improving the
+extraction prompt to fix a mistranslated name would hit the unchanged key and
+return the old terms at zero cost (CLAUDE.md §9).
+
+The resulting terms in turn key every translation row through
+:func:`glossary_identity`, so a *different glossary* can never be served a
+translation produced under the old one.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 
-from berilo.cache import CallRecord, TranslationCache, book_hash
+from berilo.cache import CallRecord, TranslationCache, book_hash, glossary_hash
 from berilo.models import Book
 from berilo.providers.base import LLMClient
 
@@ -46,7 +56,59 @@ _GLOSSARY_SYSTEM = (
     "fixed target rendering. No prose, no code fences."
 )
 
+#: User-message template for the extraction call. Named (rather than inlined)
+#: so it participates in :func:`glossary_prompt_version` — every string that
+#: reaches the model must be inside the version, or a prompt edit becomes a
+#: silent no-op on the next run.
+_GLOSSARY_PROMPT_TEMPLATE = "Target language: {target_lang}.\n\nSource passages:\n{sample}"
+
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+#: Prefix on every derived glossary prompt version, so the value is legible in
+#: a database dump rather than a bare digest.
+_GLOSSARY_VERSION_PREFIX = "glossary_"
+
+#: Hex characters of the payload digest kept in the version string.
+_GLOSSARY_VERSION_DIGEST_CHARS = 12
+
+
+def glossary_prompt_version(
+    *,
+    sample_chapters: int = DEFAULT_SAMPLE_CHAPTERS,
+    max_sample_chars: int = DEFAULT_MAX_SAMPLE_CHARS,
+    max_terms: int = MAX_GLOSSARY_TERMS,
+) -> str:
+    """Return the cache identity of the glossary-extraction pass.
+
+    Derived from every input that shapes the extracted terms — the system
+    prompt, the user-message template, and the sampling parameters actually
+    used — so that editing any of them changes the key automatically. A
+    hand-maintained version string is exactly what was forgotten the first
+    time this defect appeared (CLAUDE.md §9).
+
+    Args:
+        sample_chapters: Number of chapters sampled for extraction.
+        max_sample_chars: Character cap on the sampled source text.
+        max_terms: Cap on retained glossary terms.
+
+    Returns:
+        A short, stable version string such as ``"glossary_a1b2c3d4e5f6"``.
+    """
+    payload = "\n".join(
+        (
+            _GLOSSARY_SYSTEM,
+            _GLOSSARY_PROMPT_TEMPLATE,
+            f"sample_chapters={sample_chapters}",
+            f"max_sample_chars={max_sample_chars}",
+            f"max_terms={max_terms}",
+        )
+    )
+    digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:_GLOSSARY_VERSION_DIGEST_CHARS]
+    return f"{_GLOSSARY_VERSION_PREFIX}{digest}"
+
+
+#: Identity of the glossary pass under its default sampling parameters.
+GLOSSARY_PROMPT_VERSION = glossary_prompt_version()
 
 
 @dataclass(frozen=True)
@@ -77,6 +139,24 @@ class Glossary:
             "GLOSSARY (use these fixed renderings for the following terms; "
             "inflect/decline them naturally as the target language requires):\n" + "\n".join(lines)
         )
+
+
+def glossary_identity(glossary: Glossary | None) -> str:
+    """Return the translation-cache component identifying ``glossary``.
+
+    Computed over :meth:`Glossary.to_prompt_block` — the exact text the
+    glossary contributes to every batch prompt — so the key tracks what the
+    model actually saw. ``None`` and an empty glossary render the same empty
+    block and therefore share one identity, which is correct: both inject
+    nothing.
+
+    Args:
+        glossary: The glossary that will be injected, or ``None``.
+
+    Returns:
+        A 40-character hexadecimal sha1 digest.
+    """
+    return glossary_hash("" if glossary is None else glossary.to_prompt_block())
 
 
 def _sample_source_text(book: Book, *, sample_chapters: int, max_chars: int) -> str:
@@ -157,8 +237,10 @@ def build_glossary(
 ) -> Glossary:
     """Build (or load from cache) the fixed-term glossary for ``book``.
 
-    Makes at most one LLM call. If a glossary for ``(book, model, lang)`` is
-    already cached, no call is made.
+    Makes at most one LLM call. If a glossary for
+    ``(book, model, lang, glossary_prompt_version)`` is already cached, no call
+    is made. Changing the extraction prompt or the sampling parameters changes
+    that last component, so the pass re-runs instead of returning stale terms.
 
     Args:
         book: The source book to extract terms from.
@@ -174,18 +256,22 @@ def build_glossary(
     """
     model_name = model if model is not None else getattr(client, "model", "unknown")
     bhash = book_hash(book)
+    prompt_version = glossary_prompt_version(
+        sample_chapters=sample_chapters,
+        max_sample_chars=max_sample_chars,
+    )
 
     if cache is not None:
-        cached = cache.get_glossary(bhash, model_name, target_lang)
+        cached = cache.get_glossary(bhash, model_name, target_lang, prompt_version)
         if cached is not None:
-            logger.info("Glossary cache hit (%d terms).", len(cached))
+            logger.info("Glossary cache hit (%d terms, %s).", len(cached), prompt_version)
             return Glossary(terms=cached)
 
     sample = _sample_source_text(book, sample_chapters=sample_chapters, max_chars=max_sample_chars)
     if not sample.strip():
         return Glossary(terms={})
 
-    prompt = f"Target language: {target_lang}.\n\n" "Source passages:\n" f"{sample}"
+    prompt = _GLOSSARY_PROMPT_TEMPLATE.format(target_lang=target_lang, sample=sample)
     result = client.complete(prompt=prompt, system=_GLOSSARY_SYSTEM)
     terms = _parse_glossary_json(result.text)
     logger.info("Glossary extracted: %d terms.", len(terms))
@@ -196,11 +282,12 @@ def build_glossary(
             model_name,
             target_lang,
             terms,
-            CallRecord(
+            call=CallRecord(
                 kind="glossary",
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
                 cost_eur=result.cost_eur,
             ),
+            prompt_version=prompt_version,
         )
     return Glossary(terms=terms)
