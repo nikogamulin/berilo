@@ -686,3 +686,22 @@
   sides zlib 1.2.11). Generalization: **when porting a stdlib zip writer for
   byte-identity, compression is rarely what breaks — it is the metadata each
   stdlib considers its own to fill in.**
+
+- [2026-07-27] **A `segment_hash` guard scoped to "my own run" is insufficient
+  the moment two unrelated items can share the key.** `segment_hash` keys on text
+  alone, so a refrain, disclaimer or repeated paragraph collides across
+  structurally-unrelated items. `experiment.py` built its lead-in forbidden-hash
+  set **per run**, so an identical paragraph appearing as run 0's judged segment
+  and run 1's lead-in was served the *control* translation at EUR0 — that pair's
+  variant-vs-control delta was exactly 0 and nothing raised. Fixed by computing
+  the set pool-wide. **This generalizes review finding 3's lesson from cache keys
+  to in-process guards: the guard must cover the whole space that shares the key,
+  not the item currently being built.**
+- [2026-07-27] **A property that promises an exclusion but keeps no field for the
+  excluded value cannot be tested against its own docstring.**
+  `eur_per_1k_words` documented that per-book fixed costs are excluded so the
+  figure tracks the marginal rate, while the style-memo cost sat inside
+  `translation_cost_eur` — and no test could tell, because there was nothing to
+  compare against. Storing the excluded component as its own field
+  (`memo_cost_eur`) is what makes the subtraction assertable rather than merely
+  plausible.

@@ -485,12 +485,15 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **The ECONOMY/sl cell is `baseline_v1`, not `sl_style_v1`,** on the E2 bake-off evidence (ledger 2026-07-25): the Slovenian contract without the editor pass measured null on fluency (+0.05 [−0.10, +0.22]), so a single-pass run gains nothing by paying for its extra prompt tokens. A judgement call — one table row to reverse.
 - **Reported, not fixed:** `prompts.DEFAULT`/`DEFAULT_STYLE_NAME` still point at `revise_v1` and are now a language-blind shortcut past the table (guarded by `ensure_supports`, but worth deleting once B1b is written against `resolve_style`). `estimate_cost`'s `TARGET_EXPANSION = 1.1` is documented as a Slovenian assumption but applies to every target — now reachable via `--to de`. → A5/A7.
 
-#### A5 — Experiment and eval edges (2 pt)
-*Review findings 8, 12, 13.*
-- [ ] `eur_per_1k_words` excludes the fixed memo cost its own docstring says it excludes (`experiment.py:1020`, `:552-568`)
-- [ ] Lead-in forbidden-hash guard is global, not per-run (`experiment.py:300`)
-- [ ] The extraction screen does not silently default an unparseable reply to "dirty" (`screen.py:206-208`)
-- **Verify:** `make test && make lint` green; a book-context variant's reported €/1k words excludes the memo; an identical paragraph across two runs is not served the control translation at €0; an unparseable screen reply raises rather than scoring; every guard mutation-proven.
+#### A5 — Experiment and eval edges (2 pt) ✅
+*Review findings 8, 12, 13. **With this, 19 of the review's 20 findings are resolved** — only finding 17 remains, split to A8 because it moves `book_hash`.*
+- [x] `eur_per_1k_words` excludes the fixed memo cost its own docstring says it excludes. `memo_cost_eur` is now its own field — **which is what makes the fix assertable at all**: a property promising an exclusion but keeping no field for the excluded value can only be tested for its output, never for agreement with its docstring
+- [x] Lead-in forbidden-hash set is **pool-wide**, not per-run. An identical paragraph appearing as run 0's judged segment and run 1's lead-in shared a `segment_hash` and was served the **control** translation at €0 — that pair's variant-vs-control delta was exactly 0 and nothing raised. The same silent-measurement-corruption class as finding 3
+- [x] The extraction screen raises on an unparseable reply instead of silently scoring it dirty, following `judge.py`'s precedent rather than inventing a third convention
+- **Verify:** `make test && make lint` green; a book-context variant's reported €/1k words excludes the memo while `total_cost_eur` still includes it; an identical paragraph across two runs is not served the control translation at €0; an unparseable screen reply raises; every guard mutation-proven.
+- **Verify run 2026-07-27 on merged `main`:** **436 passed** (426 in-worktree baseline the agent measured itself with `git stash -u` rather than trusting the packet's number), black (50 files) + ruff clean. All three mutation-proven — the finding-12 test asserts the **API call count and text**, not just a hash, because the cost is the symptom. **€0.**
+- **Hash gate deliberately not re-run:** `screen.py` and `experiment.py` are provably outside the `normalize`/`translate`/`cache` import path, so A5 cannot move a key. Verified by grep rather than assumed.
+- **Judgement reported, not acted on:** `prompts.DEFAULT`/`DEFAULT_STYLE_NAME` are dead from production's perspective (`cli.py` goes through `resolve_style` exclusively) but 3 test assertions reference them, so removal belongs in its own story. `TARGET_EXPANSION = 1.1` is a dry-run cost constant and changing it silently would violate §4/§9 — it wants a story that **measures** real expansion per target language (German at minimum, now `--to de` is supported) before replacing it with a per-language table.
 
 #### A6 — Re-score Rubric T after Track A (1 pt)
 - [ ] Re-score one book and confirm no regression against the 88.0 [86.2, 89.9] baseline (`rubric_scores.jsonl`, commit `9697a90`)
