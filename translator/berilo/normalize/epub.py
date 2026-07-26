@@ -140,7 +140,9 @@ RECURRING_IMAGE_MIN_REFERENCES = 3
 #   R3  Unclosed void element -> self-closing.
 #       ``<TAG ...>`` where TAG is an HTML void element and the tag does not
 #       already end in ``/>`` becomes ``<TAG .../>``. This is the ``<br>`` and
-#       unclosed-``<img>`` case.
+#       unclosed-``<img>`` case. The attribute scan is quote-aware, so a
+#       literal ``>`` inside an attribute value (``alt="3 > 2"``, legal XML)
+#       does not terminate the tag early.
 #
 # Nothing else is repaired. Mis-nested or unbalanced non-void elements, a stray
 # ``<``, a truncated document or a wrong root all reach step 3 and fail loudly:
@@ -155,26 +157,31 @@ _NAMED_ENTITY_RE = re.compile(r"&([A-Za-z][A-Za-z0-9]*);")
 _XML_BUILTIN_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
 _BARE_AMPERSAND_RE = re.compile(r"&(?!(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);)")
 
-# HTML void elements: they have no closing tag, so XHTML that writes them
-# unclosed (``<br>``) is not well-formed XML.
+# HTML void elements (plus SVG ``<image>``, the cover wrapper this normalizer
+# already reads): they have no closing tag, so XHTML that writes them unclosed
+# (``<br>``) is not well-formed XML. Longest names first so the alternation
+# reads naturally; the name is anchored by the negative lookahead below, so
+# ``<imgfoo>`` is not mistaken for ``<img>``.
 _VOID_ELEMENTS = (
+    "source",
+    "image",
+    "embed",
+    "input",
+    "param",
+    "track",
     "area",
     "base",
-    "br",
-    "col",
-    "embed",
-    "hr",
-    "img",
-    "input",
     "link",
     "meta",
-    "param",
-    "source",
-    "track",
+    "col",
+    "img",
     "wbr",
+    "br",
+    "hr",
 )
 _UNCLOSED_VOID_RE = re.compile(
-    r"<(" + "|".join(_VOID_ELEMENTS) + r")(\b[^<>]*?)?(?<!/)>",
+    r"<(" + "|".join(_VOID_ELEMENTS) + r")(?![^\s/>])"
+    r"((?:\"[^\"]*\"|'[^']*'|[^<>\"'])*?)(?<!/)>",
     re.IGNORECASE,
 )
 

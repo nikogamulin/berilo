@@ -661,21 +661,50 @@ def test_spine_document_absent_from_archive_raises(epub_builder) -> None:
     assert "absent from the archive" in str(excinfo.value)
 
 
-def test_well_formed_documents_are_parsed_strictly_and_never_repaired(epub_builder) -> None:
+def test_well_formed_documents_are_parsed_strictly_and_never_repaired(
+    epub_builder, monkeypatch
+) -> None:
     """Step 1 of the rule, and the reason ``book_hash`` cannot move.
 
-    Repairs run only after a strict parse has already failed. If they ran
-    unconditionally, R2 would turn the ``&amp;`` in a perfectly valid document
-    into ``&amp;amp;`` and every affected segment's text — hence its id, hence
-    ``book_hash`` — would change.
+    Recovery runs ONLY after a strict parse has already failed, so a book made
+    of well-formed documents takes byte-for-byte the same path it did before
+    leniency existed. Asserted on the mechanism — a repair pass that cannot be
+    reached — rather than on output, because the repairs are near-idempotent on
+    valid markup and an output comparison would pass even if they always ran.
     """
     path = _two_chapter_epub(
-        epub_builder, {"body": "<h1>Chapter Two</h1><p>Meyer &amp; Sons &#38; Co.</p>"}
+        epub_builder,
+        {"body": "<h1>Chapter Two</h1><p>Meyer &amp; Sons &#38; Co.<br/></p>"},
     )
+
+    def _must_not_run(data: bytes) -> tuple[bytes, list[str]]:
+        raise AssertionError("recovery ran on a well-formed document")
+
+    monkeypatch.setattr("berilo.normalize.epub._repair_xhtml", _must_not_run)
 
     book = normalize_epub(path)
 
     assert book.segments[-1].text == "Meyer & Sons & Co."
+
+
+def test_repairs_do_not_corrupt_a_literal_gt_inside_an_attribute() -> None:
+    """R3 is quote-aware: a legal ``>`` in an attribute is not a tag end.
+
+    A naive ``[^<>]*`` attribute scan ends the tag at the ``>`` inside the alt
+    text and self-closes mid-attribute, silently rewriting the document.
+    """
+    repaired, applied = _repair_xhtml(b'<p><img src="x.png" alt="3 > 2"></p>')
+
+    assert repaired == b'<p><img src="x.png" alt="3 > 2"/></p>'
+    assert any(name.startswith("R3") for name in applied)
+
+
+def test_void_repair_does_not_fire_on_a_longer_tag_name() -> None:
+    """``<imgfoo>`` is not ``<img>``: the element name is anchored."""
+    repaired, applied = _repair_xhtml(b"<imgfoo>x</imgfoo>")
+
+    assert repaired == b"<imgfoo>x</imgfoo>"
+    assert applied == []
 
 
 def test_repairs_are_individually_sufficient() -> None:
