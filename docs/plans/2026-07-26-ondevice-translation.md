@@ -193,25 +193,105 @@ A3 is held to wave 2 because A2 edits translate.py's cache call sites.
 - Rubric T must not regress: re-score one book after A1+A2+A3 land. Expected
   €0 if `book_hash` is unchanged — **and whether it is unchanged is itself a
   gate**, because A1 changes extraction and therefore may change segment ids.
-  **[OPEN-B]** — if A1 shifts `book_hash`, a re-score costs a paid re-translation
-  (~€1.45/book). Niko's call before A1 lands.
+
+### `book_hash` baseline, measured 2026-07-26 at €0 (pre-A1)
+
+Measured on this box through the real `normalize()` path, on the **source**
+EPUBs. `The New Rules of War` and `Revenge of Geography` reproduce the S1.14
+ledger entry exactly, which confirms the measurement path.
+
+| Source EPUB | `book_hash` | segments | chapters | images |
+|---|---|---:|---:|---:|
+| The New Rules of War | `2db2bd1ca6782089f32f2af99bc2b69cbbaf259a` | 2309 | 27 | 4 |
+| The Revenge of Geography (Kaplan) | `f30cd8f30a17f696909f446a121bd8b0eb20b91c` | 1294 | 47 | 17 |
+| Sandworm | `3f76c96f58a59016bc86bc11616b040f12038ef2` | 1813 | 61 | 3 |
+| Ember Spark | `14425e03f36e50dfbcd2c6631fbebfd90f7d5dbf` | 1231 | 35 | 61 |
+
+**A1's first deliverable is re-running exactly this table and diffing it.** Any
+row that moves stops A1 for a paid-re-run decision (§6 [OPEN-B]). A1 spends €0.
+
+### Measured 2026-07-26 at €0: findings 1 and 2 are latent on this corpus
+
+Both of the review's top-ranked fixes were probed directly against the real data
+before scheduling them. **Neither fires on any example book.**
+
+| Probe | Result |
+|---|---|
+| Finding 2 — spine documents lost to strict `ET.fromstring` | **0** across all 4 source EPUBs (31 + 50 + 63 + 47 = 191 documents, all parse clean) |
+| Finding 1 — lines accepted by `_looks_like_heading` and killed by `_is_droppable` | **0** in *Active Measures* and **0** in *This Is How They Tell Me the World Ends* |
+
+Three consequences, and they reorder the work:
+
+1. **[OPEN-B] dissolves at €0.** A1 cannot move any `book_hash` on this corpus,
+   because neither defect has anything to fix here. No paid re-translation, no
+   flag-gate, no decision needed. The risk that gated A1 does not exist.
+2. **The review's priority ranking does not hold for Berilo's corpus.** It ranks
+   finding 1 first — *"real books lose chapters today (numeric titles)"*. On
+   these books it loses nothing today. Both findings remain correct robustness
+   defects worth fixing (a book actually titled *1984*, or an EPUB with a bare
+   `&nbsp;`, would hit them) but they are **latent**, not active.
+3. **Finding 3 is the real #1.** Unlike 1 and 2, the glossary-absent-from-the-
+   cache-key defect is *actively* poisoning every glossary and prompt experiment
+   right now, at €0, in a way indistinguishable from a null result — and it is a
+   recurrence of CLAUDE.md §9's own cache-key rule. **A2 is promoted ahead of
+   A1.**
+
+*Probe limitation, stated honestly:* the finding-1 probe tests raw text lines,
+not post-reflow blocks. Since `_SINGLE_TOKEN_WITH_DIGIT_RE` (`^\S*\d\S*$`) only
+matches whitespace-free tokens, a droppable block must originate in a droppable
+line, so the probe covers the `pdf.py:985` heading-admission path. It does
+**not** cover the second drop path, `_strip_page_furniture` (`pdf.py:739`),
+which operates on margin bands — A1 must probe that one itself.
+
+### Consequence for §3.2's lenient/strict contradiction
+
+The spec flagged a tension: §3.2 demands a Kotlin reader with a byte-identical
+`book_hash`, while finding 2 demands it be *lenient* where Python is *strict* —
+and a lenient reader that recovers a document Python drops shifts every later
+`position`, and therefore every segment id.
+
+The measurement shows the contradiction is **latent, not active**: Python drops
+zero documents on this corpus, so a lenient Kotlin reader sees exactly the same
+documents and the golden fixtures pass.
+
+But latent is not resolved, and the formulation that actually survives is:
+**A1 makes the Python reader lenient too, and the golden fixtures are generated
+from post-A1 Python — never from today's.** Both sides are then lenient by the
+same rule, and the invariant holds on any book, not just these four. This is a
+further, independent reason Track A must close before B1 freezes the fixtures.
 - No story is checked off without its Verify line executed in its closing
   session (CLAUDE.md §6).
 
 ---
 
-## 6. Open decisions
+## 6. Decisions
+
+### Resolved by Niko, 2026-07-26
+
+- **[OPEN-B] → RESOLVED: measure first, at €0.** A1 must report the `book_hash`
+  delta per example book **before** anything is re-translated. If the hashes are
+  unchanged the question dissolves at zero cost; if they move, A1 stops and
+  reports exact numbers for a paid-re-run decision. This is CLAUDE.md §9's rule
+  applied directly — verify the hash before assuming a paid re-run. **A1 may not
+  spend API budget under any circumstance.**
+- **[OPEN-C] → RESOLVED: single-pass is the on-device default; revise is
+  opt-in.** The tablet defaults to one pass (~€0.70, ~162 calls, ~half the
+  wall-clock of `revise_v1`). B7 must surface a "higher quality, ~2× cost"
+  toggle showing both real € figures. Rationale: a multi-hour battery-powered
+  e-ink job is a materially different context from a workstation run, so the
+  4.1-point Rubric T gain is an explicit user choice, never a silent default.
+  **Consequence for A3:** the language→style resolution table must express
+  "default differs by execution context", not just by target language.
+- **Sequencing → RESOLVED: Track A lands in full before Track B starts.** Four
+  review findings are port-blocking (§2); fixing them first means the Kotlin
+  side ports a corrected algorithm once. Track B is not scheduled until Track A
+  closes and Rubric T is re-scored.
+
+### Still open
 
 - **[OPEN-A]** Jsoup dependency vs. hand-rolled `XmlPullParser` recovery for
-  lenient XHTML. Decide at B2.
-- **[OPEN-B]** If A1's extraction fixes change `book_hash` on the example books,
-  a rubric re-score means a paid re-translation. Accept the cost, or gate A1's
-  extraction changes behind a flag so existing books keep their hash?
-- **[OPEN-C]** On-device model default. `gpt-5-mini` at `revise_v1` is ~€1.45 and
-  ~324 calls per book. On a tablet, is the two-pass revise style the right
-  default, or should on-device default to single-pass and let the user opt into
-  revise? Affects B7's UI and the cost story.
+  lenient XHTML. Decide at B2 — Track B, not yet scheduled.
 - **[OPEN-D]** Does the tablet-produced EPUB need to be byte-identical to the
   workstation's for the same book+model+style? §3.2 makes the *segments*
   identical; byte-identity additionally requires the writer to match
-  `assemble.py` exactly. Worth it, or is segment-identity enough?
+  `assemble.py` exactly. Decide at B3 — Track B, not yet scheduled.

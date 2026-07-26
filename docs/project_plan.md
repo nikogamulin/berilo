@@ -419,6 +419,80 @@ Two independent defects, either of which alone makes the feature unreachable:
 
 ---
 
+## Phase 4 — On-device translation (milestone `m4`)
+
+> Spec: [`docs/plans/2026-07-26-ondevice-translation.md`](plans/2026-07-26-ondevice-translation.md).
+> Source review: [`docs/reviews/2026-07-26-translator.md`](reviews/2026-07-26-translator.md) (20 findings).
+> **Sequencing decided by Niko 2026-07-26: Track A closes in full before Track B
+> starts.** Four review findings are port-blocking — fixing them first means the
+> Kotlin side ports a corrected algorithm once instead of inheriting known
+> defects and being fixed twice.
+>
+> Measured at €0 before scheduling: review findings 1 and 2 are **latent on this
+> corpus** (0 spine-document parse failures across 191 documents; 0 droppable
+> heading lines in either PDF). Finding 3 is therefore the real #1 — it is
+> *actively* poisoning experiments as a €0 no-op, and is a recurrence of
+> CLAUDE.md §9's own cache-key rule.
+
+### Track A — translator hardening
+
+#### A2 — Glossary in the cache key (3 pt) — *in progress*
+*Review findings 3 (HIGH), 9, 11. Promoted ahead of A1 on the €0 measurement above.*
+- [ ] The glossary's identity joins the translation cache key; `prompt_version` joins the glossary key; `_GLOSSARY_SYSTEM` and the sampling constants become versioned
+- [ ] Migration is crash-atomic across the DROP/RENAME boundary (`cache.py:190-202`)
+- [ ] T7's actual-cost query filters on `model` (`eval/runner.py:100-105`)
+- [ ] **Existing cache is not invalidated** — proven against a copy of the real ~10,936-row DB, rows byte-identical and still resolving
+- **Verify:** `cd translator && make test && make lint` green, plus: the same segment under two glossaries stores two distinct rows; a glossary-prompt change causes re-translation rather than a €0 no-op (the defect's exact scenario, proven fixed); migration survives a simulated kill between DROP and RENAME; non-invalidation proven on a real-cache copy with row counts reported; every guard mutation-proven to fail without its fix.
+
+#### A4 — Provider and cost correctness (2 pt) — *in progress*
+*Review findings 5, 6, 7, 18, 19, 20.*
+- [ ] Content-policy fallback spend appears in the CLI's reported total (§4 invariant: costs are visible)
+- [ ] An unknown model fails **before** the API is billed, not after (`pricing.py:43-48`)
+- [ ] Content-less and `stop_reason`-truncated responses fail loudly instead of returning `""` billed (§2 invariant: segment integrity)
+- [ ] Anthropic raises `ContentPolicyError`; `"o"` prefix no longer swallows typos; empty memo is cached
+- **Verify:** `make test && make lint` green, one test per finding, each mutation-proven; the fallback-spend test asserts the printed € equals `stats.cost_eur`; the unknown-model test asserts the provider was never invoked.
+
+#### A1 — Extraction robustness (3 pt) — *in progress*
+*Review findings 1, 2, 15, 16, 17. Hardening against future inputs — both headline findings measured latent on the current corpus.*
+- [ ] Tolerant XHTML parsing; an unrecoverable document is **loud**, not a log line (`epub.py:652-656`)
+- [ ] The digit-token drop rule stops eating `"1984"`/`"COVID-19"` on both drop paths (`pdf.py:739`, `:835`)
+- [ ] Findings 15/16/17 fixed, or explicitly deferred with a written argument
+- [ ] The leniency rule written down precisely enough to reimplement in Kotlin (B2 mirrors it)
+- **Verify:** `make test && make lint` green; **the four-book `book_hash` table in the spec §5 is byte-for-byte unchanged** (a moved hash stops the story — it means a paid re-translation and is Niko's call); a synthetic EPUB with a bare `&nbsp;`, unclosed `<br>` and stray `&` keeps its content; an unrecoverable document raises a named error; `"1984"` survives both drop paths; every guard mutation-proven.
+
+#### A3 — Language-bound styles (3 pt)
+*Review findings 4 (HIGH), 14, 10. Blocked on A2 — both edit `translate.py`.*
+- [ ] Styles declare their target languages; `revise_v1` is `sl`-only; a generic two-pass style covers other targets; a style/target mismatch is a loud refusal, not a silent contradiction
+- [ ] The resolution table expresses "default differs by execution context" — single-pass is the on-device default per Niko 2026-07-26, revise stays the workstation default
+- [ ] `[[n]]` markers anchored so a marker inside translated prose stops forcing needless strict retries (`translate.py:299-304`)
+- [ ] `context_pairs=0` disables rolling context instead of feeding the whole book (`translate.py:763-766`)
+- **Verify:** `make test && make lint` green; `--to de` does not run a Slovenian editor pass; a translation containing a literal `[[2]]` does not trigger a strict retry; `context_pairs=0` produces no context block; every guard mutation-proven.
+
+#### A5 — Experiment and eval edges (2 pt)
+*Review findings 8, 12, 13.*
+- [ ] `eur_per_1k_words` excludes the fixed memo cost its own docstring says it excludes (`experiment.py:1020`, `:552-568`)
+- [ ] Lead-in forbidden-hash guard is global, not per-run (`experiment.py:300`)
+- [ ] The extraction screen does not silently default an unparseable reply to "dirty" (`screen.py:206-208`)
+- **Verify:** `make test && make lint` green; a book-context variant's reported €/1k words excludes the memo; an identical paragraph across two runs is not served the control translation at €0; an unparseable screen reply raises rather than scoring; every guard mutation-proven.
+
+#### A6 — Re-score Rubric T after Track A (1 pt)
+- [ ] Re-score one book and confirm no regression against the 88.0 [86.2, 89.9] baseline (`rubric_scores.jsonl`, commit `9697a90`)
+- **Verify:** `berilo eval "data/examples/The Revenge of Geography.sl.epub" --sample 40 --seed 42` — T not regressed beyond the CI. **Expected €0** if `book_hash` held per A1's gate; if it did not, this needs Niko's go-ahead first.
+
+### Track B — on-device translation (Kotlin) — *not scheduled until Track A closes*
+
+Seven stories, 26 pt: **B1** core port + cross-language golden fixtures (3, gates
+the rest) · **B2** lenient EPUB reader (5) · **B3** EPUB writer (5) · **B4** Room
+v6 translation cache (3) · **B5** translate engine (5) · **B6** Kotlin provider
+hardening (2) · **B7** import → estimate → confirm → WorkManager → progress UI (3).
+
+Full text in the spec §4. Two decisions stay open and are not needed until then:
+**[OPEN-A]** Jsoup vs. hand-rolled tolerant parsing (decide at B2) and
+**[OPEN-D]** whether tablet output must be byte-identical to workstation output
+(decide at B3).
+
+---
+
 ## Backlog (post-m3, unscheduled)
 Reading stats · "Ask the book" (spoiler-safe) · vocabulary spaced repetition
 export · quote cards · additional source languages (DE, FR) · iOS.
