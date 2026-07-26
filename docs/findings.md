@@ -519,3 +519,96 @@
   resume rebuilds the same oversized prompt and aborts again. **Before promoting
   a silent degradation to an exception, find what was catching it and confirm
   the new type lands in the same handler.**
+
+- [2026-07-26] **The JVM XML parser drops an undeclared entity *silently* when a
+  DOCTYPE is present — and every real EPUB has one.** `&nbsp;` in content:
+  expat (Python) raises `undefined entity` with or without a DOCTYPE; Xerces
+  raises **only without** one. With a DOCTYPE naming an external subset the
+  parser is configured not to fetch, the well-formedness constraint becomes "not
+  checkable" and the entity simply vanishes — **no `fatalError`, no `error`, no
+  warning, no callback.** `Bare&nbsp;entity` parses to `Bareentity`. A
+  faithful-looking Kotlin port therefore loses one character per entity and
+  hashes every book differently from Python. Fix: `expandEntityReferences =
+  false`, splice references by hand, and treat a childless
+  `ENTITY_REFERENCE_NODE` as the parse failure Python reports. Generalization:
+  **when you disable a parser's ability to check something, find out whether it
+  then reports "cannot check" or says nothing at all.** Measured in both
+  runtimes (B2).
+- [2026-07-26] **Kotlin's `trim()` is not Java's `trim()`.**
+  `CharSequence.trim()` uses `Char.isWhitespace()` (Unicode, 28 code points);
+  `java.lang.String.trim()` cuts every char <= U+0020, including control
+  characters that are not whitespace. The U+0085 gap recorded above is correct
+  for **Kotlin** `trim()` and wrong for any Java call site — check which one you
+  are actually calling before reasoning about a hash.
+- [2026-07-26] **A mutation harness that strips the environment reports false
+  positives.** Running Gradle with `env={JAVA_HOME, ANDROID_HOME, PATH, HOME}`
+  and no `LANG` gives the test JVM an ASCII default charset, and
+  `java.nio.file.Path` then cannot be constructed for the Sandworm filename
+  (U+2019 in "Kremlin's") — `InvalidPathException`, which read as "the identity
+  gate is red" under six unrelated mutations. Cost ~40 min and three wrong
+  hypotheses. **Inherit `os.environ` in any subprocess harness whose verdict you
+  intend to report, and hand-check at least one CAUGHT verdict before trusting
+  the table.** Corollary: `data/` filenames carry non-ASCII, so anything reading
+  them needs a UTF-8 locale.
+- [2026-07-26] **The golden-fixture gate is necessary but not sufficient.**
+  `<sub>`, twice-referenced figures and astral-character heading-like paragraphs
+  do **not** occur in the four example books, so mutations of those rules are
+  invisible to the real-book gate; the synthetic structure tests are what cover
+  them. A corpus-derived gate proves agreement on what the corpus contains and
+  nothing more — pair it with synthetic cases for every rule the corpus does not
+  exercise.
+- [2026-07-26] **Leniency is latent from the Kotlin side too:** 0 recovered
+  documents across all four books, matching A1's Python measurement exactly.
+- [2026-07-26] **Generate ported string constants from the live source module;
+  do not transcribe and rely on a test to catch typos.** B1b produced
+  `python_prompts.json` by evaluating `berilo.prompts` and writing the bytes
+  out, rather than hand-copying 5 styles x 6 prompt fields into Kotlin. That
+  removes the transcription step instead of catching its errors afterwards —
+  verified byte-identical on all 5 styles, all fields, all digests and
+  `STRICT_MARKER_CLAUSE`. Reuse for any Python-to-Kotlin string-literal port.
+- [2026-07-26] **A NUL escape in a Kotlin/Java string literal can land as a raw
+  NUL byte, and Read/grep render it invisibly.** B1b caught this in its own
+  draft: the `promptDigest` separator (newline, NUL, newline) was written as a
+  literal NUL instead of the six-character `backslash-u-0-0-0-0` escape. A visual
+  diff will not show it — only `xxd` will. Verify control-character escapes with
+  a hex dump. (This bullet itself failed to commit on the first attempt for the
+  same reason: the tool rejected literal control characters in the command.)
+- [2026-07-26] **`git stash -u` / `git stash pop` gives a true pre-change test
+  baseline inside an agent worktree.** When a packet states an expected count,
+  stashing and re-running proves the baseline is the environment's rather than
+  the packet's — B4 confirmed 628 exactly (338 debug + 290 release) this way
+  before claiming 664. Cheaper and more honest than quoting a number measured on
+  another branch, which is how two agents reported non-comparable counts earlier
+  the same session.
+- [2026-07-26] **Worktree staleness recurred four times in one session** —
+  A4 two commits behind; A2 rebased onto `main` while the live work was on
+  `feat/lan-book-server`; B4 **~20 commits** behind, missing the very
+  `glossary_identity` and `Identity.kt` its spec depended on; B1b 24 commits
+  behind. All four were caught by the agent, none by the harness. Naming the
+  exact base SHA in the packet is necessary but not sufficient — the worktree is
+  created from wherever the branch happened to be. **The question is not "is the
+  branch behind" but "did any commit I am missing touch a file in my
+  footprint"**: check `git log --oneline -1 <file>` on both branches for every
+  file in scope.
+- [2026-07-26] **A blocked story may be only half-blocked.** The m4 spec drew
+  `A3 -> B1` and Track B was deferred whole; but B1's identity half was gated by
+  **A1** and only its prompt-registry half by A3, while B6 was gated only by
+  **A4**. Once A1 and A4 landed, two Kotlin stories were runnable while still
+  being treated as deferred. **When a dependency edge is drawn story-to-story,
+  check whether it is really edge-to-half; a story whose deliverables have
+  different gates should be split in the plan, not deferred whole.**
+- [2026-07-26] **The reviewer-agent lane failed completely — six dispatches,
+  zero verdicts.** `plan-critic` (x2, including an explicit re-request in a fixed
+  output format), `review-A4` (x3), `review-A2` (x1) each returned
+  `idle_notification` with `idleReason: "available"` and no findings, leaving
+  `/orchestrate`'s Phase-1 critic gate and Phase-4 pre-merge review unserved for
+  the whole milestone. **Every defect found this session came from the
+  Supervisor checking claims directly** — A4's finding-7 fix breaking the retry
+  ladder, and A2's order-sensitive glossary identity. Of four agent claims
+  verified independently, **two were wrong, and neither appeared in the agent's
+  own self-report.** Substitutes that worked, ~1 tool call each: re-run the
+  implementer's mutation proofs rather than reading them; re-execute the headline
+  measurement against real data (the EUR0 cache-copy proof, the six-book hash
+  gate); answer empirical questions with a probe, not an argument. **If a critic
+  or reviewer idles twice, stop polling and do the attack yourself — budget one
+  Supervisor tool call per load-bearing claim.**

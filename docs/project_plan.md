@@ -565,10 +565,20 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **Verify run 2026-07-26 on merged `main`:** **712 JVM tests** (380 debug incl. 26 skipped screenshot + 332 release), 0 failures, from a 628 baseline. Lint clean. **8 mutations, 8 caught** — including (g), folding `targetLangs` into the digest payload, which mirrors A3's own M8 and confirms `targetLangs` stays outside cache identity on this side too. **€0.**
 - **Byte-identity Supervisor-verified** against the live Python module: all 5 styles, all 6 prompt fields each, all `promptDigest`s and `STRICT_MARKER_CLAUSE` — every one identical. `baseline_v1` = `b6199d788ddac339` and `revise_v1` = `66f0704615450652` agree with the digests A3 independently reported from its cache non-invalidation proof, cross-checking both stories.
 
+#### B2 — Lenient Kotlin EPUB reader (5 pt) ✅
+*The hardest story of m4. Makes the §3.2 invariant true on **real books**, not just synthetic ones.*
+- [x] `normalize_epub` reimplemented in Kotlin: container→OPF, namespace-insensitive matching, chapter-title ladder, the segment-less-document rule, `_is_heading_like` retyping, inline subset, book-global `position`, image anchoring and dedup
+- [x] **[OPEN-A] resolved against Jsoup** — identity-exactness requires mirroring A1's exact R0–R3 sequence; a different tolerant parser recovers *differently*, producing different segments and a different `book_hash`. Hand-rolled, no new dependency
+- [x] Strict parse first, **asserted by mechanism**: `XhtmlParser` takes the repair pass as a constructor parameter, and a whole well-formed book is read through a parser whose repair *throws on invocation*. Output comparison cannot work here — the repairs are near-idempotent
+- [x] Python behaviours reproduced **deliberately, not fixed**: `<br/>` unwraps with no separating space (A9) and continuation documents increment `chapter_index` (A8). Mutation M7 — adding the A9 "fix" — is caught by the identity gate, which is exactly why those are separate stories
+- **Verify:** `./gradlew test assembleDebug` green, no regression on 628; all four books reproduce the §5 table with ids recomputed; a synthetic EPUB with `&nbsp;`, unclosed `<br>` and stray `&` recovers intact; an unrecoverable document raises naming itself; a well-formed document never reaches repair; real-book tests skip cleanly without `data/`; identity-critical paths mutation-proven.
+- **Verify run 2026-07-26 on merged `main`:** **692 JVM tests** (628 baseline), 0 failures; Python unchanged at 428. **Supervisor-verified in both directions** — with `data/examples` present the identity gate runs **2 tests, 0 skipped, 0 failures**, so the reader genuinely reproduced all four hashes; without the books it **skips 2, 0 failures**, so CI stays green. **14 mutations, 13 caught, 1 proven *equivalent*** rather than papered over. **€0.**
+- **A defect that would have silently broken the whole port.** The JVM XML parser **drops an undeclared entity with no error at all** when a DOCTYPE is present — expat raises either way, Xerces only *without* one. With a DOCTYPE naming an external subset the parser won't fetch, the well-formedness constraint becomes "not checkable" and the entity vanishes: no `fatalError`, no warning, no callback. `Bare&nbsp;entity` → `Bareentity`. **Every real EPUB has a DOCTYPE**, so a faithful-looking port loses a character per entity and hashes every book differently. Fixed with `expandEntityReferences=false` plus hand splicing.
+- **Device residual:** verified against the JDK's Xerces; the Boox runs Android's XML parser, so the entity-reference behaviour needs one on-device re-confirmation.
+
 #### Remaining (3 stories, 13 pt)
-**B2** lenient EPUB reader (5, *in progress*) · **B3** EPUB writer (5) ·
-**B5** translate engine (5) · **B7** import → estimate → confirm → WorkManager →
-progress UI (3).
+**B3** EPUB writer (5) · **B5** translate engine (5) · **B7** import → estimate →
+confirm → WorkManager → progress UI (3).
 
 Full text in the spec §4. Two decisions stay open: **[OPEN-A]** Jsoup vs.
 hand-rolled tolerant parsing (decide at B2) and **[OPEN-D]** whether tablet
