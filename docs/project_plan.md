@@ -547,10 +547,28 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **The gate recomputes rather than compares:** `assertMatchesFixture` takes a `Book` and derives every id from `(chapterIndex, position, text)`, so ids copied from elsewhere cannot pass. `segment_hash` is in the fixture deliberately — it is the actual translation-cache key, so B2/B4 can prove cache-row agreement on real text without a second fixture; `data_sha1` does the same for B3.
 - **Reported, not fixed:** `Book.language` is raw OPF soup across the corpus (`en-US`, `en`, `eng`, `EN-GB`). A3's `normalize_lang` handles this on the Python side; **B7 must use the same rule** or Ember Spark's `EN-GB` and Sandworm's `eng` will refuse against a `--to`-derived tag. Also: `android/` has **no ktlint or spotless** — "lint clean" for Kotlin here means the compiler plus Android Lint only.
 
-#### Remaining (5 stories, 21 pt) — *not scheduled*
-**B1b** prompt registry (blocked on A3) · **B2** lenient EPUB reader (5) ·
-**B3** EPUB writer (5) · **B4** Room v6 translation cache (3) · **B5** translate
-engine (5) · **B7** import → estimate → confirm → WorkManager → progress UI (3).
+#### B4 — Room v6 translation cache (3 pt) ✅
+*Ports A2's **corrected** design — the glossary is in the key from day one, not migrated in later.*
+- [x] Translations PK is the same six columns as `cache.py`: `(bookHash, segmentHash, model, lang, promptVersion, glossaryHash)`; glossaries and calls tables alongside
+- [x] `glossaryIdentity` derived from the rendered block, terms **sorted by source term** — the exact defect A2 shipped and had to fix, so B4 carries a mutation that unsorts the renderer
+- [x] `storeBatch` is `@Transaction` — the resumability guarantee, mirroring `translate.py`'s per-batch commit so process death costs at most one batch
+- **Verify:** `./gradlew test assembleDebug` green with no regression on 628; a v5 DB opens as v6 with every pre-existing row intact; the same segment under two glossaries stores two rows; `glossaryIdentity` is insertion-order independent and `null`/empty share an identity; cross-language digest vectors match Python; batch store atomic; every guard mutation-proven.
+- **Verify run 2026-07-26 on merged `main`** (merge `0a267bc`): **664 JVM tests** (356 debug + 308 release), 0 failures, from a 628 baseline the agent confirmed by stashing. Lint clean. **€0.**
+- **Cross-language agreement Supervisor-verified** by recomputing all four vectors in Python: ASCII `8d8a2f16…`, non-ASCII šumniki `6f83e5a0…`, single-term `daf59ea9…`, empty/null `da39a3ee…` (sha1 of `""`). Both languages sort by code point, so `Ljubljana < Čatež < Šiška < Žale` agrees across the boundary.
+- **The migration is purely additive** — three `CREATE TABLE`, no `ALTER`, no backfill, because no on-device translation ever existed. Asserted rather than assumed: the test hand-builds the v5 schema per the `MIGRATION_4_5` precedent, since `exportSchema=false` leaves no schema JSON to diff. Destructive migration deliberately **not** extended to v6 — a cache holding paid work must never be dropped.
+
+#### B1b — Kotlin prompt registry and style resolution (2 pt) ✅
+*Mirrors A3's contract. The reason review finding 4 was ranked port-blocking: the CLI masks it because Niko only targets `sl`, but the app exposes target language as a **free-text field**.*
+- [x] `normalizeLang`, the `(tier × language)` table, `ensureSupports`, `resolveStyle` reproduce A3's rule exactly. The app is always `DEVICE` context; B7's quality toggle overrides the **tier** and never falsifies the context
+- [x] Prompt strings byte-identical to Python's, with the vector **generated from the live `berilo.prompts` module** rather than hand-transcribed — removing the transcription step instead of relying on a test to catch a typo afterwards
+- **Verify:** `./gradlew test assembleDebug` green, no regression on 628; every style's prompts and `promptDigest` byte-identical to Python; `normalizeLang` matches A3 on six cases; the five named resolution scenarios; an explicit mismatch throws naming style/languages/target/suggestion; `EN-GB`/`eng` do not spuriously refuse; every guard mutation-proven.
+- **Verify run 2026-07-26 on merged `main`:** **712 JVM tests** (380 debug incl. 26 skipped screenshot + 332 release), 0 failures, from a 628 baseline. Lint clean. **8 mutations, 8 caught** — including (g), folding `targetLangs` into the digest payload, which mirrors A3's own M8 and confirms `targetLangs` stays outside cache identity on this side too. **€0.**
+- **Byte-identity Supervisor-verified** against the live Python module: all 5 styles, all 6 prompt fields each, all `promptDigest`s and `STRICT_MARKER_CLAUSE` — every one identical. `baseline_v1` = `b6199d788ddac339` and `revise_v1` = `66f0704615450652` agree with the digests A3 independently reported from its cache non-invalidation proof, cross-checking both stories.
+
+#### Remaining (3 stories, 13 pt)
+**B2** lenient EPUB reader (5, *in progress*) · **B3** EPUB writer (5) ·
+**B5** translate engine (5) · **B7** import → estimate → confirm → WorkManager →
+progress UI (3).
 
 Full text in the spec §4. Two decisions stay open: **[OPEN-A]** Jsoup vs.
 hand-rolled tolerant parsing (decide at B2) and **[OPEN-D]** whether tablet
