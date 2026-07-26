@@ -82,7 +82,28 @@ class EmptyCompletionError(Exception):
     no text block at all. Segment integrity (CLAUDE.md §2) requires this be
     loud; a silently empty, billed translation must never be cached or
     written into the output book.
+
+    A caller that can degrade to a smaller unit of work (a stricter retry,
+    a per-segment fallback) should catch this rather than let it abort the
+    whole run — only a caller with no smaller unit left should let it
+    propagate. ``result`` carries the (unusable-text) :class:`CompletionResult`
+    the provider had already billed before raising, so a degrading caller can
+    still fold its cost into run accounting instead of losing it silently.
+
+    Attributes:
+        result: The billed, unusable-text completion, if the provider could
+            construct one before raising; ``None`` otherwise.
     """
+
+    def __init__(self, message: str, *, result: CompletionResult | None = None) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Human-readable description of the failure.
+            result: The billed completion whose text was unusable, if known.
+        """
+        super().__init__(message)
+        self.result = result
 
 
 class TruncatedCompletionError(Exception):
@@ -93,4 +114,23 @@ class TruncatedCompletionError(Exception):
     Anthropic ``stop_reason="max_tokens"``) — indistinguishable from a
     complete response without checking that field. A partial batch
     translation must never be trusted silently.
+
+    Same degrade-vs-propagate contract as :class:`EmptyCompletionError`: a
+    caller with a smaller retry unit available should catch and degrade;
+    a caller with none left (single-segment translation) should let it
+    surface as a loud failure.
+
+    Attributes:
+        result: The billed, partial-text completion, if the provider could
+            construct one before raising; ``None`` otherwise.
     """
+
+    def __init__(self, message: str, *, result: CompletionResult | None = None) -> None:
+        """Initialize the error.
+
+        Args:
+            message: Human-readable description of the failure.
+            result: The billed, truncated completion, if known.
+        """
+        super().__init__(message)
+        self.result = result

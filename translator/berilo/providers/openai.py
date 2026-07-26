@@ -141,22 +141,29 @@ class OpenAIClient(LLMClient):
         text = choice.message.content or ""
         input_tokens = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
-        if choice.finish_reason == "length":
-            raise TruncatedCompletionError(
-                f"OpenAI truncated the completion for model {self.model} "
-                f"(finish_reason='length', {output_tokens} output tokens billed); "
-                "the response is incomplete. Increase max_tokens or reduce the batch size."
-            )
-        if not text:
-            raise EmptyCompletionError(
-                f"OpenAI returned no completion text for model {self.model} "
-                f"(finish_reason={choice.finish_reason!r}, {output_tokens} output "
-                "tokens billed)."
-            )
-        return CompletionResult(
+        # Computed before the truncation/emptiness checks below so a caller
+        # that degrades instead of propagating (see EmptyCompletionError /
+        # TruncatedCompletionError) can still fold this call's real, billed
+        # cost into its accounting via the exception's `result` attribute.
+        billed_result = CompletionResult(
             text=text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_eur=cost_eur(self.model, input_tokens, output_tokens),
             model=self.model,
         )
+        if choice.finish_reason == "length":
+            raise TruncatedCompletionError(
+                f"OpenAI truncated the completion for model {self.model} "
+                f"(finish_reason='length', {output_tokens} output tokens billed); "
+                "the response is incomplete. Increase max_tokens or reduce the batch size.",
+                result=billed_result,
+            )
+        if not text:
+            raise EmptyCompletionError(
+                f"OpenAI returned no completion text for model {self.model} "
+                f"(finish_reason={choice.finish_reason!r}, {output_tokens} output "
+                "tokens billed).",
+                result=billed_result,
+            )
+        return billed_result

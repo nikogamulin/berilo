@@ -138,29 +138,36 @@ class AnthropicClient(LLMClient):
                 "content-policy grounds (stop_reason='refusal'); route this "
                 "batch to a fallback provider."
             )
-        if response.stop_reason == "max_tokens":
-            raise TruncatedCompletionError(
-                f"Anthropic truncated the completion for model {self.model} "
-                f"(stop_reason='max_tokens', max_tokens={max_tokens}); the "
-                "response is incomplete despite being billed. Increase "
-                "max_tokens or reduce the batch size."
-            )
 
         text = "".join(
             block.text for block in response.content if getattr(block, "type", None) == "text"
         )
         input_tokens = response.usage.input_tokens
         output_tokens = response.usage.output_tokens
-        if not text:
-            raise EmptyCompletionError(
-                f"Anthropic returned no completion text for model {self.model} "
-                f"(stop_reason={response.stop_reason!r}, {output_tokens} output "
-                "tokens billed)."
-            )
-        return CompletionResult(
+        # Computed before the truncation/emptiness checks below so a caller
+        # that degrades instead of propagating (see EmptyCompletionError /
+        # TruncatedCompletionError) can still fold this call's real, billed
+        # cost into its accounting via the exception's `result` attribute.
+        billed_result = CompletionResult(
             text=text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_eur=cost_eur(self.model, input_tokens, output_tokens),
             model=self.model,
         )
+        if response.stop_reason == "max_tokens":
+            raise TruncatedCompletionError(
+                f"Anthropic truncated the completion for model {self.model} "
+                f"(stop_reason='max_tokens', max_tokens={max_tokens}); the "
+                "response is incomplete despite being billed. Increase "
+                "max_tokens or reduce the batch size.",
+                result=billed_result,
+            )
+        if not text:
+            raise EmptyCompletionError(
+                f"Anthropic returned no completion text for model {self.model} "
+                f"(stop_reason={response.stop_reason!r}, {output_tokens} output "
+                "tokens billed).",
+                result=billed_result,
+            )
+        return billed_result

@@ -21,7 +21,11 @@ from berilo.cli import cli
 from berilo.glossary import Glossary, build_glossary
 from berilo.models import Book, ImageResource, Segment, SegmentType, make_segment_id
 from berilo.prompts import BASELINE, get_style, style_names
-from berilo.providers.base import CompletionResult, LLMClient
+from berilo.providers.base import (
+    CompletionResult,
+    LLMClient,
+    TruncatedCompletionError,
+)
 from berilo.providers.pricing import cost_eur
 from berilo.translate import (
     REASONING_TOKENS_PER_CALL,
@@ -189,6 +193,70 @@ class _EmptyBookContextClient(FakeLLMClient):
 
     def _book_context_response(self) -> str:
         return ""
+
+
+class _TruncatingBookContextClient(FakeLLMClient):
+    """The book-context call is billed but truncated; everything else is normal.
+
+    Same regression class as ``_TruncatingClient``/``_ReviseTruncatingClient``:
+    the once-per-book memo call has no smaller unit to retry into, but — like
+    a genuinely blank memo reply — it is a best-effort pass, not a
+    correctness requirement, so it must degrade to "no memo" rather than
+    aborting the whole run.
+    """
+
+    def complete(self, prompt=None, messages=None, *, max_tokens=None, system=None):
+        if self._kind(prompt, system) == "book_context":
+            raise TruncatedCompletionError(
+                "truncated mid-generation",
+                result=CompletionResult(
+                    text="",
+                    input_tokens=50,
+                    output_tokens=999,
+                    cost_eur=cost_eur(self.model, 50, 999),
+                    model=self.model,
+                ),
+            )
+        return super().complete(prompt, messages, max_tokens=max_tokens, system=system)
+
+
+class _TruncatingClient(FakeLLMClient):
+    """Raises TruncatedCompletionError on the first ``fail_batch_calls``
+    batch-level ([[n]] numbered prompt) calls, then answers normally.
+
+    Optionally also truncates every per-segment fallback call
+    (``fail_single``), to drive the ladder's very last rung. Mirrors
+    ``MismatchClient``'s shape but for review finding 7's guard (a provider
+    billing a call while returning no usable text) rather than a bad mapping.
+    """
+
+    def __init__(self, *, fail_batch_calls: int = 0, fail_single: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fail_batch_calls = fail_batch_calls
+        self.fail_single = fail_single
+        self._batch_attempts = 0
+
+    def _truncated(self) -> TruncatedCompletionError:
+        return TruncatedCompletionError(
+            "truncated mid-generation",
+            result=CompletionResult(
+                text="",
+                input_tokens=50,
+                output_tokens=999,
+                cost_eur=cost_eur(self.model, 50, 999),
+                model=self.model,
+            ),
+        )
+
+    def complete(self, prompt=None, messages=None, *, max_tokens=None, system=None):
+        kind = self._kind(prompt, system)
+        if kind == "batch":
+            self._batch_attempts += 1
+            if self._batch_attempts <= self.fail_batch_calls:
+                raise self._truncated()
+        elif kind == "single" and self.fail_single:
+            raise self._truncated()
+        return super().complete(prompt, messages, max_tokens=max_tokens, system=system)
 
 
 class _KillSwitch(Exception):
@@ -403,6 +471,63 @@ def test_persistent_failure_raises_translation_error_naming_segment() -> None:
     message = str(excinfo.value)
     assert "Test Book" in message
     assert "chapter 0" in message
+
+
+# --------------------------------------------------------------------------
+# review finding 7 regression: a billed-but-truncated/empty response must
+# degrade through the SAME retry ladder as a bad mapping, not abort the run.
+# --------------------------------------------------------------------------
+
+
+def test_batch_truncation_on_first_attempt_recovers_via_strict_retry() -> None:
+    """A truncated first batch response degrades to the strict-retry rung.
+
+    Regression test for the finding-7 fix's own bug: EmptyCompletionError/
+    TruncatedCompletionError used to propagate straight out of
+    ``client.complete()`` with no handler, aborting the whole book instead
+    of being treated like a bad mapping.
+    """
+    book = _paragraph_book(2)
+    client = _TruncatingClient(fail_batch_calls=1)
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2
+    )
+
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    assert not any(
+        call["kind"] == "single" for call in client.calls
+    ), "the strict retry must have succeeded without needing per-segment fallback"
+
+
+def test_batch_truncation_on_both_attempts_falls_back_to_per_segment() -> None:
+    """A batch that truncates on both batch-level attempts falls through to
+    the per-segment fallback and completes the book, exactly like a batch
+    that persistently mismatches (test_batch_mismatch_retries_then_falls_back_
+    per_segment) — truncation must never be a smaller-granularity dead end.
+    """
+    book = _paragraph_book(2)
+    client = _TruncatingClient(fail_batch_calls=2)
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2
+    )
+
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    single_calls = [call for call in client.calls if call["kind"] == "single"]
+    assert len(single_calls) == 2, "per-segment fallback must have run for both segments"
+
+
+def test_single_segment_truncation_still_raises_translation_error() -> None:
+    """The finding-7 guarantee survives at the level with no smaller retry
+    unit: once the ladder reaches per-segment translation, a truncated/empty
+    response there is a loud TranslationError, same as a plain empty reply.
+    """
+    book = _paragraph_book(1)
+    client = _TruncatingClient(fail_batch_calls=2, fail_single=True)
+
+    with pytest.raises(TranslationError, match="Empty translation"):
+        translate_book(book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=1)
 
 
 def test_parse_numbered_response_rejects_bad_mappings() -> None:
@@ -631,6 +756,29 @@ class _ReviseMismatchClient(FakeLLMClient):
         return self._result("\n".join(parts))
 
 
+class _ReviseTruncatingClient(FakeLLMClient):
+    """Translates fine but every editor-pass call is billed and truncated.
+
+    Same regression class as ``_TruncatingClient`` (review finding 7's
+    guard escaping unhandled), applied to the revise pass rather than the
+    batch-translate ladder.
+    """
+
+    def complete(self, prompt=None, messages=None, *, max_tokens=None, system=None):
+        if self._kind(prompt, system) == "revise":
+            raise TruncatedCompletionError(
+                "truncated mid-generation",
+                result=CompletionResult(
+                    text="",
+                    input_tokens=50,
+                    output_tokens=999,
+                    cost_eur=cost_eur(self.model, 50, 999),
+                    model=self.model,
+                ),
+            )
+        return super().complete(prompt, messages, max_tokens=max_tokens, system=system)
+
+
 def test_default_style_is_baseline_and_sends_the_pre_refactor_prompt() -> None:
     """With no style argument the engine sends baseline_v1's system prompts."""
     book = _paragraph_book(3)
@@ -792,6 +940,35 @@ def test_revise_failure_keeps_the_draft_and_is_counted() -> None:
     assert seen[-1].revision_failures == 1
 
 
+def test_revise_pass_truncation_keeps_the_unrevised_translation_instead_of_aborting() -> None:
+    """review finding 7 regression, same class as the batch ladder: a
+    truncated/empty revise-pass response must degrade to 'keep the
+    un-revised translation' (exactly like a bad-mapping revise reply, see
+    ``test_revise_failure_keeps_the_draft_and_is_counted`` above), not
+    escape ``_revise_batch`` and abort the book. revise_v1 is the DEFAULT
+    style, so this path is not an edge case.
+    """
+    book = _paragraph_book(2)
+    style = get_style("revise_v1")
+    client = _ReviseTruncatingClient()
+    seen: list[TranslationStats] = []
+
+    result = translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=2,
+        style=style,
+        on_progress=seen.append,
+    )
+
+    assert len(result.segments) == 2
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    assert not any(seg.text.startswith(_REVISED_PREFIX) for seg in result.segments)
+    assert seen[-1].revision_failures == 1
+
+
 def test_book_context_memo_is_derived_once_and_injected_everywhere() -> None:
     """book_context_v1 derives one memo, injects it in every prompt, caches it."""
     book = _paragraph_book(6)
@@ -851,6 +1028,26 @@ def test_empty_book_context_memo_is_cached_and_not_rebilled_on_resume() -> None:
     resumed = _EmptyBookContextClient()
     translate_book(book, client=resumed, target_lang="sl", cache=cache, batch_size=2, style=style)
     assert resumed.book_context_calls == 0, "resumed run must not re-derive a cached empty memo"
+
+
+def test_truncated_book_context_memo_degrades_to_no_memo_instead_of_aborting() -> None:
+    """review finding 7 regression, same class as the batch ladder and the
+    revise pass: a billed-but-truncated book-context call must degrade to
+    "translate without a memo" — the pre-existing behavior for a genuinely
+    blank reply — rather than let TruncatedCompletionError escape
+    ``build_book_context`` and abort the whole book.
+    """
+    book = _paragraph_book(2)
+    style = get_style("book_context_v1")
+    client = _TruncatingBookContextClient()
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2, style=style
+    )
+
+    assert len(result.segments) == 2
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    assert all("BOOK STYLE MEMO" not in prompt for prompt in client.batch_prompts)
 
 
 def test_baseline_style_asks_for_no_extra_passes() -> None:
