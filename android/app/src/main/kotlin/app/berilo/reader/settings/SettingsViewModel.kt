@@ -3,11 +3,10 @@ package app.berilo.reader.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import app.berilo.reader.llm.AnthropicClient
 import app.berilo.reader.llm.LlmClient
 import app.berilo.reader.llm.LlmError
 import app.berilo.reader.llm.LlmResult
-import app.berilo.reader.llm.OpenAiClient
+import app.berilo.reader.llm.createLlmClient
 import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,35 +43,57 @@ data class SettingsUiState(
     val anthropicKey: String = "",
     val model: String = DEFAULT_MODEL,
     val targetLang: String = DEFAULT_TARGET_LANG,
+    val translationModel: String? = null,
     val openaiTestState: KeyTestState = KeyTestState.Idle,
     val anthropicTestState: KeyTestState = KeyTestState.Idle,
-)
+) {
+    /** Model a whole-book translation would bill against — the override, else [model]. */
+    val resolvedTranslationModel: String
+        get() = translationModel ?: model
+}
 
 /**
  * Settings screen view model. Persists [LlmSettings] via [SettingsRepository] on every
  * field change (no explicit Save button — matches the "one screen, no chrome" guideline
  * in `docs/design_guidelines.md`) and drives the per-provider "Test key" doctor-style
- * smoke call through injectable [LlmClient] factories, so tests exercise the same
+ * smoke call through an injectable [LlmClient] factory, so tests exercise the same
  * success/failure branching without ever hitting the network.
+ *
+ * **The factory is `(LlmSettings) -> LlmClient`, defaulted to [createLlmClient], not a
+ * per-provider `(apiKey) -> LlmClient`.** Constructing [app.berilo.reader.llm.OpenAiClient] /
+ * [app.berilo.reader.llm.AnthropicClient] directly here bypassed [createLlmClient]'s pricing
+ * pre-flight, which is the guard that makes a model with no pricing entry fail *before* a call
+ * is billed rather than after (review finding 6). It was harmless only because the two key-test
+ * models are hardcoded constants; routing through the factory closes the second construction
+ * site so the guard has no bypass at all (B7).
  */
 class SettingsViewModel(
     private val repository: SettingsRepository,
-    private val openAiClientFactory: (apiKey: String) -> LlmClient = { OpenAiClient(it, KEY_TEST_OPENAI_MODEL) },
-    private val anthropicClientFactory: (apiKey: String) -> LlmClient = { AnthropicClient(it, KEY_TEST_ANTHROPIC_MODEL) },
+    private val clientFactory: (LlmSettings) -> LlmClient = ::createLlmClient,
 ) : ViewModel() {
+
+    /**
+     * The last full [LlmSettings] written or loaded.
+     *
+     * Held so [persistCurrentState] can `copy()` the edited fields onto it instead of building
+     * a fresh object from the UI state. A fresh construction silently defaults every field the
+     * screen does not carry, which is exactly how `dictionaryModel` and `interpretationModel`
+     * were erased on every keystroke (fixed in B7). Keeping the whole object means a field
+     * added to [LlmSettings] later survives by construction rather than by remembering.
+     */
+    private var persisted: LlmSettings = repository.load()
 
     private val _uiState = MutableStateFlow(loadInitialState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
-    private fun loadInitialState(): SettingsUiState {
-        val settings = repository.load()
-        return SettingsUiState(
-            openaiKey = settings.openaiKey.orEmpty(),
-            anthropicKey = settings.anthropicKey.orEmpty(),
-            model = settings.model,
-            targetLang = settings.targetLang,
+    private fun loadInitialState(): SettingsUiState =
+        SettingsUiState(
+            openaiKey = persisted.openaiKey.orEmpty(),
+            anthropicKey = persisted.anthropicKey.orEmpty(),
+            model = persisted.model,
+            targetLang = persisted.targetLang,
+            translationModel = persisted.translationModel,
         )
-    }
 
     fun onOpenAiKeyChanged(value: String) =
         updateAndPersist { it.copy(openaiKey = value, openaiTestState = KeyTestState.Idle) }
@@ -83,6 +104,13 @@ class SettingsViewModel(
     fun onModelChanged(model: String) = updateAndPersist { it.copy(model = model) }
 
     fun onTargetLangChanged(targetLang: String) = updateAndPersist { it.copy(targetLang = targetLang) }
+
+    /**
+     * Sets the whole-book translation model override (B7).
+     *
+     * @param model The override, or `null` to fall back to [SettingsUiState.model].
+     */
+    fun onTranslationModelChanged(model: String?) = updateAndPersist { it.copy(translationModel = model) }
 
     /** Runs the doctor-style one-sentence test call for [provider]'s currently-entered key. */
     fun testKey(provider: LlmProvider) {
@@ -96,7 +124,7 @@ class SettingsViewModel(
         viewModelScope.launch {
             val outcome =
                 runCatching {
-                    val client = if (provider == LlmProvider.OPENAI) openAiClientFactory(apiKey) else anthropicClientFactory(apiKey)
+                    val client = clientFactory(keyTestSettings(provider, apiKey))
                     client.complete(
                         prompt =
                             "Translate the following sentence into ${state.targetLang}. " +
@@ -106,6 +134,19 @@ class SettingsViewModel(
             setTestState(provider, outcome.toKeyTestState())
         }
     }
+
+    /**
+     * Minimal [LlmSettings] describing one provider's key-test call.
+     *
+     * Carries only the key being tested and that provider's fixed smoke model, so
+     * [createLlmClient] routes by prefix to the intended vendor and pre-flights its pricing —
+     * never the user's saved [SettingsUiState.model], which may belong to the other provider.
+     */
+    private fun keyTestSettings(provider: LlmProvider, apiKey: String): LlmSettings =
+        when (provider) {
+            LlmProvider.OPENAI -> LlmSettings(openaiKey = apiKey, model = KEY_TEST_OPENAI_MODEL)
+            LlmProvider.ANTHROPIC -> LlmSettings(anthropicKey = apiKey, model = KEY_TEST_ANTHROPIC_MODEL)
+        }
 
     private fun Result<LlmResult>.toKeyTestState(): KeyTestState =
         fold(
@@ -129,16 +170,23 @@ class SettingsViewModel(
         persistCurrentState()
     }
 
+    /**
+     * Writes the edited fields onto [persisted] and saves the whole object.
+     *
+     * `copy()`, never `LlmSettings(...)`: see [persisted]. Every field this screen does not
+     * edit rides along untouched.
+     */
     private fun persistCurrentState() {
         val state = _uiState.value
-        repository.save(
-            LlmSettings(
+        persisted =
+            persisted.copy(
                 openaiKey = state.openaiKey.ifBlank { null },
                 anthropicKey = state.anthropicKey.ifBlank { null },
                 model = state.model,
                 targetLang = state.targetLang,
-            ),
-        )
+                translationModel = state.translationModel,
+            )
+        repository.save(persisted)
     }
 
     class Factory(private val repository: SettingsRepository) : ViewModelProvider.Factory {

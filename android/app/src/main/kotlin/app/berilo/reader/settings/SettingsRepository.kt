@@ -6,6 +6,7 @@ private const val KEY_MODEL = "model"
 private const val KEY_TARGET_LANG = "target_lang"
 private const val KEY_DICTIONARY_MODEL = "dictionary_model"
 private const val KEY_INTERPRETATION_MODEL = "interpretation_model"
+private const val KEY_TRANSLATION_MODEL = "translation_model"
 
 /**
  * Reads/writes [LlmSettings] to a [KeyValueStore], one field per preference key rather
@@ -24,6 +25,7 @@ class SettingsRepository(private val store: KeyValueStore) {
             targetLang = store.getString(KEY_TARGET_LANG) ?: DEFAULT_TARGET_LANG,
             dictionaryModel = store.getString(KEY_DICTIONARY_MODEL),
             interpretationModel = store.getString(KEY_INTERPRETATION_MODEL),
+            translationModel = store.getString(KEY_TRANSLATION_MODEL),
         )
 
     /** Persists [settings], one key per field. */
@@ -34,5 +36,6 @@ class SettingsRepository(private val store: KeyValueStore) {
         store.putString(KEY_TARGET_LANG, settings.targetLang)
         store.putString(KEY_DICTIONARY_MODEL, settings.dictionaryModel)
         store.putString(KEY_INTERPRETATION_MODEL, settings.interpretationModel)
+        store.putString(KEY_TRANSLATION_MODEL, settings.translationModel)
     }
 }

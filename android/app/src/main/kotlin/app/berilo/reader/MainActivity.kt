@@ -23,6 +23,7 @@ import app.berilo.reader.ui.library.LibraryEvent
 import app.berilo.reader.ui.library.LibraryScreen
 import app.berilo.reader.ui.library.LibraryViewModel
 import app.berilo.reader.ui.theme.BeriloTheme
+import app.berilo.reader.ui.translate.TranslateActivity
 
 private const val EPUB_MEDIA_TYPE = "application/epub+zip"
 
@@ -81,6 +82,7 @@ class MainActivity : ComponentActivity() {
                     onDeleteBook = viewModel::deleteBook,
                     onOpenSettings = ::openSettings,
                     snackbarHostState = snackbarHostState,
+                    onOpenTranslate = ::openTranslate,
                 )
             }
         }
@@ -108,5 +110,10 @@ class MainActivity : ComponentActivity() {
 
     private fun openSettings() {
         startActivity(SettingsActivity.newIntent(this))
+    }
+
+    /** B7's entry point: the library top bar is the one reachable path to a translation run. */
+    private fun openTranslate() {
+        startActivity(TranslateActivity.newIntent(this))
     }
 }

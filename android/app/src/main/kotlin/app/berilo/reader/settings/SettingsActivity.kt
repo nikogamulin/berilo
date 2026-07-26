@@ -35,6 +35,7 @@ class SettingsActivity : ComponentActivity() {
                     onTestAnthropicKey = { viewModel.testKey(LlmProvider.ANTHROPIC) },
                     onBack = { finish() },
                     onOpenAccount = { startActivity(AccountActivity.newIntent(this)) },
+                    onTranslationModelChanged = viewModel::onTranslationModelChanged,
                 )
             }
         }

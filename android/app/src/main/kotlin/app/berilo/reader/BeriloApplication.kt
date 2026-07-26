@@ -20,6 +20,12 @@ import app.berilo.reader.sync.SyncEngine
 import app.berilo.reader.sync.SyncManager
 import app.berilo.reader.sync.auth.AuthGateway
 import app.berilo.reader.sync.auth.ClerkAuthGateway
+import app.berilo.reader.translate.engine.RoomTranslationCache
+import app.berilo.reader.translate.job.BookTranslationJob
+import app.berilo.reader.translate.job.SourceBookImporter
+import app.berilo.reader.translate.job.TranslationPlanner
+import app.berilo.reader.translate.job.TranslationRunner
+import app.berilo.reader.translate.job.WorkManagerTranslationRunner
 import java.io.File
 
 /**
@@ -97,4 +103,28 @@ class AppContainer(app: Application) {
         )
 
     val syncManager = SyncManager(authGateway, syncEngine)
+
+    // --- B7: on-device book translation -----------------------------------------------
+    // Source EPUBs live apart from the library: `sources/` holds untranslated inputs with no
+    // BookEntity, `translate-work/` is scratch for the assembled output. Only the *translated*
+    // EPUB reaches `books/`, through the same BookImporter a CLI-produced file goes through.
+
+    private val sourcesDir = File(app.filesDir, "sources")
+    private val translateWorkDir = File(app.filesDir, "translate-work")
+
+    val sourceBookImporter = SourceBookImporter(sourcesDir)
+
+    val translationPlanner = TranslationPlanner()
+
+    val bookTranslationJob =
+        BookTranslationJob(
+            cache = RoomTranslationCache(database.translationCacheDao()),
+            bookImporter = bookImporter,
+            workDir = translateWorkDir,
+        )
+
+    // Lazy: this container is constructed by every Robolectric-hosted test, where WorkManager
+    // has no initialized instance — the same trap S3.2 hit when scheduling from
+    // Application.onCreate (see WorkManagerTranslationRunner).
+    val translationRunner: TranslationRunner by lazy { WorkManagerTranslationRunner(app) }
 }

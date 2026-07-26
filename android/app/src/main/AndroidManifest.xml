@@ -48,6 +48,13 @@
             android:exported="false"
             android:theme="@style/Theme.Berilo" />
 
+        <!-- B7: import a source-language EPUB, see what translating it costs, confirm, watch it
+             run. Reached from the library top bar — the one path from gesture to a paid run. -->
+        <activity
+            android:name=".ui.translate.TranslateActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Berilo" />
+
         <!-- S2.6: streams the notebook's Markdown export file to the share-sheet target
              (e.g. Obsidian) without granting a world-readable file:// Uri. -->
         <provider

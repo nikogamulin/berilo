@@ -127,4 +127,56 @@
     <string name="account_sync_signed_out">Signed out — sign in to sync.</string>
     <string name="account_sync_rate_limited">Too many requests — will retry shortly.</string>
     <string name="account_sync_failed">Sync failed: %1$s</string>
+
+    <!-- B7: on-device translation — import, cost gate, progress. -->
+    <string name="settings_translation_model_label">Translation model</string>
+    <string name="settings_translation_model_hint">Used for whole-book translation. A book is hundreds of calls, so this can differ from the model used for lookups.</string>
+    <string name="settings_translation_model_default">Same as the model above</string>
+
+    <string name="translate_title">Translate a book</string>
+    <string name="translate_back_cd">Back</string>
+    <string name="translate_library_cd">Translate a book</string>
+    <string name="translate_idle_title">Choose a book to translate</string>
+    <string name="translate_idle_body">Pick an EPUB in its original language. You will see what it costs before anything is sent.</string>
+    <string name="translate_choose_file">Choose an EPUB</string>
+    <string name="translate_preparing">Reading the book and working out the cost…</string>
+
+    <string name="translate_estimate_heading">Before you start</string>
+    <string name="translate_estimate_nothing_spent">Nothing has been sent to the API yet. This estimate is calculated on this device.</string>
+    <string name="translate_estimate_chapters">%1$d chapters</string>
+    <string name="translate_estimate_segments">%1$d of %2$d segments will be translated</string>
+    <string name="translate_estimate_model">Model: %1$s</string>
+    <string name="translate_estimate_style">Style: %1$s</string>
+    <string name="translate_estimate_calls">About %1$d API calls</string>
+    <string name="translate_estimate_cost">Estimated cost: %1$s</string>
+    <string name="translate_estimate_same_language">This book already declares %1$s. Translating it into %1$s will cost money and change nothing.</string>
+
+    <string name="translate_quality_heading">Quality</string>
+    <string name="translate_tier_economy">Standard — one pass</string>
+    <string name="translate_tier_quality">Higher quality — a second editing pass, about twice the cost</string>
+    <string name="translate_tier_cost">%1$s</string>
+
+    <string name="translate_confirm">Translate for %1$s</string>
+    <string name="translate_confirm_cd">Start the translation and begin spending</string>
+    <string name="translate_cancel">Cancel</string>
+
+    <string name="translate_waiting_title">Waiting to start</string>
+    <string name="translate_waiting_body">%1$s will translate as soon as this device is connected. You can close the app; it carries on in the background.</string>
+    <string name="translate_running_title">Translating %1$s</string>
+    <string name="translate_running_chapter">Chapter %1$d — %2$s</string>
+    <string name="translate_running_chapter_untitled">Chapter %1$d</string>
+    <string name="translate_running_segments">%1$d of %2$d segments</string>
+    <string name="translate_running_spend">%1$s spent · %2$d API calls</string>
+    <string name="translate_running_resumable">Interrupted work resumes where it stopped — finished batches are never paid for twice.</string>
+    <string name="translate_stop">Stop</string>
+
+    <string name="translate_done_title">%1$s is in your library</string>
+    <string name="translate_done_spend">Cost of this run: %1$s over %2$d API calls.</string>
+    <string name="translate_done_free">This run cost nothing — every segment was already translated.</string>
+    <string name="translate_done_open">Back to the library</string>
+
+    <string name="translate_failed_title">Translation stopped</string>
+    <string name="translate_failed_resumable">Nothing already translated was lost. Starting again resumes where it stopped.</string>
+    <string name="translate_retry">Resume</string>
+    <string name="translate_start_over">Start over</string>
 </resources>

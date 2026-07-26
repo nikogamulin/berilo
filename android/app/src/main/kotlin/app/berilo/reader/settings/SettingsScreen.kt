@@ -67,6 +67,9 @@ fun SettingsScreen(
     // S3.2: defaulted so the existing Compose tests, which are about API-key handling, keep
     // constructing this screen without knowing about the account surface.
     onOpenAccount: () -> Unit = {},
+    // B7: likewise defaulted — the translation-model override is a whole-book concern, and the
+    // key-handling tests above have no opinion about it.
+    onTranslationModelChanged: (String?) -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
@@ -112,6 +115,11 @@ fun SettingsScreen(
             )
             HorizontalDivider()
             ModelPicker(selectedModel = uiState.model, onModelChanged = onModelChanged)
+            HorizontalDivider()
+            TranslationModelPicker(
+                selectedModel = uiState.translationModel,
+                onTranslationModelChanged = onTranslationModelChanged,
+            )
             HorizontalDivider()
             OutlinedTextField(
                 value = uiState.targetLang,
@@ -176,6 +184,39 @@ private fun KeyTestStatusText(testState: KeyTestState) {
         KeyTestState.Testing -> Text(stringResource(R.string.settings_testing))
         is KeyTestState.Success -> Text(text = testState.summary, color = MaterialTheme.colorScheme.primary)
         is KeyTestState.Failure -> Text(text = testState.message, color = MaterialTheme.colorScheme.error)
+    }
+}
+
+/**
+ * Optional model override for whole-book translation (B7).
+ *
+ * A book is ~162 calls where a dictionary lookup is one, so the model that is right for
+ * instant lookups is not necessarily the one worth billing a multi-hour run against. The
+ * first option is "same as the default", which is what `null` means in
+ * [LlmSettings.translationModel].
+ */
+@Composable
+private fun TranslationModelPicker(selectedModel: String?, onTranslationModelChanged: (String?) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(R.string.settings_translation_model_label),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = stringResource(R.string.settings_translation_model_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = selectedModel == null, onClick = { onTranslationModelChanged(null) })
+            Text(text = stringResource(R.string.settings_translation_model_default))
+        }
+        AVAILABLE_MODELS.forEach { model ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(selected = model == selectedModel, onClick = { onTranslationModelChanged(model) })
+                Text(text = model)
+            }
+        }
     }
 }
 
