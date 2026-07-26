@@ -30,6 +30,7 @@ from berilo.normalize.pdf import (
 )
 from berilo.providers.base import CompletionResult, LLMClient
 from berilo.screen import (
+    ScreenError,
     back_matter_chapter_indices,
     front_matter_chapter_indices,
     sample_segments,
@@ -674,6 +675,27 @@ def test_screen_all_clean_is_full_fraction() -> None:
     report = screen_segments(segments, _FakeLLMClient())
     assert report.clean_fraction == 1.0
     assert not report.flagged
+
+
+@pytest.mark.parametrize(
+    "reply",
+    ["", "Probably clean, but hard to tell.", "maybe", "   ", "42"],
+    ids=["empty", "hedged", "unrelated-word", "whitespace-only", "numeric"],
+)
+def test_screen_raises_rather_than_defaulting_to_dirty(reply: str) -> None:
+    """Review finding 13: an unparseable reply must not silently score dirty.
+
+    ``judge.py`` raises on an unparseable verdict rather than defaulting one
+    way or the other; the screen must follow that precedent instead of
+    inventing a third convention (silently folding into ``clean_fraction``).
+    """
+    segments = [_paragraph("Some paragraph the model fails to classify.", 1)]
+    client = _FakeLLMClient()
+    client.complete = lambda prompt=None, messages=None: CompletionResult(
+        text=reply, input_tokens=10, output_tokens=1, cost_eur=0.001, model="fake-mini"
+    )
+    with pytest.raises(ScreenError, match="Unparseable"):
+        screen_segments(segments, client)
 
 
 # --------------------------------------------------------------------------- #

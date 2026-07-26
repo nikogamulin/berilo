@@ -325,6 +325,130 @@ def test_runs_are_primed_with_real_predecessors():
         assert run.lead_in[-1][1] == _CONTROL_PREFIX + predecessor.text
 
 
+# --------------------------------------------------------------------------
+# Cross-run lead-in safety (review finding 12).
+# --------------------------------------------------------------------------
+
+
+def _book_with_duplicate_paragraph_across_chapters() -> Book:
+    """Two 8-paragraph chapters; one of chapter 1's "gap" paragraphs — a
+    candidate lead-in, never itself judged in its own chapter's tiling —
+    duplicates verbatim a paragraph that chapter 0's first run judges.
+
+    With ``run_length=3, context_pairs=1`` chapter 0 tiles into two runs
+    (offsets 0 and 4); its first run judges paragraphs 0-2. Chapter 1 tiles
+    the same way; its second run's only lead-in candidate is paragraph 3 —
+    set here to share chapter 0 paragraph 1's exact text.
+    """
+    chapter0_texts = [f"Chapter zero unique paragraph {i}." for i in range(8)]
+    chapter1_texts = [f"Chapter one unique paragraph {i}." for i in range(8)]
+    chapter1_texts[3] = chapter0_texts[1]  # the cross-chapter duplicate
+
+    segments: list[Segment] = []
+    position = 0
+    for chapter_index, (chapter_title, texts) in enumerate(
+        [("Chapter One", chapter0_texts), ("Chapter Two", chapter1_texts)]
+    ):
+        segments.append(
+            Segment(
+                id=make_segment_id(chapter_title, chapter_index, position),
+                type=SegmentType.HEADING,
+                text=chapter_title,
+                chapter_index=chapter_index,
+                chapter_title=chapter_title,
+                position=position,
+                heading_level=1,
+            )
+        )
+        position += 1
+        for text in texts:
+            segments.append(
+                Segment(
+                    id=make_segment_id(text, chapter_index, position),
+                    type=SegmentType.PARAGRAPH,
+                    text=text,
+                    chapter_index=chapter_index,
+                    chapter_title=chapter_title,
+                    position=position,
+                )
+            )
+            position += 1
+    return Book(
+        title="Duplicate Paragraph Book",
+        authors=["Test Author"],
+        language="en",
+        source_path="dup.epub",
+        source_format="epub",
+        segments=segments,
+    )
+
+
+def test_lead_in_forbidden_hashes_are_pool_wide_not_per_run():
+    """A judged segment of one run must never be usable as another run's
+    lead-in, even across chapters — a per-run forbidden set misses this
+    (review finding 12)."""
+    source = _book_with_duplicate_paragraph_across_chapters()
+    pool = candidate_runs(source, _control_book(source), run_length=3, context_pairs=1)
+    assert len(pool) == 4
+    run_a, run_d = pool[0], pool[3]
+    assert run_a.chapter_index == 0
+    assert run_d.chapter_index == 1
+
+    duplicate_text = run_a.segments[1].text
+    # Sanity: the duplicate really sits where run D's lead-in would look.
+    assert any(seg.text == duplicate_text and seg.chapter_index == 1 for seg in source.segments)
+    assert run_d.lead_in == (), (
+        "run D's only lead-in candidate duplicates run A's judged text; it must "
+        "be excluded rather than silently seeded as context"
+    )
+
+
+def test_duplicate_paragraph_across_runs_is_not_served_the_control_at_zero_cost(
+    scratch_cache,
+):
+    """End-to-end reproduction of review finding 12.
+
+    Without a pool-wide forbidden-hash set, run D's lead-in (identical text to
+    run A's judged paragraph) gets seeded into the scratch cache under the
+    VARIANT version too — so run A's judged duplicate resolves to that seeded
+    row and is served the control translation at €0 instead of being
+    re-translated. The cost is the symptom: assert the call count.
+    """
+    import dataclasses
+
+    source = _book_with_duplicate_paragraph_across_chapters()
+    translated = _control_book(source)
+    pool = candidate_runs(source, translated, run_length=3, context_pairs=1)
+    run_a, run_d = pool[0], pool[3]
+
+    plan = _plan(source, translated, runs=2, run_length=3, context_pairs=1)
+    plan = dataclasses.replace(plan, runs=(run_a, run_d))
+
+    client = FakeTranslateClient()
+    result = run_experiment(
+        source,
+        plan=plan,
+        style=SL_STYLE,
+        client=client,
+        judge=Judge(ArmAwareJudgeClient()),
+        scratch_cache=scratch_cache,
+        glossary=None,
+    )
+
+    duplicate_text = run_a.segments[1].text
+    duplicate_pair = next(p for p in result.pairs if p.source == duplicate_text)
+    assert (
+        duplicate_pair.variant == _VARIANT_PREFIX + duplicate_text.strip()
+    ), "the duplicate judged segment must be translated for real"
+    assert duplicate_pair.variant != duplicate_pair.control, (
+        "it must not be served the control text at zero cost via the other "
+        "run's lead-in cache seed"
+    )
+    assert any(
+        duplicate_text in prompt for prompt in client.batch_prompts
+    ), "the duplicate judged segment must actually reach the translation API call"
+
+
 def test_front_and_back_matter_chapters_are_excluded_from_the_pool():
     source = _make_book(chapters=3, chapter_titles=["Copyright", "Chapter One", "Index"])
     plan = _plan(source, _control_book(source), runs=2)
@@ -820,6 +944,48 @@ def test_book_context_memo_is_derived_from_the_whole_book_not_the_sample(scratch
     memo_prompt = client.other_prompts[0]
     assert source.segments[0].text in memo_prompt, "memo must see the book's opening"
     assert all("BOOK STYLE MEMO" in prompt for prompt in client.batch_prompts)
+
+
+def test_uncached_book_context_memo_is_excluded_from_the_per_word_rate(scratch_cache):
+    """Review finding 8: eur_per_1k_words must be the marginal rate, not the total.
+
+    A book-context variant whose memo is not yet cached bills a one-time memo
+    call in addition to the batch translation; that fixed cost must not
+    inflate the reported EUR/1k-words rate against Rubric T7, even though
+    total_cost_eur (real spend) must still include it.
+    """
+    source = _make_book()
+    plan = _plan(source, _control_book(source), style=get_style("book_context_v1"), runs=2)
+    client = FakeTranslateClient()
+    result = run_experiment(
+        source,
+        plan=plan,
+        style=get_style("book_context_v1"),
+        client=client,
+        judge=Judge(ArmAwareJudgeClient()),
+        scratch_cache=scratch_cache,
+        glossary=None,
+    )
+
+    assert result.memo_cost_eur > 0, "the memo must have been uncached and billed"
+    marginal_cost_eur = result.translation_cost_eur - result.memo_cost_eur
+    assert marginal_cost_eur > 0, "real batch translation must also have been billed"
+
+    # total_cost_eur is actual spend and must still include the memo.
+    assert result.translation_cost_eur == pytest.approx(marginal_cost_eur + result.memo_cost_eur)
+    assert result.total_cost_eur == pytest.approx(
+        marginal_cost_eur + result.memo_cost_eur + result.judge_cost_eur
+    )
+
+    # eur_per_1k_words is the marginal per-word rate: it must exclude the memo.
+    expected_rate = marginal_cost_eur / (plan.source_words / experiment.WORDS_PER_COST_UNIT)
+    assert result.eur_per_1k_words == pytest.approx(expected_rate)
+    inflated_rate = result.translation_cost_eur / (
+        plan.source_words / experiment.WORDS_PER_COST_UNIT
+    )
+    assert (
+        result.eur_per_1k_words < inflated_rate
+    ), "folding the memo into the rate would over-report the marginal per-word cost"
 
 
 # --------------------------------------------------------------------------

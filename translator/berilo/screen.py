@@ -203,9 +203,37 @@ def sample_segments(
     return chosen
 
 
-def _is_yes(response_text: str) -> bool:
-    """Return True if a model reply affirms (starts with 'yes')."""
-    return response_text.strip().lower().startswith("yes")
+class ScreenError(RuntimeError):
+    """Raised when a screen reply cannot be parsed as an unambiguous YES/NO.
+
+    The cleanliness screen is a quality GATE, not a soft signal: silently
+    folding an unparseable reply (an API hiccup, empty output, a hedged
+    "Probably clean...") into ``is_clean=False`` biases ``clean_fraction``
+    with no indication anything went wrong. :mod:`berilo.eval.judge` already
+    raises rather than defaulting on an unparseable verdict — this follows
+    that precedent instead of inventing a third convention (review finding 13).
+    """
+
+
+def _parse_verdict(response_text: str) -> bool:
+    """Parse a strict YES/NO screen reply.
+
+    Args:
+        response_text: The raw model reply.
+
+    Returns:
+        True for a reply starting with "yes", False for one starting with
+        "no" (case-insensitive, surrounding whitespace ignored).
+
+    Raises:
+        ScreenError: If the reply is neither an unambiguous "yes" nor "no".
+    """
+    normalized = response_text.strip().lower()
+    if normalized.startswith("yes"):
+        return True
+    if normalized.startswith("no"):
+        return False
+    raise ScreenError(f"Unparseable screen verdict (expected YES or NO): {response_text!r}")
 
 
 def screen_segments(segments: list[Segment], client: LLMClient) -> ScreenReport:
@@ -221,6 +249,9 @@ def screen_segments(segments: list[Segment], client: LLMClient) -> ScreenReport:
     Returns:
         A :class:`ScreenReport` with per-segment verdicts, clean fraction, and
         total cost.
+
+    Raises:
+        ScreenError: If any reply cannot be parsed as an unambiguous YES/NO.
     """
     verdicts: list[SegmentVerdict] = []
     total_cost = 0.0
@@ -230,7 +261,7 @@ def screen_segments(segments: list[Segment], client: LLMClient) -> ScreenReport:
         verdicts.append(
             SegmentVerdict(
                 segment=segment,
-                is_clean=_is_yes(result.text),
+                is_clean=_parse_verdict(result.text),
                 raw_response=result.text,
             )
         )
