@@ -61,7 +61,7 @@ from berilo.eval.rubric_t import (
     excluded_chapter_indices,
     restrict_to_body,
 )
-from berilo.glossary import Glossary
+from berilo.glossary import Glossary, glossary_identity
 from berilo.models import Book, Segment, SegmentType
 from berilo.prompts import TranslationStyle
 from berilo.providers.base import LLMClient
@@ -767,6 +767,7 @@ def seed_control_translations(
     target_lang: str,
     control_version: str,
     variant_version: str,
+    glossary_hash_: str,
 ) -> None:
     """Write the existing translations into the scratch cache.
 
@@ -788,6 +789,9 @@ def seed_control_translations(
         target_lang: Target language code.
         control_version: Prompt version of the existing translation.
         variant_version: Prompt version the variant will be written under.
+        glossary_hash_: Identity of the glossary the variant run will inject.
+            The seeded rows must carry it or the variant's lookup misses and
+            the lead-ins are re-translated at real cost.
     """
     no_cost = CallRecord(kind="ab_seed", input_tokens=0, output_tokens=0, cost_eur=0.0)
 
@@ -802,10 +806,16 @@ def seed_control_translations(
         for segment, control in run.lead_in
     ]
     if judged:
-        cache.store_batch(scratch_hash, model, target_lang, judged, no_cost, control_version)
+        cache.store_batch(
+            scratch_hash, model, target_lang, judged, no_cost, control_version, glossary_hash_
+        )
     if lead_in:
-        cache.store_batch(scratch_hash, model, target_lang, lead_in, no_cost, control_version)
-        cache.store_batch(scratch_hash, model, target_lang, lead_in, no_cost, variant_version)
+        cache.store_batch(
+            scratch_hash, model, target_lang, lead_in, no_cost, control_version, glossary_hash_
+        )
+        cache.store_batch(
+            scratch_hash, model, target_lang, lead_in, no_cost, variant_version, glossary_hash_
+        )
 
 
 def _prime_book_context(
@@ -960,6 +970,7 @@ def run_experiment(
         target_lang=plan.target_lang,
         control_version=plan.control_version,
         variant_version=plan.variant_version,
+        glossary_hash_=glossary_identity(glossary),
     )
     memo_cost = _prime_book_context(
         source,
