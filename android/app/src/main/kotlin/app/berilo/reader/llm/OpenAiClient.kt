@@ -62,8 +62,9 @@ class OpenAiClient(
                     .post(bodyJson.toRequestBody(LLM_JSON_MEDIA_TYPE))
                     .build()
 
-            val response = requireSuccessful(executeWithRetry(httpClient, request), OPENAI_PROVIDER_LABEL)
-            parseOpenAiResponse(response)
+            val response = executeWithRetry(httpClient, request)
+            checkContentPolicyRefusal(response, OPENAI_PROVIDER_LABEL, ::isOpenAiContentPolicyRefusal)
+            parseOpenAiResponse(requireSuccessful(response, OPENAI_PROVIDER_LABEL))
         }
 
     private fun parseOpenAiResponse(response: okhttp3.Response): LlmResult =
@@ -77,19 +78,50 @@ class OpenAiClient(
                 } catch (e: SerializationException) {
                     throw LlmError("Could not parse $OPENAI_PROVIDER_LABEL response.", LlmError.Kind.PARSE, e)
                 }
-            val text =
-                parsed.choices.firstOrNull()?.message?.content
+            val choice =
+                parsed.choices.firstOrNull()
                     ?: throw LlmError("$OPENAI_PROVIDER_LABEL response had no completion.", LlmError.Kind.PARSE)
+            val text = choice.message.content ?: ""
             val usage = parsed.usage ?: throw LlmError("$OPENAI_PROVIDER_LABEL response had no usage data.", LlmError.Kind.PARSE)
-            LlmResult(
-                text = text,
-                inputTokens = usage.promptTokens,
-                outputTokens = usage.completionTokens,
-                costEur = costEur(model, usage.promptTokens, usage.completionTokens),
-                model = model,
-            )
+            // Computed before the truncation/emptiness checks below so a caller that
+            // degrades instead of propagating (see LlmError.Kind.EMPTY_COMPLETION /
+            // TRUNCATED_COMPLETION) can still fold this call's real, billed cost into
+            // its accounting via the exception's `result` property.
+            val billedResult =
+                LlmResult(
+                    text = text,
+                    inputTokens = usage.promptTokens,
+                    outputTokens = usage.completionTokens,
+                    costEur = costEur(model, usage.promptTokens, usage.completionTokens),
+                    model = model,
+                )
+            if (choice.finishReason == "length") {
+                throw LlmError(
+                    "$OPENAI_PROVIDER_LABEL truncated the completion for model $model " +
+                        "(finish_reason='length', ${usage.completionTokens} output tokens billed); the " +
+                        "response is incomplete. Increase max_tokens or reduce the batch size.",
+                    LlmError.Kind.TRUNCATED_COMPLETION,
+                    result = billedResult,
+                )
+            }
+            if (text.isEmpty()) {
+                throw LlmError(
+                    "$OPENAI_PROVIDER_LABEL returned no completion text for model $model " +
+                        "(${usage.completionTokens} output tokens billed).",
+                    LlmError.Kind.EMPTY_COMPLETION,
+                    result = billedResult,
+                )
+            }
+            billedResult
         }
 }
+
+/** Detects an OpenAI content-policy refusal from an HTTP 400 error body: either the
+ * `invalid_prompt` error code or "usage policy" wording (mirrors
+ * `translator/berilo/providers/openai.py`'s `BadRequestError` check). Used only to pick
+ * which fixed message to raise — the body text itself never reaches the thrown error. */
+private fun isOpenAiContentPolicyRefusal(body: String): Boolean =
+    body.contains("invalid_prompt") || body.contains("usage policy")
 
 private fun isReasoningModel(model: String): Boolean = OPENAI_REASONING_MODEL_PREFIXES.any { model.startsWith(it) }
 
@@ -111,7 +143,10 @@ private data class OpenAiChatResponse(
 )
 
 @Serializable
-private data class OpenAiChoice(val message: OpenAiResponseMessage)
+private data class OpenAiChoice(
+    val message: OpenAiResponseMessage,
+    @SerialName("finish_reason") val finishReason: String? = null,
+)
 
 @Serializable
 private data class OpenAiResponseMessage(val content: String? = null)
