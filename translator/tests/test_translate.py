@@ -1413,3 +1413,234 @@ def test_cli_default_style_also_skips_back_matter(monkeypatch, epub_builder) -> 
     assert any(
         s.text.startswith(_REVISED_PREFIX) for s in story_segments
     ), "under the default style, body prose must come back through the revision pass"
+
+
+# --------------------------------------------------------------------------
+# A3 — language-bound styles, anchored markers, and context_pairs=0.
+# Review findings 4 (HIGH), 14, 10.
+# --------------------------------------------------------------------------
+
+
+class _StrayMarkerClient(FakeLLMClient):
+    """Answers correctly, but segment 2's translation contains a literal ``[[2]]``.
+
+    This is review finding 14's exact scenario: the reply is a perfect 1:1
+    mapping, yet an unanchored scan counts a fourth marker and forces a strict
+    retry plus possibly a per-segment fallback — pure wasted spend.
+    """
+
+    def _batch_response(self, prompt: str) -> CompletionResult:
+        parts = []
+        for n, text in _extract_numbered(prompt):
+            body = f"{_PREFIX}{text}"
+            if n == 2:
+                body += " (element [[2]] of the array)"
+            parts.append(f"[[{n}]] {body}")
+        return self._result("\n".join(parts))
+
+
+def test_a_marker_inside_a_translation_does_not_force_a_strict_retry() -> None:
+    """Finding 14: prose containing ``[[2]]`` costs exactly one call, not three.
+
+    The call count IS the assertion — the defect's whole cost is the needless
+    retry ladder it triggers.
+    """
+    book = _paragraph_book(3)
+    client = _StrayMarkerClient()
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=3
+    )
+
+    assert client.translation_calls == 1, "one batch call: no strict retry, no per-segment fallback"
+    assert [call["kind"] for call in client.calls] == ["batch"]
+    # The stray marker stays inside its own translation rather than splitting it.
+    assert result.segments[1].text == f"{_PREFIX}Paragraph 1. (element [[2]] of the array)"
+    assert len(result.segments) == 3
+
+
+def test_parse_numbered_response_anchors_markers_to_line_starts() -> None:
+    """A mid-line ``[[n]]`` is prose; a line-leading one is a marker."""
+    reply = "[[1]] a\n[[2]] see [[2]] in the array\n[[3]] c"
+    assert parse_numbered_response(reply, 3) == ["a", "see [[2]] in the array", "c"]
+    # Leading indentation still marks a segment.
+    assert parse_numbered_response("  [[1]] a\n\t[[2]] b", 2) == ["a", "b"]
+
+
+def test_anchoring_never_adds_a_retry_for_a_single_line_reply() -> None:
+    """Markers packed onto one line parse exactly as they did before anchoring.
+
+    Anchoring may only remove needless retries; introducing one for a reply the
+    old parser accepted would just move finding 14's cost somewhere else.
+    """
+    assert parse_numbered_response("[[1]] a [[2]] b [[3]] c", 3) == ["a", "b", "c"]
+    # A genuinely broken mapping still fails, under either scan.
+    with pytest.raises(ValueError):
+        parse_numbered_response("[[1]] a [[3]] c", 2)
+
+
+def test_context_pairs_zero_produces_no_context_block() -> None:
+    """Finding 10: ``0`` disables rolling context instead of feeding the whole book."""
+    book = _paragraph_book(6)
+    client = FakeLLMClient()
+
+    translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=1,
+        context_pairs=0,
+    )
+
+    assert len(client.batch_prompts) == 6
+    for prompt in client.batch_prompts:
+        assert "CONTEXT (already translated" not in prompt
+    # The defect's signature: the last batch carrying every prior pair.
+    assert "Paragraph 0." not in client.batch_prompts[-1]
+
+
+def test_context_pairs_two_still_trims_to_two() -> None:
+    """The positive case is unchanged: at most N pairs ride along."""
+    book = _paragraph_book(6)
+    client = FakeLLMClient()
+
+    translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=1,
+        context_pairs=2,
+    )
+
+    last = client.batch_prompts[-1]
+    assert last.count("SOURCE: ") == 2, "exactly two pairs, never the whole book"
+    assert "Paragraph 4." in last and "Paragraph 3." in last
+    assert "Paragraph 0." not in last
+
+
+def test_translate_book_refuses_a_style_bound_to_another_language() -> None:
+    """Finding 4: a Slovenian editor pass over a German draft never reaches the API."""
+    from berilo.prompts import StyleLanguageError, get_style
+
+    book = _paragraph_book(3)
+    client = FakeLLMClient()
+
+    with pytest.raises(StyleLanguageError, match="revise_v1"):
+        translate_book(
+            book,
+            client=client,
+            target_lang="de",
+            cache=_memory_cache(),
+            style=get_style("revise_v1"),
+        )
+
+    assert client.calls == [], "the refusal must happen before anything is billed"
+
+
+def test_estimate_cost_refuses_a_style_bound_to_another_language() -> None:
+    """The dry run refuses too: quoting a price invites the user to approve it."""
+    from berilo.prompts import StyleLanguageError, get_style
+
+    with pytest.raises(StyleLanguageError):
+        estimate_cost(
+            _paragraph_book(3),
+            model="gpt-5-mini",
+            target_lang="de",
+            style=get_style("revise_v1"),
+        )
+
+
+def test_translate_book_accepts_the_generic_two_pass_style_for_any_target() -> None:
+    """revise_generic_v1 covers --to de with a second pass and no language contract."""
+    from berilo.prompts import get_style
+
+    book = _paragraph_book(3)
+    client = FakeLLMClient()
+    style = get_style("revise_generic_v1")
+
+    result = translate_book(
+        book,
+        client=client,
+        target_lang="de",
+        cache=_memory_cache(),
+        batch_size=3,
+        style=style,
+    )
+
+    assert client.revise_calls == 1, "the generic style still runs its editor pass"
+    for prompt in client.batch_prompts:
+        assert "Translate into: de." in prompt
+    for call in client.calls:
+        assert "Slovenian" not in (call["system"] or "")
+        assert "šumniki" not in (call["system"] or "")
+    assert all(seg.text.startswith(_REVISED_PREFIX) for seg in result.segments)
+
+
+def test_cli_to_de_resolves_a_generic_style_and_runs_no_slovenian_editor_pass(
+    monkeypatch, epub_builder
+) -> None:
+    """The Verify line, end to end: ``--to de`` must not run a Slovenian editor pass."""
+    import berilo.assemble as assemble_module
+    import berilo.providers as providers_module
+
+    clients: list[FakeLLMClient] = []
+
+    def _make_client(model, config):
+        client = FakeLLMClient(model=model)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(providers_module, "create_client", _make_client)
+    monkeypatch.setattr(
+        assemble_module,
+        "build_epub",
+        lambda book, output_path, *, bilingual=False, source_book=None: output_path,
+        raising=False,
+    )
+
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "translate",
+                str(epub),
+                "--model",
+                "gpt-5-mini",
+                "--to",
+                "de",
+                "--yes",
+                "--no-glossary",
+                "--cache-db",
+                "cache.db",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "revise_generic_v1" in result.output, "the resolved style must be in the run summary"
+    assert "resolved for 'de'" in result.output
+    assert clients, "a client must have been constructed"
+    for client in clients:
+        for call in client.calls:
+            system = call["system"] or ""
+            assert "native Slovenian editor" not in system
+            assert "SLOVENIAN STYLE CONTRACT" not in system
+
+
+def test_cli_refuses_a_slovenian_style_against_a_german_target(epub_builder) -> None:
+    """The mismatch is loud and actionable, not a silently contradictory paid run."""
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            ["translate", str(epub), "--dry-run", "--style", "revise_v1", "--to", "de"],
+        )
+
+    assert result.exit_code != 0
+    assert "revise_v1" in result.output
+    assert "revise_generic_v1" in result.output, "the refusal must name what to use instead"
+    assert "Dry run" not in result.output, "no estimate may be printed for a refused pair"

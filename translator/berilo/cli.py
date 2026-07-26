@@ -67,9 +67,10 @@ def cli() -> None:
     "style_name",
     default=None,
     help=(
-        "Translation prompt style from berilo.prompts "
-        f"(default: {prompts.DEFAULT_STYLE_NAME}, which adds a native-editor "
-        "revision pass; use baseline_v1 for the cheaper single-pass prompt)."
+        "Translation prompt style from berilo.prompts (default: resolved from "
+        "--to — a two-pass native-editor style, revise_v1 for Slovenian and "
+        "revise_generic_v1 otherwise; use baseline_v1 for the cheaper "
+        "single-pass prompt). A style bound to another language is refused."
     ),
 )
 @click.option(
@@ -106,8 +107,10 @@ def translate(
     is enforced socially — the estimate and a "proceeding" line print first).
     Use ``--dry-run`` to see the estimate without spending anything.
 
-    The prompt style defaults to :data:`berilo.prompts.DEFAULT`; pass
-    ``--style baseline_v1`` for the cheaper single-pass prompt.
+    The prompt style is resolved from the target language (see
+    :func:`berilo.prompts.resolve_style`); pass ``--style baseline_v1`` for the
+    cheaper single-pass prompt. Naming a style bound to another language is a
+    refusal, not a silent contradiction.
     """
     from dotenv import find_dotenv
 
@@ -115,7 +118,7 @@ def translate(
     from berilo.translate import back_matter_segment_ids, estimate_cost
 
     try:
-        style = prompts.get_style(style_name or prompts.DEFAULT_STYLE_NAME)
+        requested_style = prompts.get_style(style_name) if style_name else None
     except KeyError as exc:
         click.echo(f"translate: {exc}", err=True)
         ctx.exit(INPUT_ERROR_EXIT_CODE)
@@ -132,6 +135,14 @@ def translate(
     config = load_config(env_file=env_file, translation_model=model, target_lang=target_language)
     model_name = config.translation_model
     lang = config.target_lang
+
+    try:
+        style = prompts.resolve_style(lang, requested=requested_style)
+    except prompts.StyleLanguageError as exc:
+        click.echo(f"translate: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
     skip_ids = back_matter_segment_ids(book) if skip_back_matter else set()
 
     if dry_run:
@@ -225,6 +236,7 @@ def translate(
             skip_back_matter=skip_back_matter,
             total_cost_eur=total_cost_eur,
             style=style,
+            target_lang=lang,
         )
 
         out_path = Path(output) if output else _default_output_path(source_file, lang)
@@ -316,6 +328,7 @@ def _print_summary(
     skip_back_matter: bool,
     total_cost_eur: float | None = None,
     style: prompts.TranslationStyle | None = None,
+    target_lang: str | None = None,
 ) -> None:
     """Print the end-of-run summary line.
 
@@ -326,11 +339,17 @@ def _print_summary(
         style: Prompt style used. When it carries a revision pass, any batch
             whose revision could not be applied is surfaced loudly — those
             segments silently hold only single-pass quality.
+        target_lang: Target language the style was resolved for, named beside
+            it so the resolution is visible in the run summary (plan §3.3)
+            rather than inferred from the default.
     """
     if stats is None:
         return
     total = stats.cost_eur if total_cost_eur is None else total_cost_eur
-    style_note = f" Style: {style.name}." if style is not None else ""
+    style_note = ""
+    if style is not None:
+        resolved_for = f" (resolved for '{target_lang}')" if target_lang else ""
+        style_note = f" Style: {style.name}{resolved_for}."
     click.echo(
         f"Done: {stats.total_segments} segments "
         f"({stats.translated_segments} translated, {stats.cached_segments} from cache, "
@@ -723,7 +742,7 @@ def ab(
     from berilo.eval.judge import Judge, JudgeError
     from berilo.eval.rubric_t import AlignmentError
     from berilo.glossary import Glossary
-    from berilo.prompts import get_style
+    from berilo.prompts import StyleLanguageError, ensure_supports, get_style
     from berilo.translate import TranslationError
 
     env_file = find_dotenv(usecwd=True) or None
@@ -737,7 +756,8 @@ def ab(
 
     try:
         style = get_style(variant)
-    except KeyError as exc:
+        ensure_supports(style, lang)
+    except (KeyError, StyleLanguageError) as exc:
         click.echo(f"ab: {exc}", err=True)
         ctx.exit(INPUT_ERROR_EXIT_CODE)
         return

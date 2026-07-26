@@ -50,7 +50,7 @@ from berilo.cache import (
 )
 from berilo.glossary import Glossary, glossary_identity
 from berilo.models import Book, Segment
-from berilo.prompts import BASELINE, TranslationStyle
+from berilo.prompts import BASELINE, TranslationStyle, ensure_supports
 from berilo.providers.base import (
     CompletionResult,
     ContentPolicyError,
@@ -75,8 +75,16 @@ DEFAULT_BATCH_SIZE = 10
 DEFAULT_CONTEXT_PAIRS = 2
 
 #: Marker wrapping each segment's ordinal in the prompt and expected in the
-#: reply, e.g. ``[[1]]``.
-_MARKER_RE = re.compile(r"\[\[(\d+)\]\]")
+#: reply, e.g. ``[[1]]``. Anchored to the start of a line because that is where
+#: :func:`_numbered_source_block` puts it and where both system prompts demand
+#: it back ("each on its own line"); a ``[[2]]`` occurring *inside* a
+#: translation is prose, not a marker (review finding 14).
+_ANCHORED_MARKER_RE = re.compile(r"^[ \t]*\[\[(\d+)\]\]", re.MULTILINE)
+
+#: The pre-anchoring pattern, kept as a second parsing attempt so a reply that
+#: puts several markers on one line still parses exactly as it did before —
+#: anchoring may only remove needless retries, never add one.
+_LOOSE_MARKER_RE = re.compile(r"\[\[(\d+)\]\]")
 
 # --------------------------------------------------------------------------
 # Cost-estimation constants.
@@ -288,21 +296,21 @@ def _build_batch_prompt(
     return "\n\n".join(blocks)
 
 
-def parse_numbered_response(text: str, expected_count: int) -> list[str]:
-    """Parse a ``[[n]] translation`` reply into an ordered list of translations.
+def _split_on_markers(text: str, pattern: re.Pattern[str], expected_count: int) -> list[str]:
+    """Split ``text`` on ``pattern``'s markers into a 1:1 list of translations.
 
     Args:
         text: The model's reply.
+        pattern: Marker pattern to scan with (anchored or loose).
         expected_count: The number of segments that were sent.
 
     Returns:
-        A list of ``expected_count`` non-empty translations, in order 1..n.
+        ``expected_count`` non-empty translations, in order 1..n.
 
     Raises:
-        ValueError: If the reply has missing, extra, duplicate, or empty
-            markers — i.e. it does not map 1:1 onto the sent segments.
+        ValueError: If this pattern does not yield exactly that mapping.
     """
-    matches = list(_MARKER_RE.finditer(text))
+    matches = list(pattern.finditer(text))
     parsed: dict[int, str] = {}
     for i, match in enumerate(matches):
         index = int(match.group(1))
@@ -322,6 +330,41 @@ def parse_numbered_response(text: str, expected_count: int) -> list[str]:
             raise ValueError(f"segment [[{n}]] missing or empty in reply")
         out.append(value)
     return out
+
+
+def parse_numbered_response(text: str, expected_count: int) -> list[str]:
+    """Parse a ``[[n]] translation`` reply into an ordered list of translations.
+
+    Markers are looked for at the **start of a line** first, because that is
+    where both the numbered source block and the system prompts put them. A
+    ``[[2]]`` that occurs mid-sentence inside a translation ("element ``[[2]]``
+    of the array") is therefore prose, not a fourth marker in a three-segment
+    batch — before this anchoring it forced a strict retry and possibly a
+    per-segment fallback, pure wasted spend (review finding 14).
+
+    If line-anchored scanning does not produce a 1:1 mapping, the reply is
+    re-scanned with the old unanchored pattern before failing, so a model that
+    packs several markers onto one line parses exactly as it always did.
+    Anchoring can only remove retries, never introduce one.
+
+    Args:
+        text: The model's reply.
+        expected_count: The number of segments that were sent.
+
+    Returns:
+        A list of ``expected_count`` non-empty translations, in order 1..n.
+
+    Raises:
+        ValueError: If the reply has missing, extra, duplicate, or empty
+            markers under both scans — i.e. it does not map 1:1 onto the sent
+            segments.
+    """
+    try:
+        return _split_on_markers(text, _ANCHORED_MARKER_RE, expected_count)
+    except ValueError:
+        # Fall through to the historical unanchored scan, which also owns the
+        # diagnostic message when the reply is genuinely not 1:1.
+        return _split_on_markers(text, _LOOSE_MARKER_RE, expected_count)
 
 
 def _translate_single(
@@ -846,7 +889,12 @@ def translate_book(
     Raises:
         TranslationError: If a segment cannot be translated after retry and
             per-segment fallback.
+        StyleLanguageError: If ``style`` is written for a language other than
+            ``target_lang``. This is the gate every entry point passes through
+            — CLI, experiment runner, or app — so a contradictory pair can
+            never reach a billed call (review finding 4).
     """
+    ensure_supports(style, target_lang)
     model = client.model
     bhash = book_hash(book)
     skip = set(skip_segment_ids)
@@ -876,8 +924,15 @@ def translate_book(
     index = 0
 
     def _remember(source: str, target: str) -> None:
+        # ``context_pairs <= 0`` means "no rolling context": remember nothing.
+        # Appending and skipping the trim (the pre-A3 behaviour) fed *every*
+        # prior pair of the book into each batch — the exact opposite of the
+        # intent, and a guaranteed blow-through of the per-batch token ceiling
+        # on a full book (review finding 10).
+        if context_pairs <= 0:
+            return
         recent_pairs.append((source, target))
-        if context_pairs > 0 and len(recent_pairs) > context_pairs:
+        if len(recent_pairs) > context_pairs:
             del recent_pairs[:-context_pairs]
 
     while index < len(segments):
@@ -1093,9 +1148,16 @@ def estimate_cost(
 
     Returns:
         The :class:`CostEstimate`, including a per-chapter breakdown.
+
+    Raises:
+        StyleLanguageError: If ``style`` is written for a language other than
+            ``target_lang``. The dry run refuses for the same reason the paid
+            run does: quoting a price for a contradictory pair invites the user
+            to approve it.
     """
     from berilo.providers.pricing import cost_eur
 
+    ensure_supports(style, target_lang)
     skip = set(skip_segment_ids)
     reasoning = _is_reasoning_model(model)
     revising = style.revise_system is not None
