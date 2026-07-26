@@ -20,7 +20,12 @@ from berilo.config import Config, load_config
 from berilo.providers import create_client, retry_with_backoff
 from berilo.providers.anthropic import DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL
 from berilo.providers.anthropic import AnthropicClient
-from berilo.providers.base import CompletionResult
+from berilo.providers.base import (
+    CompletionResult,
+    ContentPolicyError,
+    EmptyCompletionError,
+    TruncatedCompletionError,
+)
 from berilo.providers.doctor import run_doctor
 from berilo.providers.openai import DEFAULT_MODEL as OPENAI_DEFAULT_MODEL
 from berilo.providers.openai import OpenAIClient
@@ -53,6 +58,12 @@ def _anthropic_rate_limit_error() -> anthropic_sdk.RateLimitError:
     return anthropic_sdk.RateLimitError("rate limited", response=response, body=None)
 
 
+def _anthropic_bad_request_error(message: str) -> anthropic_sdk.BadRequestError:
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    response = httpx.Response(400, request=request)
+    return anthropic_sdk.BadRequestError(message, response=response, body=None)
+
+
 class _FakeOpenAICompletions:
     """Fake for `client.chat.completions`; replays a queue of results."""
 
@@ -75,9 +86,16 @@ class _FakeOpenAISDKClient:
         self.chat = SimpleNamespace(completions=_FakeOpenAICompletions(queue))
 
 
-def _openai_response(content: str, prompt_tokens: int, completion_tokens: int) -> SimpleNamespace:
+def _openai_response(
+    content: str | None,
+    prompt_tokens: int,
+    completion_tokens: int,
+    finish_reason: str = "stop",
+) -> SimpleNamespace:
     return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        choices=[
+            SimpleNamespace(message=SimpleNamespace(content=content), finish_reason=finish_reason)
+        ],
         usage=SimpleNamespace(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
     )
 
@@ -104,10 +122,17 @@ class _FakeAnthropicSDKClient:
         self.messages = _FakeAnthropicMessages(queue)
 
 
-def _anthropic_response(text: str, input_tokens: int, output_tokens: int) -> SimpleNamespace:
+def _anthropic_response(
+    text: str,
+    input_tokens: int,
+    output_tokens: int,
+    stop_reason: str = "end_turn",
+    content: list[object] | None = None,
+) -> SimpleNamespace:
     return SimpleNamespace(
-        content=[SimpleNamespace(type="text", text=text)],
+        content=content if content is not None else [SimpleNamespace(type="text", text=text)],
         usage=SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens),
+        stop_reason=stop_reason,
     )
 
 
@@ -250,6 +275,36 @@ def test_missing_key_error_does_not_leak_key_material() -> None:
     with pytest.raises(ValueError) as exc_info:
         create_client("gpt-5-mini", config)
     assert FAKE_ANTHROPIC_KEY not in str(exc_info.value)
+
+
+def test_create_client_unpriced_model_fails_before_any_provider_client_is_constructed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unpriced model (review finding 6) is rejected before it can be billed.
+
+    Without the pre-flight check, ``create_client`` would construct an
+    ``OpenAIClient`` (billing only happens later, on the first ``complete()``
+    call) — so this test also asserts the SDK client constructor is never
+    reached, proving the guard fires before any provider object exists.
+    """
+    constructed: list[str] = []
+    monkeypatch.setattr(
+        "berilo.providers.openai.openai_sdk.OpenAI",
+        lambda api_key: constructed.append(api_key) or object(),
+    )
+    config = Config(openai_api_key=FAKE_OPENAI_KEY)
+
+    with pytest.raises(ValueError, match="No pricing entry"):
+        create_client("gpt-4.1", config)
+
+    assert constructed == []
+
+
+def test_create_client_rejects_o_prefixed_typo_instead_of_routing_to_openai() -> None:
+    """review finding 19: 'opus-4' must not be misrouted by a bare 'o' prefix match."""
+    config = Config(openai_api_key=FAKE_OPENAI_KEY, anthropic_api_key=FAKE_ANTHROPIC_KEY)
+    with pytest.raises(ValueError, match="Unrecognized model"):
+        create_client("opus-4", config)
 
 
 def test_retry_with_backoff_succeeds_after_two_transient_failures(
@@ -406,6 +461,39 @@ def test_openai_client_non_retryable_error_raised_immediately(
     assert len(fake_sdk_client.chat.completions.calls) == 1
 
 
+def test_openai_client_empty_content_raises_instead_of_returning_empty_string(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review finding 7: content=None must raise loudly, never coerce to ''."""
+    fake_sdk_client = _FakeOpenAISDKClient([_openai_response(None, 20, 5, finish_reason="stop")])
+    monkeypatch.setattr(
+        "berilo.providers.openai.openai_sdk.OpenAI", lambda api_key: fake_sdk_client
+    )
+
+    client = OpenAIClient(api_key=FAKE_OPENAI_KEY)
+    with pytest.raises(EmptyCompletionError):
+        client.complete(prompt="Translate: Hello.")
+
+
+def test_openai_client_length_truncation_raises_even_with_no_visible_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review finding 7: a gpt-5-class model exhausting max_tokens on hidden
+    reasoning returns content=None with finish_reason='length' — must raise,
+    not silently return an empty, billed translation.
+    """
+    fake_sdk_client = _FakeOpenAISDKClient(
+        [_openai_response(None, 20, 479, finish_reason="length")]
+    )
+    monkeypatch.setattr(
+        "berilo.providers.openai.openai_sdk.OpenAI", lambda api_key: fake_sdk_client
+    )
+
+    client = OpenAIClient(api_key=FAKE_OPENAI_KEY)
+    with pytest.raises(TruncatedCompletionError):
+        client.complete(prompt="Translate: Hello.")
+
+
 # --------------------------------------------------------------------------
 # providers/anthropic.py
 # --------------------------------------------------------------------------
@@ -467,6 +555,91 @@ def test_anthropic_client_retries_transient_then_succeeds(
 
     assert result.text == "V redu."
     assert len(fake_sdk_client.messages.calls) == 3
+
+
+def test_anthropic_client_empty_content_raises_instead_of_returning_empty_string(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review finding 7: no text block in the response must raise, never coerce to ''."""
+    fake_sdk_client = _FakeAnthropicSDKClient(
+        [_anthropic_response("", 20, 5, stop_reason="end_turn", content=[])]
+    )
+    monkeypatch.setattr(
+        "berilo.providers.anthropic.anthropic_sdk.Anthropic", lambda api_key: fake_sdk_client
+    )
+
+    client = AnthropicClient(api_key=FAKE_ANTHROPIC_KEY)
+    with pytest.raises(EmptyCompletionError):
+        client.complete(prompt="Translate: Hello.")
+
+
+def test_anthropic_client_max_tokens_truncation_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review finding 7: the default max_tokens=1024 is never checked against
+    stop_reason today, so a long batch is silently truncated — must raise instead.
+    """
+    fake_sdk_client = _FakeAnthropicSDKClient(
+        [_anthropic_response("partial trans", 900, 1024, stop_reason="max_tokens")]
+    )
+    monkeypatch.setattr(
+        "berilo.providers.anthropic.anthropic_sdk.Anthropic", lambda api_key: fake_sdk_client
+    )
+
+    client = AnthropicClient(api_key=FAKE_ANTHROPIC_KEY)
+    with pytest.raises(TruncatedCompletionError):
+        client.complete(prompt="Translate: a long batch.")
+
+
+def test_anthropic_client_streaming_refusal_raises_content_policy_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review finding 18: stop_reason='refusal' is Anthropic's in-band content-
+    policy signal and must map to the same ContentPolicyError OpenAI raises, so
+    the batch-level fallback-provider routing works for both providers.
+    """
+    fake_sdk_client = _FakeAnthropicSDKClient(
+        [_anthropic_response("", 20, 1, stop_reason="refusal", content=[])]
+    )
+    monkeypatch.setattr(
+        "berilo.providers.anthropic.anthropic_sdk.Anthropic", lambda api_key: fake_sdk_client
+    )
+
+    client = AnthropicClient(api_key=FAKE_ANTHROPIC_KEY)
+    with pytest.raises(ContentPolicyError):
+        client.complete(prompt="Translate: flagged content.")
+
+
+def test_anthropic_client_bad_request_policy_refusal_raises_content_policy_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """review finding 18: a pre-generation policy-blocked BadRequestError must
+    also map to ContentPolicyError, mirroring openai.py's existing behavior.
+    """
+    fake_sdk_client = _FakeAnthropicSDKClient(
+        [_anthropic_bad_request_error("Output blocked by usage policy.")]
+    )
+    monkeypatch.setattr(
+        "berilo.providers.anthropic.anthropic_sdk.Anthropic", lambda api_key: fake_sdk_client
+    )
+
+    client = AnthropicClient(api_key=FAKE_ANTHROPIC_KEY)
+    with pytest.raises(ContentPolicyError):
+        client.complete(prompt="Translate: flagged content.")
+
+
+def test_anthropic_client_unrelated_bad_request_error_is_not_swallowed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A BadRequestError unrelated to content policy must propagate unchanged."""
+    fake_sdk_client = _FakeAnthropicSDKClient([_anthropic_bad_request_error("model not found")])
+    monkeypatch.setattr(
+        "berilo.providers.anthropic.anthropic_sdk.Anthropic", lambda api_key: fake_sdk_client
+    )
+
+    client = AnthropicClient(api_key=FAKE_ANTHROPIC_KEY)
+    with pytest.raises(anthropic_sdk.BadRequestError):
+        client.complete(prompt="hi")
 
 
 # --------------------------------------------------------------------------
