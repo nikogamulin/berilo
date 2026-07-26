@@ -120,10 +120,14 @@ fun segmentHash(text: String): String = sha1Hex(text.pythonStrip())
 /**
  * Hex-encode the sha1 digest of a string's UTF-8 bytes.
  *
+ * Internal (not private) so [glossaryIdentity] (`Glossary.kt`) reuses the same digest
+ * mechanism rather than reimplementing it — a second sha1-hex helper drifting from this one
+ * is exactly the kind of silent divergence B1a exists to prevent.
+ *
  * @param payload The string to hash.
  * @return A 40-character lowercase hexadecimal digest.
  */
-private fun sha1Hex(payload: String): String {
+internal fun sha1Hex(payload: String): String {
     val digest = MessageDigest.getInstance(SHA1).digest(payload.toByteArray(Charsets.UTF_8))
     return buildString(SHA1_HEX_LENGTH) {
         digest.forEach { byte -> append("%02x".format(byte)) }
