@@ -119,6 +119,7 @@ berilo inspect mybook.epub       # extraction preview, no API cost
 berilo translate mybook.epub --to sl --dry-run   # cost estimate — always run first
 berilo translate mybook.epub --to sl             # translated EPUB alongside the source
 berilo eval mybook.sl.epub --sample 40 --seed 42 # quality score with a CI (~€0.15)
+berilo serve --dir .             # publish books on your LAN, scan the QR from a tablet
 ```
 
 Useful flags:
@@ -134,6 +135,57 @@ Useful flags:
 | `-o out.epub` | Output path |
 
 Requires Python 3.10+. MOBI input additionally requires Calibre (`ebook-convert`).
+
+## Getting books onto a tablet
+
+The reader app imports books through the Android file picker, so the EPUB has
+to reach the device first. `berilo serve` does that over your own Wi-Fi —
+no cable, no cloud account, no upload.
+
+```bash
+berilo serve                          # serves ./data/examples
+berilo serve --dir ~/books            # or any directory of EPUBs
+```
+
+It prints a URL and a QR code for it:
+
+```
+Berilo — 12 EPUB(s) from ~/books
+http://192.168.1.42:8577/?t=<fresh-token-each-run>
+  █▀▀▀▀▀█ ▄▀▄▀▀▄▀▀▀█▄█▄ ▄ █ ▀▀▀▀▀█
+  █ ███ █ ▀▀█▄▄▄▀  █▄█▄██ █ ███ █
+  …
+Ctrl-C to stop.
+```
+
+1. Put the tablet on the **same Wi-Fi** as this machine.
+2. Point its camera at the QR code and open the link.
+3. Tap **Prenesi** on a book — it lands in Downloads.
+4. Open Berilo and import the file.
+
+The page lists every EPUB in the directory, labelled with its title and author
+from the book's own metadata. Drop a new file into the directory and refresh
+the page; no restart needed.
+
+| Flag | Effect |
+|------|--------|
+| `--dir <path>` | Directory to publish (default `data/examples`) |
+| `--port 8577` | Port to listen on; falls back to a free one if taken |
+| `--host 127.0.0.1` | Bind locally only, e.g. for testing |
+| `--no-qr` | Print just the URL |
+
+**Scope of the exposure.** Each run mints a fresh random token that is baked
+into the URL, so scanning still costs no typing while someone else on the same
+network who probes the port gets a 404. The token dies with the process. Only
+`.epub` files directly in that one directory are ever listed or served, and
+nothing is uploaded anywhere — the file goes straight from this machine to
+your tablet.
+
+**If the page won't load,** the printed address is a guess: on a machine with
+a VPN or Docker, several addresses exist and only one is on your Wi-Fi.
+`serve` prints the alternatives under *"If that address does not load, try:"* —
+work down that list, or pass the right one explicitly. A VPN that routes
+private ranges (WireGuard, Tailscale) is the usual culprit.
 
 ## Reader app (Phase 2, Android / Boox)
 

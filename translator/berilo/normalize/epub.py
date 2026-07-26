@@ -150,6 +150,46 @@ def _read_metadata(opf_root: ET.Element) -> tuple[str, list[str], str]:
     return title, authors, language
 
 
+@dataclass(frozen=True)
+class EpubMetadata:
+    """Package-level metadata of an EPUB, without parsing its content.
+
+    Attributes:
+        title: ``dc:title``, or an empty string when the package declares none.
+        authors: Every ``dc:creator``, in declaration order.
+        language: ``dc:language`` (e.g. ``sl``), or an empty string.
+    """
+
+    title: str
+    authors: list[str]
+    language: str
+
+
+def read_epub_metadata(path: Path) -> EpubMetadata:
+    """Read an EPUB's title, authors, and language without parsing its content.
+
+    The full :func:`normalize_epub` walk is far too expensive for callers that
+    only need to label a file (the LAN catalog, a library listing). This reads
+    the container and the OPF package document and stops there.
+
+    Args:
+        path: Path to the ``.epub`` file.
+
+    Returns:
+        The package metadata; fields the package omits are empty.
+
+    Raises:
+        ValueError: If the EPUB container declares no OPF rootfile.
+        KeyError: If ``META-INF/container.xml`` is missing from the archive.
+        zipfile.BadZipFile: If *path* is not a valid zip archive.
+        xml.etree.ElementTree.ParseError: If the container or OPF XML is malformed.
+    """
+    with zipfile.ZipFile(path) as archive:
+        opf_root = ET.fromstring(archive.read(_find_opf_path(archive)))
+    title, authors, language = _read_metadata(opf_root)
+    return EpubMetadata(title=title, authors=authors, language=language)
+
+
 def _read_manifest(opf_root: ET.Element, opf_dir: str) -> dict[str, str]:
     """Map manifest item ``id`` to its zip-internal path, resolved against *opf_dir*."""
     manifest: dict[str, str] = {}
