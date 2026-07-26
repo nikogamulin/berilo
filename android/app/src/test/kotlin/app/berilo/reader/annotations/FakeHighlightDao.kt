@@ -12,12 +12,16 @@ class FakeHighlightDao : HighlightDao {
 
     fun count(): Int = entries.value.size
 
+    /** Live rows only, mirroring the real DAO's `deletedAt IS NULL` filter (S3.2). */
     override fun observeForBook(bookId: String) =
         entries.map { all ->
-            all.values.filter { it.bookId == bookId }.sortedBy { it.createdAt }
+            all.values
+                .filter { it.bookId == bookId && it.deletedAt == null }
+                .sortedBy { it.createdAt }
         }
 
-    override suspend fun getById(id: String): HighlightEntity? = entries.value[id]
+    override suspend fun getById(id: String): HighlightEntity? =
+        entries.value[id]?.takeIf { it.deletedAt == null }
 
     override suspend fun insert(entity: HighlightEntity) {
         entries.value = entries.value + (entity.id to entity)
@@ -29,5 +33,22 @@ class FakeHighlightDao : HighlightDao {
 
     override suspend fun deleteById(id: String) {
         entries.value = entries.value - id
+    }
+
+    override suspend fun softDelete(id: String, at: Long) {
+        val existing = entries.value[id] ?: return
+        entries.value = entries.value + (id to existing.copy(deletedAt = at, updatedAt = at))
+    }
+
+    override suspend fun dirtySince(since: Long, limit: Int): List<HighlightEntity> =
+        entries.value.values
+            .filter { it.updatedAt > since }
+            .sortedWith(compareBy({ it.updatedAt }, { it.id }))
+            .take(limit)
+
+    override suspend fun getAnyById(id: String): HighlightEntity? = entries.value[id]
+
+    override suspend fun upsert(entity: HighlightEntity) {
+        entries.value = entries.value + (entity.id to entity)
     }
 }

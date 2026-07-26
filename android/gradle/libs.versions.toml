@@ -19,6 +19,12 @@ okhttp = "4.12.0"
 kotlinxSerialization = "1.7.3"
 securityCrypto = "1.1.0-alpha06"
 roborazzi = "1.45.1"
+# S3.2: pinned to the last Kotlin-2.1.x-era Clerk release. 1.0.x is built against
+# kotlin-stdlib 2.4.0 and drags androidx.browser 1.10 / okhttp-android 5.4, which demand
+# compileSdk 36 + AGP 8.9.1 — outside this repo's pinned platform-35 set (docs/findings.md).
+# 0.1.31 needs kotlin-stdlib 2.1.20 and okhttp 4.12.0, exactly matching this project.
+clerk = "0.1.31"
+work = "2.10.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -54,6 +60,11 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 okhttp-mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+# S3.2: Clerk auth. The `-api` artifact only — the app draws its own sign-in screen from
+# `design_guidelines.md`, so Clerk's prebuilt `-ui` components are never pulled in.
+clerk-android-api = { group = "com.clerk", name = "clerk-android-api", version.ref = "clerk" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+androidx-work-testing = { group = "androidx.work", name = "work-testing", version.ref = "work" }
 # S2.10: JVM screenshot harness. Library-only (no Gradle plugin) so it doesn't touch the
 # AGP/compileSdk ceiling in docs/findings.md — captureRoboImage() is called directly from
 # Robolectric-hosted Compose UI tests, same testDebug source set as the S2.9 UI tests.

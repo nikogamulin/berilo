@@ -19,3 +19,7 @@ core.[0-9]*
 keystore.properties
 *.keystore
 *.jks
+
+# S3.2: cloud-sync build config (Clerk publishable key + API base URL) — the
+# compiled APK carries them, git never does. berilo.properties.example is the template.
+berilo.properties

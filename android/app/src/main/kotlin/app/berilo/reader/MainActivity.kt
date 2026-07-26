@@ -13,7 +13,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import app.berilo.reader.store.repository.Book
+import app.berilo.reader.sync.SyncWorker
+import kotlinx.coroutines.launch
 import app.berilo.reader.reader.ReaderActivity
 import app.berilo.reader.settings.SettingsActivity
 import app.berilo.reader.ui.library.LibraryEvent
@@ -37,6 +40,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // S3.2: background sync is registered here rather than in Application.onCreate. The
+        // Application object is constructed by every Robolectric-hosted test, and WorkManager
+        // has no initialized instance there — scheduling from the launcher activity keeps the
+        // JVM test suite free of a scheduler it never exercises, and costs nothing at runtime
+        // since KEEP means re-registering an existing schedule is a no-op.
+        val container = (application as BeriloApplication).container
+        if (container.syncManager.isConfigured) {
+            SyncWorker.schedule(this)
+            // Catch up immediately on launch: a user who reconnects and opens the app should
+            // not wait for the next periodic window.
+            lifecycleScope.launch { container.syncManager.syncNow() }
+        }
         setContent {
             BeriloTheme {
                 val uiState by viewModel.uiState.collectAsStateWithLifecycle()

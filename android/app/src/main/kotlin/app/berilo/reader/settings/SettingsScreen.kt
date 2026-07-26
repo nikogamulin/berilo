@@ -64,6 +64,9 @@ fun SettingsScreen(
     onTestAnthropicKey: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    // S3.2: defaulted so the existing Compose tests, which are about API-key handling, keep
+    // constructing this screen without knowing about the account surface.
+    onOpenAccount: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
@@ -86,6 +89,10 @@ fun SettingsScreen(
                     .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp),
         ) {
+            TextButton(onClick = onOpenAccount, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.settings_account))
+            }
+            HorizontalDivider()
             ApiKeySection(
                 label = stringResource(R.string.settings_openai_key_label),
                 key = uiState.openaiKey,

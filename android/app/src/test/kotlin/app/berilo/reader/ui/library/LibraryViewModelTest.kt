@@ -10,6 +10,7 @@ import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -19,6 +20,8 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -128,7 +131,39 @@ class LibraryViewModelTest {
         }
 
     @Test
-    fun `deleteBook removes the book from the repository`() =
+    fun `deleteBook removes the book from the library and deletes its file`() =
+        runTest(testDispatcher) {
+            val dao = FakeBookDao()
+            val epub = File(tempDir, "x.epub").apply { writeText("stub") }
+            dao.insert(
+                BookEntity(
+                    id = "x",
+                    title = "Title",
+                    authors = "Author",
+                    filePath = epub.absolutePath,
+                    coverPath = null,
+                    addedAt = 1L,
+                    lastOpenedAt = null,
+                    progressionJson = null,
+                ),
+            )
+            val viewModel = viewModel(dao)
+
+            viewModel.deleteBook(dao.getById("x")!!.toDomain())
+            advanceUntilIdle()
+
+            assertNull("a deleted book must not be readable", dao.getById("x"))
+            assertEquals("the library must not list it", 0, dao.observeAll().first().size)
+            assertFalse("the EPUB itself must leave the disk", epub.exists())
+        }
+
+    /**
+     * S3.2: deletion is a tombstone, not a row removal. Without the surviving row the delete
+     * would never reach the user's other devices, and the next pull would restore the book the
+     * user just deleted. The metadata that survives is title/authors only — the file is gone.
+     */
+    @Test
+    fun `deleteBook leaves a tombstone so the delete can propagate`() =
         runTest(testDispatcher) {
             val dao = FakeBookDao()
             dao.insert(
@@ -148,7 +183,13 @@ class LibraryViewModelTest {
             viewModel.deleteBook(dao.getById("x")!!.toDomain())
             advanceUntilIdle()
 
-            assertEquals(0, dao.count())
+            val tombstone = dao.getAnyById("x")
+            assertNotNull("the row must survive as a tombstone", tombstone)
+            assertNotNull("deletedAt must be set", tombstone!!.deletedAt)
+            assertTrue(
+                "the tombstone must be dirty so it is pushed",
+                dao.metadataDirtySince(0L, 10).any { it.id == "x" },
+            )
         }
 
     private fun importer(dao: FakeBookDao): BookImporter =

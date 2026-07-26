@@ -30,6 +30,10 @@ import androidx.room.PrimaryKey
  *   locator carried none (falls back to an "Untitled" bucket in the notebook/export).
  * @property createdAt Epoch-millis timestamp of creation.
  * @property updatedAt Epoch-millis timestamp of the last edit (color/note change).
+ * @property deletedAt Epoch-millis tombstone, or null for a live row (S3.2, `sync_api.md`
+ *   [OPEN-4]). Deleting a highlight keeps the row so the delete reaches the other devices
+ *   instead of the row silently reappearing on the next pull; the notebook and the reader's
+ *   decorations both filter tombstones out.
  */
 @Entity(tableName = "highlights", indices = [Index("bookId")])
 data class HighlightEntity(
@@ -42,4 +46,5 @@ data class HighlightEntity(
     val chapterTitle: String?,
     val createdAt: Long,
     val updatedAt: Long,
+    val deletedAt: Long? = null,
 )

@@ -27,6 +27,20 @@
 -keep @androidx.room.Entity class * { *; }
 -dontwarn androidx.room.paging.**
 
+# --- Clerk (S3.2) -----------------------------------------------------------
+# The Clerk AAR ships its own consumer rules, which already keep its serializable
+# models and Retrofit interfaces, so nothing is repeated here.
+#
+# What is needed is these -dontwarn entries. app/build.gradle.kts deliberately excludes
+# Clerk's Play-Services dependencies (Google One Tap, Play Integrity): Boox e-ink tablets
+# frequently ship without Play Services, and this app signs in with email codes and
+# passwords only, so those code paths are unreachable. R8 still sees the references from
+# Clerk's compiled SSO/attestation classes and fails the build over classes that are
+# absent by design — these silence exactly that, and nothing else.
+-dontwarn com.google.android.gms.tasks.**
+-dontwarn com.google.android.libraries.identity.googleid.**
+-dontwarn com.google.android.play.core.integrity.**
+
 # --- Readium (shared/streamer/navigator) ------------------------------------
 # The toolkit parses OPF/NCX/media-type metadata and (de)serializes its model
 # classes reflectively; keep the whole package rather than chase individual

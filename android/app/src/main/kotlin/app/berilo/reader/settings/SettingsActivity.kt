@@ -9,6 +9,7 @@ import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.berilo.reader.BeriloApplication
+import app.berilo.reader.sync.ui.AccountActivity
 import app.berilo.reader.ui.theme.BeriloTheme
 
 /** Single entry point for the Settings screen (S2.3), reached from the library top bar. */
@@ -33,6 +34,7 @@ class SettingsActivity : ComponentActivity() {
                     onTestOpenAiKey = { viewModel.testKey(LlmProvider.OPENAI) },
                     onTestAnthropicKey = { viewModel.testKey(LlmProvider.ANTHROPIC) },
                     onBack = { finish() },
+                    onOpenAccount = { startActivity(AccountActivity.newIntent(this)) },
                 )
             }
         }

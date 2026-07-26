@@ -14,11 +14,14 @@ class FakeBookDao : BookDao {
 
     override fun observeAll(): Flow<List<BookEntity>> = state
 
-    override suspend fun getById(id: String): BookEntity? = books[id]
+    override suspend fun getById(id: String): BookEntity? =
+        books[id]?.takeIf { it.deletedAt == null }
 
-    override suspend fun exists(id: String): Boolean = books.containsKey(id)
+    override suspend fun exists(id: String): Boolean = getById(id) != null
 
-    override suspend fun getProgression(id: String): String? = books[id]?.progressionJson
+    override suspend fun getAnyById(id: String): BookEntity? = books[id]
+
+    override suspend fun getProgression(id: String): String? = getById(id)?.progressionJson
 
     override suspend fun updateProgression(id: String, progressionJson: String?, openedAt: Long) {
         val existing = books[id] ?: return
@@ -47,7 +50,60 @@ class FakeBookDao : BookDao {
         publish()
     }
 
+    override suspend fun softDelete(id: String, at: Long) {
+        val existing = books[id] ?: return
+        books[id] = existing.copy(deletedAt = at, updatedAt = at)
+        publish()
+    }
+
+    override suspend fun metadataDirtySince(since: Long, limit: Int): List<BookEntity> =
+        books.values
+            .filter { it.updatedAt > since }
+            .sortedWith(compareBy({ it.updatedAt }, { it.id }))
+            .take(limit)
+
+    override suspend fun progressDirtySince(since: Long, limit: Int): List<BookEntity> =
+        books.values
+            .filter {
+                it.deletedAt == null && it.progressionJson != null && (it.lastOpenedAt ?: 0L) > since
+            }
+            .sortedWith(compareBy({ it.lastOpenedAt ?: 0L }, { it.id }))
+            .take(limit)
+
+    override suspend fun applyServerMetadata(
+        id: String,
+        title: String,
+        authors: String,
+        sourceLang: String?,
+        targetLang: String?,
+        updatedAt: Long,
+        deletedAt: Long?,
+    ) {
+        val existing = books[id] ?: return
+        // Mirrors the real query: server-owned columns only, device-local paths untouched.
+        books[id] =
+            existing.copy(
+                title = title,
+                authors = authors,
+                sourceLang = sourceLang,
+                targetLang = targetLang,
+                updatedAt = updatedAt,
+                deletedAt = deletedAt,
+            )
+        publish()
+    }
+
+    override suspend fun applyServerProgress(id: String, progressionJson: String, updatedAt: Long) {
+        val existing = books[id]?.takeIf { it.deletedAt == null } ?: return
+        books[id] = existing.copy(progressionJson = progressionJson, lastOpenedAt = updatedAt)
+        publish()
+    }
+
+    /** Mirrors the real query: live rows whose EPUB is present on this device. */
     private fun publish() {
-        state.value = books.values.sortedByDescending { it.addedAt }
+        state.value =
+            books.values
+                .filter { it.deletedAt == null && it.filePath.isNotEmpty() }
+                .sortedByDescending { it.addedAt }
     }
 }

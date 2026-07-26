@@ -52,7 +52,12 @@ class ReadiumMetadataExtractor(context: Context) : BookMetadataExtractor {
                 val title = BookMetadataMapper.mapTitle(publication.metadata.title, fallbackTitle)
                 val authors = BookMetadataMapper.mapAuthors(publication.metadata.authors.map { it.name })
                 val coverBytes = publication.cover()?.let(::encodeCoverJpeg)
-                ExtractedMetadata(title = title, authors = authors, coverBytes = coverBytes)
+                ExtractedMetadata(
+                    title = title,
+                    authors = authors,
+                    coverBytes = coverBytes,
+                    language = BookMetadataMapper.mapLanguage(publication.metadata.languages),
+                )
             } finally {
                 publication.close()
             }

@@ -21,6 +21,41 @@ val keystoreProperties = Properties().apply {
     }
 }
 
+// S3.2: cloud-sync build configuration, resolved at build time and baked into BuildConfig so
+// the compiled APK can reach the sync service while the repository stays value-free.
+//
+// The Clerk *publishable* key is a public client identifier (the web app serves the same
+// string in its JS bundle) — it authorizes nothing on its own. It is kept out of git anyway so
+// this open-source repo carries no environment-specific values, and because the secret half of
+// the pair (CLERK_SECRET_KEY, SUPABASE_SECRET_KEY) must never come near the app: the client
+// only ever holds a short-lived session JWT that Postgres RLS evaluates server-side.
+//
+// Resolution order, first hit wins: android/berilo.properties (gitignored, see
+// berilo.properties.example) -> environment variable -> empty. Empty is not a build failure:
+// the app compiles and runs with the sync surface disabled behind a stated message, which
+// keeps `assembleDebug` working for any contributor who clones without credentials.
+val syncPropertiesFile = rootProject.file("berilo.properties")
+val syncProperties = Properties().apply {
+    if (syncPropertiesFile.exists()) {
+        load(FileInputStream(syncPropertiesFile))
+    }
+}
+
+fun syncConfig(key: String, envVar: String, default: String = ""): String =
+    syncProperties.getProperty(key)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(envVar)?.takeIf { it.isNotBlank() }
+        ?: default
+
+val clerkPublishableKey = syncConfig("clerkPublishableKey", "BERILO_CLERK_PUBLISHABLE_KEY")
+val syncApiBaseUrl = syncConfig("apiBaseUrl", "BERILO_API_BASE_URL", "https://berilo.app/api/v1")
+
+if (clerkPublishableKey.isEmpty()) {
+    logger.lifecycle(
+        "berilo: no clerkPublishableKey -> cloud sync disabled in this build " +
+            "(see android/berilo.properties.example)"
+    )
+}
+
 android {
     namespace = "app.berilo.reader"
     compileSdk = 35
@@ -33,6 +68,9 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "CLERK_PUBLISHABLE_KEY", "\"$clerkPublishableKey\"")
+        buildConfigField("String", "SYNC_API_BASE_URL", "\"$syncApiBaseUrl\"")
     }
 
     signingConfigs {
@@ -76,7 +114,8 @@ android {
 
     buildFeatures {
         compose = true
-        // BuildConfig.DEBUG gates the reader's page-turn timing overlay (PerfLog, R2).
+        // BuildConfig.DEBUG gates the reader's page-turn timing overlay (PerfLog, R2); S3.2
+        // adds CLERK_PUBLISHABLE_KEY / SYNC_API_BASE_URL (see syncConfig above).
         buildConfig = true
     }
 
@@ -141,6 +180,32 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.security.crypto)
+
+    // S3.2: cloud sync — Clerk session auth + background sync scheduling.
+    implementation(libs.clerk.android.api) {
+        // Boox e-ink tablets frequently ship without Google Play Services, and the app's
+        // sign-in is deliberately email-code only (no Google One Tap, no passkeys) so none of
+        // these are ever called. Excluding them keeps the APK from carrying Play-dependent
+        // code paths that would fail on the target device.
+        exclude(group = "com.google.android.gms")
+        exclude(group = "com.google.android.play")
+        exclude(group = "com.google.android.libraries.identity.googleid")
+        exclude(group = "androidx.credentials", module = "credentials-play-services-auth")
+    }
+    implementation(libs.androidx.work.runtime.ktx)
+
+    constraints {
+        // Clerk pulls androidx.browser 1.9.0, whose aar-metadata demands compileSdk 36 +
+        // AGP 8.9.1 and so breaks the platform-35 set this repo is pinned to
+        // (docs/findings.md). `strictly` holds it at the last 1.x that builds here.
+        // Safe because androidx.browser is Custom Tabs, which only Clerk's OAuth/SSO
+        // redirect paths use — this app signs in with email codes and passwords only, and
+        // the Play-side SSO dependencies are excluded above.
+        implementation("androidx.browser:browser") {
+            version { strictly("1.8.0") }
+            because("androidx.browser 1.9.0+ requires compileSdk 36/AGP 8.9.1 (findings.md)")
+        }
+    }
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 

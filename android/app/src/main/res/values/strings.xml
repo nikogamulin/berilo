@@ -92,4 +92,34 @@
     <string name="highlight_color_rose">Rose</string>
     <string name="highlight_color_cd">%1$s highlight color</string>
     <string name="highlight_color_selected_cd">%1$s highlight color, selected</string>
+
+    <!-- S3.2: account and cloud sync. -->
+    <string name="account_title">Account &amp; sync</string>
+    <string name="account_back_cd">Back</string>
+    <string name="settings_account">Account &amp; sync</string>
+    <string name="account_privacy">Your notes, highlights, vocabulary, reading position and book titles sync to your account. Book files never leave this device.</string>
+    <string name="account_unconfigured">This build has no account configured, so sync is off. Everything else works as usual.</string>
+    <string name="account_loading">Checking your account…</string>
+    <string name="account_email_label">Email</string>
+    <string name="account_password_label">Password</string>
+    <string name="account_use_password">Use a password instead</string>
+    <string name="account_code_explainer">We\'ll email you a one-time code. No password to type.</string>
+    <string name="account_sign_in">Sign in</string>
+    <string name="account_sign_up">Create an account</string>
+    <string name="account_working">Working…</string>
+    <string name="account_code_sent">Enter the code sent to %1$s.</string>
+    <string name="account_code_label">Code</string>
+    <string name="account_verify">Verify</string>
+    <string name="account_start_over">Use a different email</string>
+    <string name="account_signed_in_as">Signed in as %1$s</string>
+    <string name="account_sign_out">Sign out</string>
+    <string name="account_sign_out_explainer">Signing out leaves your books, notes and vocabulary on this device.</string>
+    <string name="account_sync_now">Sync now</string>
+    <string name="account_sync_idle">Not synced yet.</string>
+    <string name="account_sync_running">Syncing…</string>
+    <string name="account_sync_ok">Synced. %1$d received, %2$d sent.</string>
+    <string name="account_sync_offline">Offline — will sync when you\'re connected.</string>
+    <string name="account_sync_signed_out">Signed out — sign in to sync.</string>
+    <string name="account_sync_rate_limited">Too many requests — will retry shortly.</string>
+    <string name="account_sync_failed">Sync failed: %1$s</string>
 </resources>

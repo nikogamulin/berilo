@@ -1,4 +1,4 @@
-# Berilo sync API contract — v1.1 (post-review)
+# Berilo sync API contract — v1.3
 
 > Implementation-ready contract for `berilo-cloud` (private repo). This
 > document is the boundary artifact: the private repo implements *from* this
@@ -16,6 +16,33 @@
 > yet, so this is a pre-implementation revision fixing gaps found in
 > plan-critic review (F1–F13 below), not a breaking change to a deployed
 > API. The wire version stays `/api/v1/*` (§6).
+>
+> **v1.2 note (2026-07-25).** Additive, for the growth surface (S3.6 /
+> `berilo-cloud` C6.1): `shared_passages` gains a nullable
+> `source_excerpt` (≤ 500 chars, server-enforced — same anti-piracy cap as
+> `excerpt`) carrying the aligned source-language sentence for the
+> bilingual passage card, plus nullable `source_lang` / `target_lang`
+> (BCP-47 primary subtags, e.g. `en`, `sl`) snapshotted at share time for
+> the card's `EN → SL` badge — consistent with the table's snapshot design
+> (`book_title`/`book_authors` are already denormalized there). All three
+> are nullable because existing highlights predate source alignment; the
+> card renders monolingual and badge-less when absent. Public payloads
+> expose them wherever `excerpt` is exposed. `shelves.kind` additionally
+> gains `'favourites'` (S3.6 "štiri knjige": the four-slot favourites block
+> on the public profile) — the existing one-non-custom-shelf-per-kind index
+> already caps it at one per user; the block renders its first four items.
+> The wire version stays `/api/v1/*`.
+>
+> **v1.3 note (2026-07-25).** Additive, for S3.6 C6.4/C6.5: new
+> service-side tables `gifts` (priporoči knjigo — the private
+> send-to-one-person page) and `recaps` (letni pregled — the published
+> data-only reading recap). Both are web-service state, **not synced
+> entities**: they never appear in `/sync/pull` or `/sync/push` and the
+> Android client is unaffected. Anonymous reads use a capability-token
+> RLS policy (URL token, sha256 stored, compared inside the policy via
+> the request header) — no `SECURITY DEFINER`, no enumerable listing.
+> Gift creation is rate-limited server-side (stated error, never a 500).
+> The wire version stays `/api/v1/*`.
 
 ## 1. Overview
 
@@ -115,9 +142,10 @@ than guessing, since it changes the RLS policy shape below.
   server still subjects to the normal `updated_at` LWW check against the
   tombstone. This is enforced at the database layer, not just in API code:
   every tombstone-bearing table carries an `enforce_delete_wins` trigger
-  (§2) that raises unless the request set `berilo.allow_undelete = true`
-  for that transaction (the push handler sets it only when the item's
-  `undelete` flag is `true`).
+  (§2) that raises unless the authenticated PostgREST request carries
+  `x-berilo-undelete: true` (the push handler uses that separate
+  request-scoped client only when the item's `undelete` flag is `true`).
+  The header does not grant access: the normal owner RLS policy still applies.
 - **`progress` is upsert-only.** It has no `deleted_at` column and no
   delete operation — a reading-position row is simply overwritten as the
   reader advances; there is no "un-reading" a book. `op: delete` on
@@ -148,27 +176,34 @@ Executable DDL. Every table has `user_id`, `created_at`, `updated_at`
 `gen_random_uuid()` (enabled by default on Supabase).
 
 ```sql
--- Shared trigger: auto-touch updated_at on every UPDATE.
+-- Shared trigger: auto-touch updated_at on ordinary web edits while preserving
+-- the explicit UTC timestamp supplied by sync writes.
 create or replace function set_updated_at()
 returns trigger as $$
 begin
-  new.updated_at = now();
+  if new.updated_at is not distinct from old.updated_at then
+    new.updated_at = now();
+  end if;
   return new;
 end;
 $$ language plpgsql;
 
 -- Shared trigger: delete-wins (§1.3). Blocks any UPDATE that would clear a
--- tombstone unless the API explicitly opted in for this transaction via
--- `set local berilo.allow_undelete = 'true'` (only done for a push item
--- with `undelete: true`, itself still subject to normal LWW).
+-- tombstone unless the authenticated PostgREST request explicitly opted in
+-- with x-berilo-undelete: true (only used for a push item with undelete: true,
+-- itself still subject to normal LWW). RLS continues to enforce ownership.
 create or replace function enforce_delete_wins()
 returns trigger as $$
 begin
   if old.deleted_at is not null
      and new.deleted_at is null
-     and coalesce(current_setting('berilo.allow_undelete', true), 'false') <> 'true'
+     and coalesce(
+       (nullif(current_setting('request.headers', true), '')::jsonb
+         ->> 'x-berilo-undelete'),
+       'false'
+     ) <> 'true'
   then
-    raise exception 'cannot clear deleted_at without explicit undelete (berilo.allow_undelete)';
+    raise exception 'cannot clear deleted_at without explicit undelete';
   end if;
   return new;
 end;
@@ -203,6 +238,12 @@ create policy profiles_upsert_own on profiles
 
 create policy profiles_update_own on profiles
   for update using (id = (auth.jwt() ->> 'sub'));
+
+-- Hard erasure is intentionally profile-scoped: deleting the caller's profile
+-- cascades through every user-owned table while RLS still verifies the Clerk
+-- subject. This is the self-service account-deletion path, not sync deletion.
+create policy profiles_delete_own on profiles
+  for delete using (id = (auth.jwt() ->> 'sub'));
 
 -- ---------------------------------------------------------------------
 -- books_metadata — content_hash is PK *per user* (composite), never a
@@ -359,7 +400,7 @@ create table shelves (
   id         uuid primary key default gen_random_uuid(),
   user_id    text not null references profiles(id) on delete cascade,
   kind       text not null default 'custom'
-             check (kind in ('reading','read','want_to_read','custom')),
+             check (kind in ('reading','read','want_to_read','custom','favourites')),  -- 'favourites' v1.2
   name       text not null,
   is_public  boolean not null default false,     -- [OPEN-3]
   created_at timestamptz not null default now(),
@@ -506,6 +547,8 @@ create policy ratings_select_public on ratings
 -- shared_passages — citation-length excerpt (<=500 chars) + attribution.
 -- `highlight_id` is a soft reference: the passage is a snapshot taken at
 -- share time and outlives edits/deletes of the source highlight.
+-- `source_excerpt` (v1.2) is the aligned source-language sentence for the
+-- bilingual card; nullable, same 500-char anti-piracy cap.
 -- ---------------------------------------------------------------------
 create table shared_passages (
   id             uuid primary key default gen_random_uuid(),
@@ -515,6 +558,9 @@ create table shared_passages (
   book_authors   text not null,
   highlight_id   uuid references highlights(id) on delete set null,
   excerpt        text not null check (char_length(excerpt) <= 500),
+  source_excerpt text check (char_length(source_excerpt) <= 500),  -- v1.2
+  source_lang    text check (source_lang ~ '^[a-z]{2,3}$'),        -- v1.2
+  target_lang    text check (target_lang ~ '^[a-z]{2,3}$'),        -- v1.2
   is_public      boolean not null default false,   -- private-by-default (spec §6.1)
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
@@ -549,6 +595,102 @@ create policy shared_passages_select_public on shared_passages
       select 1 from profiles p
       where p.id = shared_passages.user_id and p.is_public = true
     )
+  );
+
+-- ---------------------------------------------------------------------
+-- gifts (v1.3) — "priporoči knjigo": a private, send-to-one-person page.
+-- Never listed, never indexed. Anonymous access is capability-based: the
+-- URL carries a random token, the row stores only its sha256, and the
+-- select policy compares against the `x-berilo-gift-token` request
+-- header — without the token the anon role sees zero rows, so the table
+-- cannot be enumerated through PostgREST. No SECURITY DEFINER involved.
+-- The passage is a snapshot (like shared_passages): the gifted excerpt
+-- need not be public anywhere else, and edits later don't change a gift.
+-- ---------------------------------------------------------------------
+create table gifts (
+  id             uuid primary key default gen_random_uuid(),
+  user_id        text not null references profiles(id) on delete cascade,
+  token_hash     text not null check (token_hash ~ '^[0-9a-f]{64}$'),
+  recipient_name text check (char_length(recipient_name) <= 100),
+  message        text not null check (char_length(message) <= 280),
+  book_hash      text not null,
+  book_title     text not null,
+  book_authors   text not null,
+  excerpt        text not null check (char_length(excerpt) <= 500),
+  source_excerpt text check (char_length(source_excerpt) <= 500),
+  source_lang    text check (source_lang ~ '^[a-z]{2,3}$'),
+  target_lang    text check (target_lang ~ '^[a-z]{2,3}$'),
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  deleted_at     timestamptz
+);
+
+create trigger gifts_set_updated_at
+  before update on gifts
+  for each row execute function set_updated_at();
+
+create index gifts_user_created_idx on gifts (user_id, created_at);
+
+alter table gifts enable row level security;
+
+create policy gifts_owner_crud on gifts
+  for all
+  using (user_id = (auth.jwt() ->> 'sub'))
+  with check (user_id = (auth.jwt() ->> 'sub'));
+
+create policy gifts_select_by_token on gifts
+  for select using (
+    deleted_at is null
+    and token_hash = encode(extensions.digest(
+      coalesce(
+        nullif(current_setting('request.headers', true), '')::jsonb
+          ->> 'x-berilo-gift-token',
+        ''
+      ), 'sha256'), 'hex')
+  );
+
+-- ---------------------------------------------------------------------
+-- recaps (v1.3) — "letni pregled": a published, data-only reading recap.
+-- Private by default: the row exists only once the user publishes; the
+-- payload is a computed snapshot (no live joins, no LLM prose).
+-- Unpublishing tombstones the row -> the share URL 404s. Anonymous
+-- access uses the same capability-token pattern as gifts, via the
+-- `x-berilo-recap-token` header.
+-- ---------------------------------------------------------------------
+create table recaps (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     text not null references profiles(id) on delete cascade,
+  token_hash  text not null check (token_hash ~ '^[0-9a-f]{64}$'),
+  range_start date not null,
+  range_end   date not null check (range_end >= range_start),
+  payload     jsonb not null,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  deleted_at  timestamptz
+);
+
+create trigger recaps_set_updated_at
+  before update on recaps
+  for each row execute function set_updated_at();
+
+create index recaps_user_created_idx on recaps (user_id, created_at);
+
+alter table recaps enable row level security;
+
+create policy recaps_owner_crud on recaps
+  for all
+  using (user_id = (auth.jwt() ->> 'sub'))
+  with check (user_id = (auth.jwt() ->> 'sub'));
+
+create policy recaps_select_by_token on recaps
+  for select using (
+    deleted_at is null
+    and token_hash = encode(extensions.digest(
+      coalesce(
+        nullif(current_setting('request.headers', true), '')::jsonb
+          ->> 'x-berilo-recap-token',
+        ''
+      ), 'sha256'), 'hex')
   );
 ```
 
@@ -807,6 +949,9 @@ paths:
                         book_title: { type: string }
                         book_authors: { type: string }
                         excerpt: { type: string }
+                        source_excerpt: { type: string, nullable: true }
+                        source_lang: { type: string, nullable: true }
+                        target_lang: { type: string, nullable: true }
                         created_at: { type: string, format: date-time }
                   next_cursor: { type: string, nullable: true }
         "404": { description: Profile not found or not public. }
@@ -843,6 +988,9 @@ paths:
                         book_title: { type: string }
                         book_authors: { type: string }
                         excerpt: { type: string }
+                        source_excerpt: { type: string, nullable: true }
+                        source_lang: { type: string, nullable: true }
+                        target_lang: { type: string, nullable: true }
                         created_at: { type: string, format: date-time }
                   next_cursor: { type: string, nullable: true }
         "429": { $ref: "#/components/responses/RateLimited" }
@@ -1010,26 +1158,39 @@ client build in the field has migrated.
 
 ## 7. Open decisions for Niko
 
-- **[OPEN-1]** `vocabulary.sentence` needs a new column on
-  `DictionaryEntryEntity` (currently only `sentenceHash`) before S3.2 can
-  push it — confirm before S3.2 starts, or descope the raw sentence from
-  web review.
-- **[OPEN-2]** `books_metadata.source_lang`/`target_lang` have no Android
-  source today; confirm S3.2 backfills them (from EPUB `dc:language` /
-  settings) rather than leaving them null indefinitely.
+> **Client status (2026-07-25).** The Android sync client is implemented against
+> this contract. [OPEN-1], [OPEN-2] and [OPEN-4] were resolved in code as
+> described below; [OPEN-3] and [OPEN-5] remain open and are unaffected by the
+> client, which follows the contract as written.
+
+- **[OPEN-1]** *Resolved as (a).* `DictionaryEntryEntity` gained a
+  `sentence: String` column (schema v5). New lookups store the raw sentence
+  alongside its hash; the hash remains the cache key. Rows written before v5
+  keep an empty sentence — the migration cannot invert a hash — and the client
+  **skips pushing** those rather than earning a permanent `missing_sentence`
+  rejection. `SyncReport.skippedVocabulary` surfaces the count.
+- **[OPEN-2]** *Resolved, partially.* `BookEntity` gained `sourceLang`/
+  `targetLang`. `target_lang` is backfilled at import from the EPUB's
+  `dc:language`, reduced to a BCP-47 primary subtag so it satisfies the
+  `^[a-z]{2,3}$` check (`sl-SI` → `sl`). **`source_lang` is left null**: an EPUB
+  records the language it is *in*, not what it was translated from, and guessing
+  would put a fabricated value on the public language-pair badge. Populating it
+  properly means the translator writing the source language into its output
+  metadata — a Phase-1 change, not a client one.
 - **[OPEN-3]** Privacy granularity is per-shelf (`shelves.is_public`), not
   per-book-on-a-shelf. Confirm this matches the "per item" reading of spec
   §6.1, or this becomes `shelf_items.is_public` instead (changes the RLS
   policy on `shelf_items`).
-- **[OPEN-4]** Android's synced entities aren't sync-shaped yet:
-  `HighlightEntity` has no soft-delete flag and no outbox/pending-mutation
-  table (S2.6 shipped it as local-only), and `DictionaryEntryEntity` has no
-  `updatedAt` (only `createdAt`, treated as an immutable cache row). Both
-  are required by this contract — `updated_at` drives LWW on every pushed
-  item (§1.3), and a delete needs something to tombstone. S3.2 must add
-  soft-delete/outbox support to `HighlightEntity` and an `updatedAt` column
-  to `DictionaryEntryEntity` before it can implement the sync client
-  against this contract.
+- **[OPEN-4]** *Resolved.* Schema v5 adds `deletedAt` to `highlights` and
+  `books`, and `updatedAt`/`deletedAt` to `dictionary_entries`; deletes in the
+  annotations and library repositories are now tombstones, and every app-facing
+  query filters `deletedAt IS NULL`. **No outbox table was added.** Every synced
+  row already carries the `updatedAt` that decides LWW, so "dirty" is
+  `updatedAt > lastPushedAt`, with the watermark held per entity in a new
+  `sync_state` table. A second copy of each pending mutation would add nothing
+  but a way for the two records to disagree after a crash. The watermark advances
+  only across the leading run of items the server accepted, so a rejected item is
+  retried rather than skipped.
 - **[OPEN-5]** Client-clock LWW (§1.3) has a real data-loss mode: a device
   with a wrong clock can make its writes always lose (clock behind) or
   always win and clobber others' newer edits (clock ahead), silently, with
