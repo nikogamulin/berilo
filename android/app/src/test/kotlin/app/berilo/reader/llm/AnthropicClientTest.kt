@@ -114,10 +114,11 @@ class AnthropicClientTest {
         }
 
     @Test
-    fun `500 twice in a row maps to PROVIDER after the single retry`() =
+    fun `500 repeated past the retry ladder eventually maps to PROVIDER`() =
         runTest {
-            server.enqueue(MockResponse().setResponseCode(500))
-            server.enqueue(MockResponse().setResponseCode(500))
+            // MAX_RETRY_ATTEMPTS retries after the initial call: 1 + MAX_RETRY_ATTEMPTS
+            // requests total before the ladder gives up and the final 500 is mapped.
+            repeat(1 + MAX_RETRY_ATTEMPTS) { server.enqueue(MockResponse().setResponseCode(500)) }
 
             val error =
                 try {
@@ -129,7 +130,153 @@ class AnthropicClientTest {
                 }
 
             assertEquals(LlmError.Kind.PROVIDER, error!!.kind)
+            assertEquals(1 + MAX_RETRY_ATTEMPTS, server.requestCount)
+        }
+
+    @Test
+    fun `429 with Retry-After honours the header delay instead of the computed backoff`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(429).addHeader("Retry-After", "5"))
+            server.enqueue(MockResponse().setBody(successBody()))
+
+            val before = testScheduler.currentTime
+            val result = client().complete(prompt = "hi")
+            val elapsedMs = testScheduler.currentTime - before
+
+            assertEquals("ok", result.text)
             assertEquals(2, server.requestCount)
+            assertEquals(5_000L, elapsedMs)
+        }
+
+    @Test
+    fun `empty completion text raises EMPTY_COMPLETION carrying the billed result`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "content": [],
+                      "usage": {"input_tokens": 40, "output_tokens": 3},
+                      "stop_reason": "end_turn"
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.EMPTY_COMPLETION, error!!.kind)
+            val billed = error.result!!
+            assertEquals("", billed.text)
+            assertEquals(40, billed.inputTokens)
+            assertEquals(3, billed.outputTokens)
+            assertTrue(billed.costEur > 0.0)
+        }
+
+    @Test
+    fun `stop_reason max_tokens raises TRUNCATED_COMPLETION carrying the billed result`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "content": [{"type": "text", "text": "partial transl"}],
+                      "usage": {"input_tokens": 40, "output_tokens": 1024},
+                      "stop_reason": "max_tokens"
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.TRUNCATED_COMPLETION, error!!.kind)
+            val billed = error.result!!
+            assertEquals("partial transl", billed.text)
+            assertEquals(1024, billed.outputTokens)
+            assertTrue(billed.costEur > 0.0)
+        }
+
+    @Test
+    fun `in-band stop_reason refusal on an otherwise-200 response maps to CONTENT_POLICY`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "content": [],
+                      "usage": {"input_tokens": 40, "output_tokens": 0},
+                      "stop_reason": "refusal"
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.CONTENT_POLICY, error!!.kind)
+        }
+
+    @Test
+    fun `400 usage policy body maps to CONTENT_POLICY without leaking the response body`() =
+        runTest {
+            val bodySecret = "moderation-detail-should-never-leak"
+            server.enqueue(
+                MockResponse().setResponseCode(400).setBody(
+                    """{"type": "error", "error": {"type": "invalid_request_error", "message": "Usage policy violation: $bodySecret"}}""",
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.CONTENT_POLICY, error!!.kind)
+            assertFalse(error.message.orEmpty().contains(bodySecret))
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun `400 unrelated to content policy is not swallowed`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error": {"message": "bad schema"}}"""))
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.PROVIDER, error!!.kind)
         }
 
     private fun successBody() =

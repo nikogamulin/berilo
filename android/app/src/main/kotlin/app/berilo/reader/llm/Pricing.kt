@@ -26,6 +26,36 @@ private val PRICING_USD_PER_MILLION_TOKENS: Map<String, Pair<Double, Double>> =
     )
 
 /**
+ * Returns whether `model` has a pricing entry.
+ *
+ * @param model Model identifier to check.
+ */
+internal fun isKnownModel(model: String): Boolean = model in PRICING_USD_PER_MILLION_TOKENS
+
+/** Sorted, comma-joined list of every priced model (for error messages). */
+private fun knownModelsList(): String = PRICING_USD_PER_MILLION_TOKENS.keys.sorted().joinToString(", ")
+
+/**
+ * Throws if `model` has no pricing entry.
+ *
+ * Intended as a pre-flight check called *before* any API request is made (see
+ * [createLlmClient]), so an unpriced model fails fast and for free — never after the
+ * call has already been billed (review finding 6).
+ *
+ * @param model Model identifier to check.
+ * @throws LlmError With [LlmError.Kind.PROVIDER] if `model` has no known pricing entry.
+ *   The message lists all known models so the caller can pick a supported one.
+ */
+internal fun requireKnownModel(model: String) {
+    if (!isKnownModel(model)) {
+        throw LlmError(
+            "Unsupported model '$model' — pick one in Settings. Known models: ${knownModelsList()}.",
+            LlmError.Kind.PROVIDER,
+        )
+    }
+}
+
+/**
  * Computes the EUR cost of a completion call.
  *
  * @param model Model identifier as billed (must be a key in the pricing table above).
@@ -34,7 +64,9 @@ private val PRICING_USD_PER_MILLION_TOKENS: Map<String, Pair<Double, Double>> =
  * @return Cost of the call in EUR.
  * @throws LlmError With [LlmError.Kind.PARSE] if `model` has no known pricing entry — an
  *   unrecognized model in a real response means something is wrong with the
- *   response parse, not a genuine new model to price silently.
+ *   response parse, not a genuine new model to price silently. Every call site reaches
+ *   this only after [requireKnownModel] has already pre-flighted the model, so this is
+ *   defense in depth, not the primary guard.
  */
 internal fun costEur(model: String, inputTokens: Int, outputTokens: Int): Double {
     val pricing =

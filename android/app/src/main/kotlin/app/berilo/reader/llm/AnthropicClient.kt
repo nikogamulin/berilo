@@ -56,8 +56,9 @@ class AnthropicClient(
                     .post(bodyJson.toRequestBody(LLM_JSON_MEDIA_TYPE))
                     .build()
 
-            val response = requireSuccessful(executeWithRetry(httpClient, request), ANTHROPIC_PROVIDER_LABEL)
-            parseAnthropicResponse(response)
+            val response = executeWithRetry(httpClient, request)
+            checkContentPolicyRefusal(response, ANTHROPIC_PROVIDER_LABEL, ::isAnthropicContentPolicyRefusal)
+            parseAnthropicResponse(requireSuccessful(response, ANTHROPIC_PROVIDER_LABEL))
         }
 
     private fun parseAnthropicResponse(response: okhttp3.Response): LlmResult =
@@ -71,21 +72,59 @@ class AnthropicClient(
                 } catch (e: SerializationException) {
                     throw LlmError("Could not parse $ANTHROPIC_PROVIDER_LABEL response.", LlmError.Kind.PARSE, e)
                 }
-            val text = parsed.content.filter { block -> block.type == "text" }.joinToString(separator = "") { block -> block.text }
-            if (text.isEmpty()) {
-                throw LlmError("$ANTHROPIC_PROVIDER_LABEL response had no completion.", LlmError.Kind.PARSE)
+            // Checked before any text/usage extraction — an in-band refusal (an
+            // otherwise-200 response) is Anthropic's second content-policy signal
+            // alongside the pre-generation HTTP 400 handled by
+            // `checkContentPolicyRefusal` above; a wrapper around the HTTP error alone
+            // misses this case (review finding 18).
+            if (parsed.stopReason == "refusal") {
+                throw LlmError(
+                    "$ANTHROPIC_PROVIDER_LABEL refused the request for model $model on content-policy " +
+                        "grounds (stop_reason='refusal'); route this batch to a fallback provider.",
+                    LlmError.Kind.CONTENT_POLICY,
+                )
             }
+            val text = parsed.content.filter { block -> block.type == "text" }.joinToString(separator = "") { block -> block.text }
             val usage =
                 parsed.usage ?: throw LlmError("$ANTHROPIC_PROVIDER_LABEL response had no usage data.", LlmError.Kind.PARSE)
-            LlmResult(
-                text = text,
-                inputTokens = usage.inputTokens,
-                outputTokens = usage.outputTokens,
-                costEur = costEur(model, usage.inputTokens, usage.outputTokens),
-                model = model,
-            )
+            // Computed before the truncation/emptiness checks below so a caller that
+            // degrades instead of propagating (see LlmError.Kind.EMPTY_COMPLETION /
+            // TRUNCATED_COMPLETION) can still fold this call's real, billed cost into
+            // its accounting via the exception's `result` property.
+            val billedResult =
+                LlmResult(
+                    text = text,
+                    inputTokens = usage.inputTokens,
+                    outputTokens = usage.outputTokens,
+                    costEur = costEur(model, usage.inputTokens, usage.outputTokens),
+                    model = model,
+                )
+            if (parsed.stopReason == "max_tokens") {
+                throw LlmError(
+                    "$ANTHROPIC_PROVIDER_LABEL truncated the completion for model $model " +
+                        "(stop_reason='max_tokens'); the response is incomplete despite being billed. " +
+                        "Increase max_tokens or reduce the batch size.",
+                    LlmError.Kind.TRUNCATED_COMPLETION,
+                    result = billedResult,
+                )
+            }
+            if (text.isEmpty()) {
+                throw LlmError(
+                    "$ANTHROPIC_PROVIDER_LABEL returned no completion text for model $model " +
+                        "(${usage.outputTokens} output tokens billed).",
+                    LlmError.Kind.EMPTY_COMPLETION,
+                    result = billedResult,
+                )
+            }
+            billedResult
         }
 }
+
+/** Detects an Anthropic content-policy refusal from an HTTP 400 error body (mirrors
+ * `translator/berilo/providers/anthropic.py`'s `BadRequestError` check). Used only to
+ * pick which fixed message to raise — the body text itself never reaches the thrown
+ * error. */
+private fun isAnthropicContentPolicyRefusal(body: String): Boolean = body.lowercase().contains("usage polic")
 
 @Serializable
 private data class AnthropicMessage(val role: String, val content: String)
@@ -102,6 +141,7 @@ private data class AnthropicRequest(
 private data class AnthropicResponse(
     val content: List<AnthropicContentBlock> = emptyList(),
     val usage: AnthropicUsage? = null,
+    @SerialName("stop_reason") val stopReason: String? = null,
 )
 
 @Serializable

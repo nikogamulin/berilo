@@ -84,7 +84,13 @@ class DictionaryViewModel(
         when (this) {
             LlmError.Kind.NETWORK -> DictionaryErrorKind.NETWORK
             LlmError.Kind.AUTH -> DictionaryErrorKind.AUTH
-            LlmError.Kind.RATE_LIMIT, LlmError.Kind.PROVIDER, LlmError.Kind.PARSE -> DictionaryErrorKind.OTHER
+            LlmError.Kind.RATE_LIMIT,
+            LlmError.Kind.PROVIDER,
+            LlmError.Kind.PARSE,
+            LlmError.Kind.CONTENT_POLICY,
+            LlmError.Kind.EMPTY_COMPLETION,
+            LlmError.Kind.TRUNCATED_COMPLETION,
+            -> DictionaryErrorKind.OTHER
         }
 
     class Factory(

@@ -112,10 +112,11 @@ class OpenAiClientTest {
         }
 
     @Test
-    fun `429 twice in a row maps to RATE_LIMIT after the single retry`() =
+    fun `429 repeated past the retry ladder eventually maps to RATE_LIMIT`() =
         runTest {
-            server.enqueue(MockResponse().setResponseCode(429))
-            server.enqueue(MockResponse().setResponseCode(429))
+            // MAX_RETRY_ATTEMPTS retries after the initial call: 1 + MAX_RETRY_ATTEMPTS
+            // requests total before the ladder gives up and the final 429 is mapped.
+            repeat(1 + MAX_RETRY_ATTEMPTS) { server.enqueue(MockResponse().setResponseCode(429)) }
 
             val error =
                 try {
@@ -127,7 +128,24 @@ class OpenAiClientTest {
                 }
 
             assertEquals(LlmError.Kind.RATE_LIMIT, error!!.kind)
+            assertEquals(1 + MAX_RETRY_ATTEMPTS, server.requestCount)
+        }
+
+    @Test
+    fun `429 with Retry-After honours the header delay instead of the computed backoff`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(429).addHeader("Retry-After", "7"))
+            server.enqueue(MockResponse().setBody(successBody()))
+
+            val before = testScheduler.currentTime
+            val result = client().complete(prompt = "hi")
+            val elapsedMs = testScheduler.currentTime - before
+
+            assertEquals("ok", result.text)
             assertEquals(2, server.requestCount)
+            // Exactly the Retry-After delay (7s), not the ~1-2s the computed backoff
+            // formula would have produced for attempt 1.
+            assertEquals(7_000L, elapsedMs)
         }
 
     @Test
@@ -145,6 +163,135 @@ class OpenAiClientTest {
                 }
 
             assertEquals(LlmError.Kind.PARSE, error!!.kind)
+        }
+
+    @Test
+    fun `empty completion text raises EMPTY_COMPLETION carrying the billed result`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "choices": [{"message": {"content": ""}, "finish_reason": "stop"}],
+                      "usage": {"prompt_tokens": 40, "completion_tokens": 5}
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.EMPTY_COMPLETION, error!!.kind)
+            val billed = error.result!!
+            assertEquals("", billed.text)
+            assertEquals(40, billed.inputTokens)
+            assertEquals(5, billed.outputTokens)
+            assertTrue(billed.costEur > 0.0)
+        }
+
+    @Test
+    fun `null completion content raises EMPTY_COMPLETION carrying the billed result`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "choices": [{"message": {}, "finish_reason": "content_filter"}],
+                      "usage": {"prompt_tokens": 40, "completion_tokens": 0}
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.EMPTY_COMPLETION, error!!.kind)
+            assertEquals(40, error.result!!.inputTokens)
+        }
+
+    @Test
+    fun `finish_reason length raises TRUNCATED_COMPLETION carrying the billed result`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setBody(
+                    """
+                    {
+                      "choices": [{"message": {"content": "partial transl"}, "finish_reason": "length"}],
+                      "usage": {"prompt_tokens": 40, "completion_tokens": 1024}
+                    }
+                    """.trimIndent(),
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.TRUNCATED_COMPLETION, error!!.kind)
+            val billed = error.result!!
+            assertEquals("partial transl", billed.text)
+            assertEquals(1024, billed.outputTokens)
+            assertTrue(billed.costEur > 0.0)
+        }
+
+    @Test
+    fun `400 invalid_prompt maps to CONTENT_POLICY without leaking the response body`() =
+        runTest {
+            val bodySecret = "moderation-detail-should-never-leak"
+            server.enqueue(
+                MockResponse().setResponseCode(400).setBody(
+                    """{"error": {"message": "blocked: $bodySecret", "code": "invalid_prompt"}}""",
+                ),
+            )
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.CONTENT_POLICY, error!!.kind)
+            assertFalse(error.message.orEmpty().contains(bodySecret))
+            assertEquals(1, server.requestCount)
+        }
+
+    @Test
+    fun `400 unrelated to content policy is not swallowed`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(400).setBody("""{"error": {"message": "bad schema"}}"""))
+
+            val error =
+                try {
+                    client().complete(prompt = "hi")
+                    fail("expected LlmError")
+                    null
+                } catch (e: LlmError) {
+                    e
+                }
+
+            assertEquals(LlmError.Kind.PROVIDER, error!!.kind)
         }
 
     private fun successBody() =

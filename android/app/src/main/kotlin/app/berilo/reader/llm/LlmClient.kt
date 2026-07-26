@@ -49,7 +49,39 @@ data class LlmResult(
  *
  * @property kind Coarse failure classification the caller (Settings "Test
  *   key", dictionary/interpretation error states) branches on.
+ * @property result The billed, unusable-text (or partial-text) completion,
+ *   for [Kind.EMPTY_COMPLETION]/[Kind.TRUNCATED_COMPLETION] — `null`
+ *   otherwise. A provider call that already reached the API is billed
+ *   whether or not its text is usable, so a caller that can degrade to a
+ *   smaller unit of work (stricter retry, per-segment fallback) should catch
+ *   these kinds and fold this cost into its accounting rather than lose it
+ *   silently; only a caller with no smaller unit left should let the error
+ *   propagate. Mirrors `translator/berilo/providers/base.py`'s
+ *   `EmptyCompletionError`/`TruncatedCompletionError.result`.
  */
-class LlmError(message: String, val kind: Kind, cause: Throwable? = null) : Exception(message, cause) {
-    enum class Kind { AUTH, RATE_LIMIT, NETWORK, PROVIDER, PARSE }
+class LlmError(
+    message: String,
+    val kind: Kind,
+    cause: Throwable? = null,
+    val result: LlmResult? = null,
+) : Exception(message, cause) {
+    enum class Kind {
+        AUTH,
+        RATE_LIMIT,
+        NETWORK,
+        PROVIDER,
+        PARSE,
+
+        /** A request was refused on content-policy grounds (not transient; never retry
+         * against the same provider — route the batch to a fallback). */
+        CONTENT_POLICY,
+
+        /** A provider billed a call but returned no completion text (e.g. a reasoning
+         * model exhausting its token budget on hidden reasoning). */
+        EMPTY_COMPLETION,
+
+        /** A provider cut a completion off before it finished, still billed
+         * (OpenAI `finish_reason="length"`, Anthropic `stop_reason="max_tokens"`). */
+        TRUNCATED_COMPLETION,
+    }
 }
