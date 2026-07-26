@@ -612,3 +612,36 @@
   gate); answer empirical questions with a probe, not an argument. **If a critic
   or reviewer idles twice, stop polling and do the attack yourself — budget one
   Supervisor tool call per load-bearing claim.**
+
+- [2026-07-27] **Java's `MULTILINE` `^` matches after CR, U+0085, U+2028 and
+  U+2029; Python's matches only after `\n`.** Any regex ported from
+  `re.MULTILINE` needs `RegexOption.UNIX_LINES` or it parses the same model reply
+  differently. This is not academic: A3 anchored the `[[n]]` marker parser to
+  line starts precisely to stop needless retries, so a Kotlin port without
+  `UNIX_LINES` would anchor at *more* positions than Python and diverge on
+  exactly the billed path the anchoring was meant to protect (B5).
+- [2026-07-27] **`pythonStrip()` on the translate path governs which segments get
+  billed, not just how they hash.** Kotlin's `isBlank()`/`trim()` miss U+0085
+  where Python's `strip()` removes it, so a segment that the CLI treats as empty
+  and skips would be sent to the API by the tablet. The U+0085 divergence is
+  already recorded for hashes above; this is its second, costlier consequence.
+- [2026-07-27] **`runTest` cannot nest, and JUnit's `assertThrows` cannot host a
+  suspending call.** Every suspending failure path needs a
+  `suspend inline fun <reified T> assertSuspendThrows` helper. Four B5 tests
+  would otherwise have been silently unwritable — the failure mode is "the test
+  cannot be expressed", which reads as "that path is untestable" rather than as
+  a missing helper.
+- [2026-07-27] **The invisible-control-character trap recurred in a new form.**
+  Writing a KDoc comment that *names* U+0085/U+2028/U+2029 lands them as raw
+  bytes in the file; the Edit tool then cannot match the block, and Bash refuses
+  the heredoc that would fix it. Escape control characters in prose as well as in
+  string literals, and scan with `LC_ALL=C grep -P` before committing. (Third
+  occurrence this session, after B1b's NUL separator and the findings entry that
+  itself failed to commit for the same reason.)
+- [2026-07-27] **B4 shipped no `book_contexts` table**, so the per-book style
+  memo cannot be persisted on device. Inert today — no style `resolveStyle`
+  returns for `DEVICE` (`baseline_v1`, `revise_v1`, `revise_generic_v1`) declares
+  a `bookContextSystem` — and `RoomTranslationCacheTest` asserts exactly that
+  rather than leaving it to be discovered later. Adding the table is a B4-shaped
+  change (entity + migration) and is required before any book-context style
+  reaches the device.

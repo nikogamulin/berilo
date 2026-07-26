@@ -576,9 +576,21 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **A defect that would have silently broken the whole port.** The JVM XML parser **drops an undeclared entity with no error at all** when a DOCTYPE is present — expat raises either way, Xerces only *without* one. With a DOCTYPE naming an external subset the parser won't fetch, the well-formedness constraint becomes "not checkable" and the entity vanishes: no `fatalError`, no warning, no callback. `Bare&nbsp;entity` → `Bareentity`. **Every real EPUB has a DOCTYPE**, so a faithful-looking port loses a character per entity and hashes every book differently. Fixed with `expandEntityReferences=false` plus hand splicing.
 - **Device residual:** verified against the JDK's Xerces; the Boox runs Android's XML parser, so the entity-reference behaviour needs one on-device re-confirmation.
 
-#### Remaining (3 stories, 13 pt)
-**B3** EPUB writer (5) · **B5** translate engine (5) · **B7** import → estimate →
-confirm → WorkManager → progress UI (3).
+#### B5 — On-device translate engine (5 pt) ✅
+***The story m4 exists for: a book can now be translated inside the Android app.***
+- [x] `translateBook` ports `translate_book` faithfully on the verified base — dynamic batching capped at 10 (broken by chapter boundary, empty segment or cache hit), rolling context, anchored-with-fallback marker parsing, the batch → strict → per-segment ladder, the revise pass, per-batch cache commit, glossary pass, 1:1 integrity
+- [x] `estimateCost` for B7's spending gate (CLAUDE.md §4)
+- [x] **The truncation-degrade design, which is what A4 was bounced for getting wrong.** `EMPTY_COMPLETION`/`TRUNCATED_COMPLETION` degrade at every rung with a smaller unit — batch, revise, book-context memo — appending B6's already-billed result to the accounting, and stay **loud** only at `translateSingle`, which has none. Two mutations pin both halves
+- [x] `DEVICE` → ECONOMY by default; a QUALITY override resolves the two-pass style; the context is never falsified
+- **Verify:** `./gradlew test assembleDebug` green, no regression; a killed run resumes re-billing zero cached segments; a second full run makes zero API calls; batch shapes asserted concretely; truncation degrades and completes; billed cost still folded in; revise failure keeps the draft; 1:1 integrity matches Python on duplicate/missing/stray markers; mutation-proven.
+- **Verify run 2026-07-27 on merged `main`:** **924 JVM tests** (486 debug incl. 28 skipped + 438 release), **0 failures**, from a **776** baseline the agent measured with `git stash -u` rather than trusting the packet's 712 (which was from merged `main`). **12/12 mutations caught.** Lint 0 errors. **€0.** Supervisor-verified: all **31** `TranslateEngineTest` cases pass with **0 skipped**, including the resumability and full degrade-ladder cases by name.
+- **Resumability evidence:** a 25-segment book, client dies on call 3 → 20 segments committed; resume with a fresh client makes **one** call carrying exactly the 5 uncached segments; a third run makes **zero**. Removing the per-batch commit fails that test at `expected:<20> but was:<0>`. Batch shapes asserted as `[10, 2, 1, 3]` from a book tripping the cap, a chapter boundary, an empty segment and a cache hit — not merely "batches happened".
+- **Deliberate divergence:** `TranslationStats` is immutable, unlike Python's mutable dataclass — B7 renders it in Compose, and a mutated object handed to the UI would compare equal to itself and never recompose.
+- **Reported, not fixed:** B4 shipped no `book_contexts` table, so the per-book style memo cannot persist on device. Inert today (no `DEVICE`-resolvable style declares a `bookContextSystem`) and asserted as such rather than left to be discovered. Required before any book-context style reaches the device. Also: `TARGET_EXPANSION = 1.1` is a Slovenian assumption applied to every language, ported as-is and pinned so it cannot drift from the CLI.
+
+#### Remaining (2 stories, 8 pt)
+**B3** EPUB writer (5, *in progress*) · **B7** import → estimate → confirm →
+WorkManager → progress UI (3).
 
 Full text in the spec §4. Two decisions stay open: **[OPEN-A]** Jsoup vs.
 hand-rolled tolerant parsing (decide at B2) and **[OPEN-D]** whether tablet
