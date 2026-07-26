@@ -651,7 +651,7 @@
   `assemble.py:374-377` seeds the `dc:identifier` UUID5 on
   `berilo:{source_path}:{title}:{language}`. Measured on *The New Rules of War*,
   same `Book`, only the path varying:
-  `/home/niko/workspace/berilo/data/examples/…` -> `85e89f18…` / 2 652 144 B ·
+  `<abs-repo>/data/examples/…` -> `85e89f18…` / 2 652 144 B ·
   `data/examples/…` -> `3ff13117…` / 2 652 144 B ·
   `../data/examples/…` -> `16f34b3e…` / 2 652 142 B ·
   `/data/user/0/app.berilo.reader/files/books/….epub` -> `5b320784…` / 2 652 145 B.
