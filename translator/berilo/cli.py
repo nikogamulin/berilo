@@ -2,11 +2,13 @@
 
 Subcommands (all implemented): ``translate`` (S1.5), ``inspect`` (S1.1, with
 ``--screen`` from S1.2), ``eval`` (S1.7, Rubric T; ``--dump``/``--judge-repeats``
-from S1.9), ``ab`` (S1.11, paired prompt-variant experiments), ``doctor`` (S1.4).
+from S1.9), ``ab`` (S1.11, paired prompt-variant experiments), ``doctor`` (S1.4),
+``serve`` (S1.15, LAN book handoff to the tablet).
 """
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import zipfile
@@ -14,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
+from click.core import ParameterSource
 
 from berilo import prompts
 from berilo.cache import BASELINE_PROMPT_VERSION
@@ -832,6 +835,102 @@ def ab(
         click.echo(json.dumps(experiment.result_to_dict(result), ensure_ascii=False, indent=2))
     else:
         click.echo(experiment.format_result(result))
+
+
+@cli.command()
+@click.option(
+    "--dir",
+    "directory",
+    default="data/examples",
+    show_default=True,
+    type=click.Path(file_okay=False),
+    help="Directory of EPUBs to publish.",
+)
+@click.option(
+    "--port",
+    default=8577,
+    show_default=True,
+    help="TCP port to listen on; falls back to a free port if this one is busy.",
+)
+@click.option(
+    "--host",
+    default="0.0.0.0",  # noqa: S104 - the tablet has to be able to reach it
+    show_default=True,
+    help="Interface to bind; 127.0.0.1 keeps the server on this machine.",
+)
+@click.option("--no-qr", is_flag=True, help="Print the URL without a QR code.")
+@click.pass_context
+def serve(ctx: click.Context, directory: str, port: int, host: str, no_qr: bool) -> None:
+    """Publish translated EPUBs on the LAN so a tablet can download them.
+
+    Prints a tokenized URL (and a QR code for it) and serves until Ctrl-C.
+    Scan the code with the tablet, tap a book to download it, then import the
+    file in the reader app. Books are served from this machine only — nothing
+    is uploaded anywhere.
+    """
+    from berilo.serve.server import BookServer, lan_address_candidates
+
+    source_dir = Path(directory)
+    if not source_dir.is_dir():
+        click.echo(f"Not a directory: {source_dir}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+
+    explicit_port = ctx.get_parameter_source("port") is not ParameterSource.DEFAULT
+    try:
+        server = BookServer(source_dir, host=host, port=port)
+    except OSError as error:
+        if explicit_port:
+            click.echo(f"Could not bind {host}:{port} — {error}", err=True)
+            ctx.exit(INPUT_ERROR_EXIT_CODE)
+            return
+        # The default port is a popular one; rather than fail, take any free
+        # port — the URL is printed and QR-encoded anyway, so it costs nothing.
+        click.echo(f"Port {port} is busy ({error.strerror}); using a free port.", err=True)
+        try:
+            server = BookServer(source_dir, host=host, port=0)
+        except OSError as fallback_error:
+            click.echo(f"Could not bind {host} — {fallback_error}", err=True)
+            ctx.exit(INPUT_ERROR_EXIT_CODE)
+            return
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    books = server.catalog()
+    bound_host = host if host not in ("0.0.0.0", "") else None  # noqa: S104
+    url = server.url(bound_host)
+
+    click.echo(f"Berilo — {len(books)} EPUB(s) from {source_dir}")
+    click.echo(url)
+    if not no_qr:
+        click.echo(_qr_block(url))
+
+    # Address detection is a guess: a box with a VPN or Docker bridges has
+    # many addresses and the routing table cannot know which one the tablet
+    # shares a network with. Show the alternatives so a wrong guess is a
+    # visible second option, not a silent timeout.
+    if bound_host is None:
+        alternatives = [address for address in lan_address_candidates() if address not in url]
+        if alternatives:
+            click.echo("\nIf that address does not load, try:")
+            for address in alternatives:
+                click.echo(f"  http://{address}:{server.port}/?t={server.token}")
+    click.echo("\nCtrl-C to stop.\n")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\nStopped.")
+
+
+def _qr_block(url: str) -> str:
+    """Render *url* as a QR code for the terminal, or a hint if segno is missing."""
+    try:
+        import segno
+    except ImportError:  # pragma: no cover - depends on the install
+        return "(install `segno` for a scannable QR code)"
+
+    buffer = io.StringIO()
+    segno.make(url, error="m").terminal(buffer, compact=True)
+    return buffer.getvalue()
 
 
 @cli.command()

@@ -122,6 +122,7 @@ berilo inspect mojaknjiga.epub   # predogled izvlečka, brez stroška API
 berilo translate mojaknjiga.epub --to sl --dry-run   # ocena stroška — vedno najprej
 berilo translate mojaknjiga.epub --to sl             # prevedeni EPUB ob izvirniku
 berilo eval mojaknjiga.sl.epub --sample 40 --seed 42 # ocena kakovosti z IZ (~€0,15)
+berilo serve --dir .             # objavi knjige v svojem omrežju, skeniraj kodo QR
 ```
 
 Uporabne zastavice:
@@ -138,6 +139,55 @@ Uporabne zastavice:
 
 Potrebuje Python 3.10+. Za vhod v obliki MOBI je potreben še Calibre
 (`ebook-convert`).
+
+## Kako knjigo spraviš na tablico
+
+Bralnik uvaža knjige prek Androidovega izbirnika datotek, zato mora EPUB
+najprej priti na napravo. To opravi `berilo serve` — prek tvojega omrežja
+Wi-Fi, brez kabla, brez oblaka, brez računa.
+
+```bash
+berilo serve                          # objavi ./data/examples
+berilo serve --dir ~/knjige           # ali katerokoli mapo z datotekami EPUB
+```
+
+Izpiše naslov in kodo QR zanj:
+
+```
+Berilo — 12 EPUB(s) from ~/knjige
+http://192.168.1.42:8577/?t=<fresh-token-each-run>
+  █▀▀▀▀▀█ ▄▀▄▀▀▄▀▀▀█▄█▄ ▄ █ ▀▀▀▀▀█
+  █ ███ █ ▀▀█▄▄▄▀  █▄█▄██ █ ███ █
+  …
+Ctrl-C to stop.
+```
+
+1. Tablica naj bo v **istem omrežju Wi-Fi** kot ta računalnik.
+2. Usmeri njeno kamero v kodo QR in odpri povezavo.
+3. Pri knjigi pritisni **Prenesi** — datoteka pristane med prenosi.
+4. Odpri Berilo in uvozi datoteko.
+
+Stran našteje vsak EPUB v mapi, z naslovom in avtorjem iz metapodatkov same
+knjige. Novo datoteko odloži v mapo in osveži stran; ponovni zagon ni potreben.
+
+| Zastavica | Učinek |
+|-----------|--------|
+| `--dir <pot>` | Mapa za objavo (privzeto `data/examples`) |
+| `--port 8577` | Vrata; če so zasedena, vzame prosta |
+| `--host 127.0.0.1` | Posluša samo lokalno, npr. za preizkus |
+| `--no-qr` | Izpiše samo naslov |
+
+**Kaj je izpostavljeno.** Vsak tek ustvari nov naključni žeton, vgrajen v
+naslov, zato skeniranje še vedno ne zahteva tipkanja, kdor drug v omrežju pa
+ob poskusu dobi 404. Žeton umre skupaj s procesom. Objavljene so samo
+datoteke `.epub` neposredno v tisti eni mapi, nič se nikamor ne naloži —
+datoteka gre s tega računalnika naravnost na tvojo tablico.
+
+**Če se stran ne odpre,** je izpisani naslov ugibanje: na računalniku z VPN
+ali Dockerjem obstaja več naslovov in samo eden je v tvojem omrežju Wi-Fi.
+`serve` izpiše druge možnosti pod *"If that address does not load, try:"* —
+preizkusi jih po vrsti ali pravega podaj izrecno. Običajni krivec je VPN, ki
+usmerja zasebne razpone (WireGuard, Tailscale).
 
 ## Bralnik (faza 2, Android / Boox)
 
