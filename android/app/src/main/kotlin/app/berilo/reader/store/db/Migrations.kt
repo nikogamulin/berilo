@@ -93,7 +93,7 @@ val MIGRATION_5_6 =
             db.execSQL(
                 """
                 CREATE TABLE IF NOT EXISTS calls (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT, bookHash TEXT NOT NULL, model TEXT NOT NULL,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, bookHash TEXT NOT NULL, model TEXT NOT NULL,
                     lang TEXT NOT NULL, kind TEXT NOT NULL, inputTokens INTEGER NOT NULL,
                     outputTokens INTEGER NOT NULL, costEur REAL NOT NULL, createdAt INTEGER NOT NULL
                 )

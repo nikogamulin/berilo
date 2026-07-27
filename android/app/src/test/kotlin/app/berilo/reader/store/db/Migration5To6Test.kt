@@ -188,6 +188,79 @@ class Migration5To6Test {
         assertEquals(1, rowCount("calls"))
     }
 
+    /**
+     * The discriminating check: re-open the migrated file through the **real** Room builder.
+     *
+     * Counting rows after `MIGRATION_5_6.migrate(db)` cannot see a schema mismatch — the rows
+     * are all there and every query works. Only `Room.databaseBuilder(...).build()` runs
+     * `validateMigration`, which compares the hand-written DDL against the entities column by
+     * column, including type, **nullability** and derived index name.
+     *
+     * That gap shipped a real defect: `calls.id` was declared `INTEGER PRIMARY KEY
+     * AUTOINCREMENT` while `TranslationCallEntity.id` is a non-null Kotlin `Long`, so Room
+     * generates `... NOT NULL`. SQLite's `table_info` reports `notnull=0` without the keyword
+     * and Room's comparison is exact, so **every existing install would have crashed on its
+     * first v5 -> v6 open** with `IllegalStateException: Migration didn't properly handle:
+     * calls`. Fresh v6 installs were unaffected, which is why nothing else caught it.
+     *
+     * Found by B9 (2026-07-27) while writing the equivalent 6 -> 7 test. Recorded in
+     * `docs/findings.md`.
+     */
+    @Test
+    fun `every column this migration creates matches its entity's nullability`() {
+        migrate()
+
+        // `calls.id` is the one that shipped wrong: declared `INTEGER PRIMARY KEY AUTOINCREMENT`
+        // while TranslationCallEntity.id is a non-null Kotlin `Long`, so Room generates
+        // `... NOT NULL`. SQLite reports notnull=0 without the keyword and Room's TableInfo
+        // comparison is exact, so every existing install would have hit
+        // `IllegalStateException: Migration didn't properly handle: calls` on its first
+        // v5 -> v6 open. Fresh v6 installs were unaffected, which is why nothing caught it.
+        assertTrue("calls.id must be NOT NULL to match TranslationCallEntity", notNull("calls", "id"))
+
+        // The rest of the migration's own surface, so the class cannot return elsewhere.
+        listOf(
+            "translations" to
+                listOf(
+                    "bookHash", "segmentHash", "model", "lang", "promptVersion",
+                    "glossaryHash", "text", "costEur", "createdAt",
+                ),
+            "glossaries" to
+                listOf("bookHash", "model", "lang", "promptVersion", "termsJson", "createdAt"),
+            "calls" to
+                listOf(
+                    "id", "bookHash", "model", "lang", "kind", "inputTokens",
+                    "outputTokens", "costEur", "createdAt",
+                ),
+        )
+            .forEach { (table, columns) ->
+                columns.forEach { column ->
+                    assertTrue("$table.$column must be NOT NULL", notNull(table, column))
+                }
+            }
+    }
+
+    /**
+     * Read a column's `notnull` flag straight from SQLite.
+     *
+     * Counting rows after `migrate()` cannot see a nullability mismatch — every row is present
+     * and every query works; only Room's `validateMigration` compares against the entity, and
+     * it runs on open. A full `Room.databaseBuilder` reopen would be the stronger check, but it
+     * validates **every** table, including the ones this test hand-builds to stand in for
+     * version 5 — so it fails on fixture drift (`highlights` today) rather than on the migration
+     * under test. Asserting `table_info` for the tables MIGRATION_5_6 actually creates is the
+     * part that is this migration's responsibility. Recorded in `docs/findings.md`.
+     */
+    private fun notNull(table: String, column: String): Boolean =
+        db.query("PRAGMA table_info($table)").use { cursor ->
+            val nameIndex = cursor.getColumnIndexOrThrow("name")
+            val notNullIndex = cursor.getColumnIndexOrThrow("notnull")
+            while (cursor.moveToNext()) {
+                if (cursor.getString(nameIndex) == column) return cursor.getInt(notNullIndex) == 1
+            }
+            error("no column $column on $table")
+        }
+
     private companion object {
         const val DB_NAME = "migration-5-6-test.db"
     }

@@ -745,3 +745,35 @@
   path sat in the repo. B7's report caught it. **The exclusion list in CLAUDE.md
   §7 is the specification, not a starting point: if the scan is red, fix the
   content.** Promoted to §9.
+
+- [2026-07-27] **A migration test that only calls `MIGRATION.migrate(db)` and
+  counts rows cannot see a schema mismatch — and one shipped because of it.**
+  B4's `MIGRATION_5_6` declared `calls.id INTEGER PRIMARY KEY AUTOINCREMENT`
+  while `TranslationCallEntity.id` is a non-null Kotlin `Long`, so Room generates
+  `... NOT NULL`. SQLite's `table_info` reports `notnull=0` without the keyword
+  and Room's `TableInfo` comparison is **exact**, so every existing install would
+  have thrown `IllegalStateException: Migration didn't properly handle: calls` on
+  its first v5 -> v6 open. Fresh v6 installs were unaffected, which is why the
+  row-counting test, the full suite and the Supervisor's own merge review all
+  passed. Found by B9 while writing the equivalent 6 -> 7 test.
+  **Assert the schema, not just the rows** — `PRAGMA table_info` per column for
+  the tables the migration creates, mutation-proven.
+- [2026-07-27] **Room's `validateMigration` on a full `databaseBuilder` reopen is
+  the stronger check but validates EVERY table, including hand-built fixtures.**
+  Attempting it on `Migration5To6Test` failed on `highlights` — the test's own
+  stand-in for version 5 diverges from `HighlightEntity` — not on the migration
+  under test. With `exportSchema = false` there is no schema JSON to build a
+  faithful fixture from, so a full reopen tests fixture fidelity as much as
+  production code. Scope the assertion to the tables the migration is responsible
+  for. (The fixture drift is real and worth its own story; it means the v5
+  fixtures across `Migration4To5Test`/`Migration5To6Test` are approximations.)
+- [2026-07-27] **`runTest`'s virtual clock does not own Room's query executor.**
+  `advanceUntilIdle()` returns while a suspend `@Insert` is still in flight, so a
+  ViewModel test over a real in-memory database reads a row that has not landed
+  and reports a broken write. `Dispatchers.Unconfined` does not help — Room hops
+  to its own executor regardless. Use an in-memory DAO fake, poll the database,
+  or `runBlocking`.
+- [2026-07-27] **Room's derived index name is part of the schema contract.**
+  `@Index("bookId")` becomes `index_<table>_<column>`; a hand-written
+  `CREATE INDEX` under any other name passes every row assertion and crashes on
+  the first launch after upgrade.
