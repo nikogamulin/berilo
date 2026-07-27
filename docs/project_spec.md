@@ -175,7 +175,17 @@ no like-count theater, no algorithmic feed. A well-set page, not a network.
 - No book piracy features: no downloading, sharing, or DRM stripping. The user
   supplies files they own.
 - No server-side translation in phases 1–2 (keys and books stay on-device).
-- No iOS until Android + cloud are done.
+- ~~No iOS until Android + cloud are done.~~ **Lifted 2026-07-27** (Niko).
+  Android reached feature completeness through m4 (on-device translation) and
+  the cloud service is live, so the gate this non-goal described has been
+  passed. iOS is now milestone `m5`, in the separate **private** repo
+  [`berilo-ios`](https://github.com/nikogamulin/berilo-ios) — the same
+  open/closed split already used for `berilo-cloud`. The plan lives in that
+  repo's `docs/project_plan.md`; only the sync contract crosses between them.
+
+  Recording the reversal rather than deleting the line: this non-goal was a
+  sequencing decision, not a product one, and the sequence it was protecting
+  is now satisfied.
 
 ## 8. Design direction
 
