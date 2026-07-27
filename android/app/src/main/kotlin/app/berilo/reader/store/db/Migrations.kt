@@ -140,3 +140,79 @@ val MIGRATION_6_7 =
             )
         }
     }
+
+/**
+ * Schema 7 -> 8 (S3.7): adds the personal book vault's device-side bookkeeping —
+ * `vault_books`, `vault_translations` and `vault_glossaries`.
+ *
+ * Additive, like [MIGRATION_5_6] and [MIGRATION_6_7], and for the same reason those two had to
+ * be: version 7 holds the paid translation cache, so extending the destructive fallback over this
+ * bump would throw away real money to add three empty tables. Nothing pre-existing is read or
+ * rewritten; the load-bearing property is that every row in every v7 table is still there
+ * afterwards, byte for byte.
+ *
+ * **`userId` leads every primary key here, and that is the whole point of the migration**
+ * (`docs/sync_api.md` §8.2(1)). `vault_translations` in particular is the on-device cache's
+ * six-column key with an owner prepended: the six columns alone are content-addressed, so hosted
+ * without an owner two users importing the same ISBN would collide on `bookHash` and the second
+ * would be served the first's translated text (§8.3(1)). Putting the owner in the *key* — rather
+ * than in a `WHERE` clause or an RLS policy alone — is what makes that collision impossible to
+ * reintroduce by dropping a predicate.
+ *
+ * The DDL below must match what Room generates from [VaultBookEntity], [VaultTranslationEntity]
+ * and [VaultGlossaryEntity] **exactly**, down to `NOT NULL`: SQLite's `table_info` reports
+ * `notnull=0` without the keyword and Room's `TableInfo` comparison is exact, so a mismatch
+ * throws `IllegalStateException: Migration didn't properly handle` on the first upgrade open
+ * while fresh installs stay green. That is precisely how B4's `calls.id` defect shipped
+ * (`docs/findings.md`, 2026-07-27), so `Migration7To8Test` asserts every column with
+ * `PRAGMA table_info` and then reopens the file through Room to run its own `validateMigration`.
+ *
+ * Nullability, chosen to say something true about a row that predates its first upload:
+ * `kdfSalt`, `algorithm` and `uploadedAt` are nullable because a book can be opted in and not yet
+ * pushed. `enabled` is `INTEGER NOT NULL` with **no SQL `DEFAULT`** even though §8.2(4)'s default
+ * is off — the off-by-default rule is enforced in [VaultDao] and
+ * [app.berilo.reader.vault.VaultRepository] (a missing row reads as off), and adding a `DEFAULT 0`
+ * here would make `PRAGMA table_info` report a `dflt_value` that Room's own `TableInfo` does not
+ * expect from an entity with no `@ColumnInfo(defaultValue = …)`. These three statements are
+ * copied from Room's generated `AppDatabase_Impl` for exactly that reason.
+ */
+val MIGRATION_7_8 =
+    object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS vault_books (
+                    userId TEXT NOT NULL, bookHash TEXT NOT NULL,
+                    enabled INTEGER NOT NULL, objectPath TEXT NOT NULL,
+                    kdfSalt BLOB, algorithm TEXT, sizeBytes INTEGER NOT NULL,
+                    uploadedAt INTEGER, updatedAt INTEGER NOT NULL, deletedAt INTEGER,
+                    PRIMARY KEY(userId, bookHash)
+                )
+                """
+                    .trimIndent(),
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS vault_translations (
+                    userId TEXT NOT NULL, bookHash TEXT NOT NULL, segmentHash TEXT NOT NULL,
+                    model TEXT NOT NULL, lang TEXT NOT NULL, promptVersion TEXT NOT NULL,
+                    glossaryHash TEXT NOT NULL, uploadedAt INTEGER NOT NULL,
+                    PRIMARY KEY(userId, bookHash, segmentHash, model, lang, promptVersion,
+                        glossaryHash)
+                )
+                """
+                    .trimIndent(),
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS vault_glossaries (
+                    userId TEXT NOT NULL, bookHash TEXT NOT NULL, model TEXT NOT NULL,
+                    lang TEXT NOT NULL, promptVersion TEXT NOT NULL,
+                    uploadedAt INTEGER NOT NULL,
+                    PRIMARY KEY(userId, bookHash, model, lang, promptVersion)
+                )
+                """
+                    .trimIndent(),
+            )
+        }
+    }

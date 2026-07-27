@@ -34,7 +34,18 @@ data class AccountUiState(
     val error: String? = null,
     val notice: String? = null,
     val syncStatus: SyncStatus = SyncStatus.Idle,
+    val vaultEnabledBooks: Int = VAULT_ENABLED_BOOKS_DEFAULT,
 )
+
+/**
+ * How many books are in the vault before the user has opted any in: **none**.
+ *
+ * Named rather than inlined because `AccountScreenTest` asserts the screen's privacy copy against
+ * this exact value — `docs/sync_api.md` §8.2(4) makes "off by default" a MUST, and the account
+ * screen is the user's only account of where their books are, so the text and the default have to
+ * be provably the same thing rather than two claims that happen to agree today.
+ */
+const val VAULT_ENABLED_BOOKS_DEFAULT: Int = 0
 
 /**
  * Drives the account screen (S3.2).

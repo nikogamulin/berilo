@@ -15,6 +15,7 @@ import app.berilo.reader.store.db.AppDatabase
 import app.berilo.reader.store.db.MIGRATION_4_5
 import app.berilo.reader.store.db.MIGRATION_5_6
 import app.berilo.reader.store.db.MIGRATION_6_7
+import app.berilo.reader.store.db.MIGRATION_7_8
 import app.berilo.reader.store.importer.BookImporter
 import app.berilo.reader.store.importer.ReadiumMetadataExtractor
 import app.berilo.reader.store.repository.BookRepository
@@ -57,8 +58,10 @@ class AppContainer(app: Application) {
             // carries a real migration and highlights/notes survive it. 5 -> 6 (B4) is likewise
             // real: it adds the on-device translation cache, and paid translation work must
             // never be destructively migrated away. 6 -> 7 (B9) adds translation_flags on top of
-            // that same cache, so it is real for the same reason plus its own.
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            // that same cache, so it is real for the same reason plus its own. 7 -> 8 (S3.7) adds
+            // the vault's bookkeeping tables over that same cache — additive, and never
+            // destructive for the same reason.
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 

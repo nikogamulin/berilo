@@ -264,7 +264,7 @@ class Migration6To7Test {
     }
 
     @Test
-    fun `a migrated v6 file opens as v7 through Room with every row still readable`() =
+    fun `a migrated v6 file opens at the current schema version with every row still readable`() =
         runTest {
             insertAllTablesOneRowEach()
             helper.close()
@@ -272,7 +272,11 @@ class Migration6To7Test {
             val context = ApplicationProvider.getApplicationContext<Context>()
             val database =
                 Room.databaseBuilder(context, AppDatabase::class.java, DB_NAME)
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    // The whole chain up to [AppDatabase]'s current version, not just 6 -> 7:
+                    // Room migrates the file to whatever version the @Database declares, so this
+                    // list has to grow with every schema bump or the reopen fails with
+                    // "A migration from 6 to N was required but not found" (S3.7 added 7 -> 8).
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .build()
             try {
                 // Opening runs the migration AND Room's own schema validation — the only check
