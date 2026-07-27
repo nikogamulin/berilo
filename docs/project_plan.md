@@ -495,9 +495,13 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **Hash gate deliberately not re-run:** `screen.py` and `experiment.py` are provably outside the `normalize`/`translate`/`cache` import path, so A5 cannot move a key. Verified by grep rather than assumed.
 - **Judgement reported, not acted on:** `prompts.DEFAULT`/`DEFAULT_STYLE_NAME` are dead from production's perspective (`cli.py` goes through `resolve_style` exclusively) but 3 test assertions reference them, so removal belongs in its own story. `TARGET_EXPANSION = 1.1` is a dry-run cost constant and changing it silently would violate §4/§9 — it wants a story that **measures** real expansion per target language (German at minimum, now `--to de` is supported) before replacing it with a per-language table.
 
-#### A6 — Re-score Rubric T after Track A (1 pt)
-- [ ] Re-score one book and confirm no regression against the 88.0 [86.2, 89.9] baseline (`rubric_scores.jsonl`, commit `9697a90`)
-- **Verify:** `berilo eval "data/examples/The Revenge of Geography.sl.epub" --sample 40 --seed 42` — T not regressed beyond the CI. **Expected €0** if `book_hash` held per A1's gate; if it did not, this needs Niko's go-ahead first.
+#### A6 — Re-score Rubric T after Track A (1 pt) ✅
+- [x] Re-scored and **no regression**: **T = 87.63 [85.68, 89.53]** against the 88.03 [86.18, 89.93] baseline (`rubric_scores.jsonl`, commit `9697a90`). The point estimate sits well inside the baseline CI and the intervals overlap almost entirely
+- **Verify:** `berilo eval "data/examples/The Revenge of Geography.sl.epub" --sample 40 --seed 42` — T not regressed beyond the CI.
+- **Verify run 2026-07-27** (commit `3366370`, seed 42, sample 40): per-dimension **T1 20.0 · T2 26.7 · T3 13.5 · T4 7.737 · T5 10.0 · T6 5.0 · T7 4.692**. Only T3 moved at all (13.9 → 13.5, inside its own [12.4, 14.7]); every other dimension is unchanged. **Judge cost €0.0698**; session total including the provider smoke **€0.0702**.
+- **It was blocked first, and that is the durable finding.** The eval aborted with `ALIGNMENT FAILURE — Structural mismatch at source segments [42:44] vs translated [33:43]`. The `.sl.epub` on disk was assembled before A1's heading-detection change: the source types 65 segments as `heading`, the stale artifact read all 65 back as `paragraph`, and `rubric_t.align` keys on `(chapter, type, heading_level)`. **`book_hash` was byte-identical throughout** — `make_segment_id` hashes `chapter_index:position:text` and **not `type`** — so the six-book gate stayed green while every derived artifact silently went stale. It also predated S1.14: **0 images against the source's 17**.
+- **Fixed at €0.** Cache pre-flight showed **1294/1294** resolving under *both* `revise_v1` and `baseline_v1`; the rebuild reported **0 API calls, €0.0000**, after which fingerprint divergences went **65 → 0** and images **0 → 17**. Note the dry-run estimate quoted €1.2173 for that run — it prices tokens, not cache hits, so it is not the instrument for this question.
+- **Residual:** the other four example `.sl.epub` artifacts are stale the same way and rebuild at €0. Not done here — they are files under `data/`, which is Niko's.
 
 #### A7 — `calls.prompt_version` so T7 charges one arm (1 pt)
 *Found by A2, out of its scope. Finding 11's fix is one column short.*

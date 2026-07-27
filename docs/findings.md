@@ -804,3 +804,43 @@
   through the shared local cache when uploading. A device-sharing question, not
   a hosting one — but it is the one place the per-user invariant is enforced by
   circumstance rather than by structure.
+
+- [2026-07-27] **An unchanged `book_hash` does NOT mean the translated artifact
+  still aligns — and this blocked A6.** `make_segment_id` hashes
+  `chapter_index:position:text`, **not `type`**, so A1's heading-detection change
+  left every source hash byte-identical (the six-book gate stayed green) while
+  silently invalidating the `.sl.epub` artifacts on disk: Kaplan's source types
+  65 segments as `heading`, the stale artifact read them all back as
+  `paragraph`. `rubric_t.align` keys on `(chapter, type, heading_level)`, so the
+  eval aborted with `ALIGNMENT FAILURE — Structural mismatch at source
+  segments [42:44] vs translated [33:43]`. The same artifact also predated
+  S1.14: 0 images against the source's 17.
+  **The hash gate covers sources, never the derived artifacts.** After any
+  normalize change, rebuild the translated EPUBs before trusting an eval —
+  which costs **€0** when `book_hash` held (1294/1294 cache hits, 0 API calls,
+  verified by pre-flight *and* by the run's own report). Extends the §9
+  corollary that already notes types and titles sit outside the hash.
+- [2026-07-27] **`berilo eval` needs `--source` when the filenames do not pair.**
+  `The Revenge of Geography.sl.epub` next to
+  `The Revenge of Geography What the Map Tells Us… (Robert D. Kaplan) (z-library…).epub`
+  does not auto-resolve; it fails with "could not locate the source file — pass
+  --source explicitly". Working form:
+  `python3 -m berilo.cli eval "<translated>" --source "<source>" --sample 40 --seed 42`.
+- [2026-07-27] **Cache pre-flight before any rebuild costs nothing and settles
+  the spend question.** Resolving every segment through
+  `cache.get_translation(bookHash, segmentHash(text), model, lang, promptVersion,
+  glossaryIdentity(glossary))` reported 1294/1294 cached under *both*
+  `revise_v1` and `baseline_v1` before a single call was made. It also
+  independently confirmed A2's migration landed on the real cache — 80 glossary
+  terms, `glossary_hash` resolving. Do this instead of trusting a dry-run
+  estimate, which prices tokens rather than cache hits (it quoted €1.2173 for a
+  run that cost €0.0000).
+
+- [2026-07-27] **`berilo eval` writes its score row relative to the working
+  directory, so running it from `translator/` creates a second, stray
+  `loops/build/rubric_scores.jsonl`.** It reports "Wrote score row to
+  loops/build/rubric_scores.jsonl" either way, so the message does not
+  disambiguate — and the canonical file silently keeps its old last row while
+  the new score sits somewhere else. Run it from the repo root, or check
+  `find . -name rubric_scores.jsonl` afterwards. One stray row was recovered and
+  merged on 2026-07-27; the stray tree is removed.
