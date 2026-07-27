@@ -60,6 +60,14 @@
     <string name="reader_copy">Copy</string>
     <string name="reader_copied">Copied</string>
     <string name="reader_selection_clip_label">Passage</string>
+    <!-- B9: the selection-bar label must fit a floating toolbar next to five other actions,
+         so it is short; the sheet it opens carries the full wording. -->
+    <string name="reader_flag">Bad translation</string>
+
+    <string name="flag_title">Flag a bad translation</string>
+    <string name="flag_comment_label">What should it say?</string>
+    <string name="flag_comment_optional">Optional — flagging without a comment still records the passage.</string>
+    <string name="flag_confirm">Flag</string>
 
     <string name="dictionary_loading">Looking up…</string>
     <string name="dictionary_error_network">You\'re offline — dictionary needs a connection.</string>
@@ -90,6 +98,13 @@
     <string name="notebook_change_color">Change color</string>
     <string name="notebook_delete">Delete</string>
     <string name="notebook_delete_confirm_title">Delete this highlight?</string>
+    <string name="notebook_flags_heading">Flagged translations</string>
+    <string name="notebook_flag_badge">Bad translation</string>
+    <!-- Model, prompt version and the source segment's hash — enough to find the exact run
+         that produced the flagged text. -->
+    <string name="notebook_flag_provenance">%1$s · prompt %2$s · segment %3$s</string>
+    <string name="notebook_flag_no_provenance">No cached translation matched this passage.</string>
+    <string name="notebook_delete_flag_confirm_title">Delete this flag?</string>
 
     <string name="highlight_color_amber">Amber</string>
     <string name="highlight_color_sage">Sage</string>

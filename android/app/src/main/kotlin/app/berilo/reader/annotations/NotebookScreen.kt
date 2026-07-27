@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -59,6 +60,8 @@ fun NotebookScreen(
     onDelete: (Highlight) -> Unit,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
+    onJumpToFlag: (TranslationFlag) -> Unit = {},
+    onDeleteFlag: (TranslationFlag) -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier,
@@ -77,7 +80,7 @@ fun NotebookScreen(
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (uiState.chapters.isEmpty()) {
+            if (uiState.isEmpty) {
                 Text(
                     text = stringResource(R.string.notebook_empty),
                     style = MaterialTheme.typography.bodyLarge,
@@ -86,10 +89,13 @@ fun NotebookScreen(
             } else {
                 NotebookList(
                     chapters = uiState.chapters,
+                    flagChapters = uiState.flagChapters,
                     onJumpTo = onJumpTo,
                     onEditNote = onEditNote,
                     onChangeColor = onChangeColor,
                     onDelete = onDelete,
+                    onJumpToFlag = onJumpToFlag,
+                    onDeleteFlag = onDeleteFlag,
                 )
             }
         }
@@ -99,10 +105,13 @@ fun NotebookScreen(
 @Composable
 private fun NotebookList(
     chapters: List<ChapterHighlights>,
+    flagChapters: List<ChapterFlags>,
     onJumpTo: (Highlight) -> Unit,
     onEditNote: (Highlight, String) -> Unit,
     onChangeColor: (Highlight, HighlightColor) -> Unit,
     onDelete: (Highlight) -> Unit,
+    onJumpToFlag: (TranslationFlag) -> Unit,
+    onDeleteFlag: (TranslationFlag) -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         chapters.forEach { chapter ->
@@ -123,6 +132,100 @@ private fun NotebookList(
                 )
             }
         }
+
+        // B9: flagged translations get their own section rather than being interleaved with
+        // highlights. They are a different kind of record — a complaint about the book, not a
+        // note on it — and the export makes the same split, so the two surfaces agree.
+        if (flagChapters.isNotEmpty()) {
+            item(key = "flags-section-header") {
+                HorizontalDivider(modifier = Modifier.padding(top = 16.dp))
+                Text(
+                    text = stringResource(R.string.notebook_flags_heading),
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                )
+            }
+            flagChapters.forEach { chapter ->
+                item(key = "flag-header-${chapter.chapterTitle}") {
+                    Text(
+                        text = chapter.chapterTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                }
+                items(chapter.flags, key = { it.id }) { flag ->
+                    FlagRow(
+                        flag = flag,
+                        onJumpTo = { onJumpToFlag(flag) },
+                        onDelete = { onDeleteFlag(flag) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One flagged translation. The left border uses the `error` role rather than a highlight colour
+ * — flags are not colour-coded, and reusing a highlight swatch here would say "this is a
+ * highlight" at a glance. Provenance is rendered small and last: it matters when acting on the
+ * flag later, not when scanning the list.
+ */
+@Composable
+private fun FlagRow(flag: TranslationFlag, onJumpTo: () -> Unit, onDelete: () -> Unit) {
+    var pendingDelete by remember(flag.id) { mutableStateOf(false) }
+
+    Row(modifier = Modifier.fillMaxWidth().clickable(onClick = onJumpTo)) {
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.error),
+        )
+        Column(modifier = Modifier.padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(
+                text = stringResource(R.string.notebook_flag_badge),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Text(
+                text = flag.selectedText,
+                style = MaterialTheme.typography.bodyLarge,
+                fontStyle = FontStyle.Italic,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            flag.comment?.takeIf { it.isNotBlank() }?.let { comment ->
+                Text(
+                    text = comment,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Text(
+                text = flag.provenance?.let {
+                    stringResource(R.string.notebook_flag_provenance, it.model, it.promptVersion, it.segmentHash)
+                } ?: stringResource(R.string.notebook_flag_no_provenance),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Row(modifier = Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { pendingDelete = true }) {
+                    RowActionIcon(R.drawable.ic_delete, tint = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.notebook_delete), color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+
+    if (pendingDelete) {
+        DeleteFlagDialog(
+            onConfirm = {
+                onDelete()
+                pendingDelete = false
+            },
+            onDismiss = { pendingDelete = false },
+        )
     }
 }
 
@@ -262,6 +365,22 @@ private fun DeleteHighlightDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.notebook_delete_confirm_title)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) { Text(stringResource(R.string.notebook_delete)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.annotation_cancel)) }
+        },
+    )
+}
+
+/** Confirmation for deleting a flag. Its own dialog rather than a shared one, so the title can
+ * name what is being discarded — a flag and a highlight are not the same loss. */
+@Composable
+private fun DeleteFlagDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.notebook_delete_flag_confirm_title)) },
         confirmButton = {
             TextButton(onClick = onConfirm) { Text(stringResource(R.string.notebook_delete)) }
         },

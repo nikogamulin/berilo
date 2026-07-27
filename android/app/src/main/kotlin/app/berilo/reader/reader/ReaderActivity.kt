@@ -36,6 +36,7 @@ import app.berilo.reader.R
 import app.berilo.reader.annotations.Highlight
 import app.berilo.reader.annotations.HighlightViewModel
 import app.berilo.reader.annotations.NotebookActivity
+import app.berilo.reader.annotations.TranslationFlagViewModel
 import app.berilo.reader.annotations.toComposeColor
 import app.berilo.reader.dictionary.DictionaryViewModel
 import app.berilo.reader.dictionary.buildSelectionContext
@@ -120,6 +121,11 @@ class ReaderActivity : FragmentActivity() {
         HighlightViewModel.Factory(bookId, container.annotationsRepository)
     }
 
+    private val flagViewModel: TranslationFlagViewModel by viewModels {
+        val container = (application as BeriloApplication).container
+        TranslationFlagViewModel.Factory(bookId, container.translationFlagRepository)
+    }
+
     private var navigator: EpubNavigatorFragment? = null
     private var openedPublication: Publication? = null
     private var pageTurnMark: Long? = null
@@ -152,6 +158,7 @@ class ReaderActivity : FragmentActivity() {
                     dictionaryViewModel.uiState,
                     interpretationViewModel.uiState,
                     highlightViewModel.editorState,
+                    flagViewModel.editorState,
                     ::readerOverlayVisible,
                 ).collect { visible -> chrome.isVisible = visible }
             }
@@ -309,6 +316,7 @@ class ReaderActivity : FragmentActivity() {
                 SelectionAction.NOTE -> beginAnnotation(locator, withNote = true)
                 SelectionAction.DEFINE -> define(locator)
                 SelectionAction.INTERPRET -> interpret(locator?.text?.highlight)
+                SelectionAction.FLAG -> beginFlag(locator)
                 SelectionAction.COPY -> copyToClipboard(locator?.text?.highlight)
             }
         }
@@ -330,6 +338,23 @@ class ReaderActivity : FragmentActivity() {
         } else {
             highlightViewModel.beginHighlight(target.text, target.locatorJson, target.chapterTitle)
         }
+    }
+
+    /**
+     * Opens the "Bad translation" sheet for [locator] (B9).
+     *
+     * Reuses [highlightTarget] deliberately: a flag needs exactly what a highlight needs — the
+     * selected text as the user saw it, plus the anchor to jump back to — and the flagged text
+     * doubles as the key the translation cache is matched on
+     * ([app.berilo.reader.annotations.TranslationProvenanceResolver]).
+     */
+    private fun beginFlag(locator: Locator?) {
+        val target = highlightTarget(locator)
+        if (target == null) {
+            toastSelectionLost()
+            return
+        }
+        flagViewModel.beginFlag(target.text, target.locatorJson, target.chapterTitle)
     }
 
     /**
@@ -442,6 +467,7 @@ class ReaderActivity : FragmentActivity() {
         val dictionaryState by dictionaryViewModel.uiState.collectAsStateWithLifecycle()
         val interpretationState by interpretationViewModel.uiState.collectAsStateWithLifecycle()
         val annotationEditorState by highlightViewModel.editorState.collectAsStateWithLifecycle()
+        val flagEditorState by flagViewModel.editorState.collectAsStateWithLifecycle()
 
         BeriloTheme(useDarkTheme = !preferences.einkMode && preferences.darkTheme) {
             if (failed) {
@@ -469,6 +495,7 @@ class ReaderActivity : FragmentActivity() {
                 dictionaryState = dictionaryState,
                 interpretationState = interpretationState,
                 annotationEditorState = annotationEditorState,
+                flagEditorState = flagEditorState,
             )
             val actions = ReaderChromeActions(
                 onToggleChrome = { viewModel.toggleChrome() },
@@ -498,6 +525,9 @@ class ReaderActivity : FragmentActivity() {
                 onAnnotationNoteTextChanged = highlightViewModel::onNoteTextChanged,
                 onConfirmAnnotationNote = highlightViewModel::confirmNote,
                 onDismissAnnotationEditor = highlightViewModel::dismissEditor,
+                onFlagCommentChanged = flagViewModel::onCommentChanged,
+                onConfirmFlag = flagViewModel::confirmFlag,
+                onDismissFlagEditor = flagViewModel::dismissEditor,
             )
             ReaderChromeOverlay(state = state, actions = actions)
         }

@@ -3,6 +3,8 @@ package app.berilo.reader
 import android.app.Application
 import androidx.room.Room
 import app.berilo.reader.annotations.AnnotationsRepository
+import app.berilo.reader.annotations.TranslationFlagRepository
+import app.berilo.reader.annotations.TranslationProvenanceResolver
 import app.berilo.reader.dictionary.DictionaryRepository
 import app.berilo.reader.dictionary.DictionaryService
 import app.berilo.reader.interpretation.InterpretationRepository
@@ -12,6 +14,7 @@ import app.berilo.reader.settings.SettingsRepository
 import app.berilo.reader.store.db.AppDatabase
 import app.berilo.reader.store.db.MIGRATION_4_5
 import app.berilo.reader.store.db.MIGRATION_5_6
+import app.berilo.reader.store.db.MIGRATION_6_7
 import app.berilo.reader.store.importer.BookImporter
 import app.berilo.reader.store.importer.ReadiumMetadataExtractor
 import app.berilo.reader.store.repository.BookRepository
@@ -53,8 +56,9 @@ class AppContainer(app: Application) {
             // highlights). Version 5 is different: S2.11 put builds on a device, so 4 -> 5
             // carries a real migration and highlights/notes survive it. 5 -> 6 (B4) is likewise
             // real: it adds the on-device translation cache, and paid translation work must
-            // never be destructively migrated away.
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
+            // never be destructively migrated away. 6 -> 7 (B9) adds translation_flags on top of
+            // that same cache, so it is real for the same reason plus its own.
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
@@ -78,6 +82,14 @@ class AppContainer(app: Application) {
     val interpretationRepository = InterpretationRepository(database.interpretationDao(), InterpretationService())
 
     val annotationsRepository = AnnotationsRepository(database.highlightDao())
+
+    // B9: flagged bad translations. The provenance resolver reads B4's translation cache, which
+    // is the only table on the device that knows which model/prompt/glossary produced a passage.
+    val translationFlagRepository =
+        TranslationFlagRepository(
+            dao = database.translationFlagDao(),
+            provenanceResolver = TranslationProvenanceResolver(database.translationCacheDao()),
+        )
 
     // --- S3.2: cloud sync -------------------------------------------------------------
     // Built from BuildConfig values injected at build time (app/build.gradle.kts). With no

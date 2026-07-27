@@ -11,12 +11,15 @@ import androidx.room.TypeConverters
  * `highlights` for highlights/notes; version 5 (S3.2) makes the synced entities sync-shaped
  * (sync timestamps, tombstones, raw dictionary sentence) and adds `sync_state`; version 6 (B4)
  * adds the on-device translation cache (`translations`, `glossaries`, `calls`), the Kotlin
- * mirror of `translator/berilo/cache.py`.
+ * mirror of `translator/berilo/cache.py`; version 7 (B9) adds `translation_flags`, passages the
+ * reader marked as badly translated.
  *
  * Versions 1–4 predate any released build, so the app still falls back to a destructive
  * migration for those; 4 -> 5 is a real [MIGRATION_4_5] because S2.11 put builds on a device
  * and highlights are now user data worth keeping; 5 -> 6 is [MIGRATION_5_6], purely additive
- * (no on-device translation data predates it) — see [app.berilo.reader.AppContainer].
+ * (no on-device translation data predates it); 6 -> 7 is [MIGRATION_6_7], additive over a
+ * version that holds paid translation work and therefore must never be destructively migrated
+ * — see [app.berilo.reader.AppContainer].
  *
  * Schema export (`exportSchema`) stays off — turning it on pulls in Room's
  * kotlinx-serialization-based schema bundler on the KSP classpath, which clashes on this
@@ -32,8 +35,9 @@ import androidx.room.TypeConverters
         TranslationEntity::class,
         GlossaryEntity::class,
         TranslationCallEntity::class,
+        TranslationFlagEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 @TypeConverters(HighlightColorConverters::class)
@@ -49,6 +53,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun syncStateDao(): SyncStateDao
 
     abstract fun translationCacheDao(): TranslationCacheDao
+
+    abstract fun translationFlagDao(): TranslationFlagDao
 
     companion object {
         const val DATABASE_NAME = "berilo.db"
