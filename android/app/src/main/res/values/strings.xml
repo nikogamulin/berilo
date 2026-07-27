@@ -117,7 +117,10 @@
     <string name="account_title">Account &amp; sync</string>
     <string name="account_back_cd">Back</string>
     <string name="settings_account">Account &amp; sync</string>
-    <string name="account_privacy">Your notes, highlights, vocabulary, reading position and book titles sync to your account. Book files never leave this device.</string>
+    <string name="account_privacy">Your notes, highlights, vocabulary, reading position and book titles sync to your account. Book files stay on this device.</string>
+    <string name="account_vault_title">Book vault</string>
+    <string name="account_vault_explainer">The vault is off. Book files and their translations stay on this device.\n\nIt is turned on one book at a time, never for your whole library. When a book is in the vault, that book and the translations you have already paid for are encrypted on this device before they are uploaded, so the server stores only bytes it cannot read — and a second device of yours can restore them without translating the book again.\n\nNothing is uploaded unless you turn it on for that book. There is no way to share a book from the vault with anyone else.</string>
+    <string name="account_vault_enabled_count">The vault is on for %1$d of your books. Every other book stays on this device.</string>
     <string name="account_unconfigured">This build has no account configured, so sync is off. Everything else works as usual.</string>
     <string name="account_loading">Checking your account…</string>
     <string name="account_email_label">Email</string>

@@ -63,6 +63,25 @@ interface TranslationCacheDao {
         insertCall(call)
     }
 
+    /**
+     * Every cached translation row for [bookHash], across all models, languages and prompts.
+     *
+     * Added for the vault (S3.7): "push this book and everything I have paid to translate of it"
+     * is one user action, so the upload reads the whole book rather than one six-column key the
+     * caller would have to know in advance.
+     *
+     * Deliberately **not** user-scoped — this is the local, single-device cache B4 shipped, which
+     * `docs/sync_api.md` §8.3(1) says is "correct on one machine". The owner is attached at the
+     * vault boundary ([app.berilo.reader.vault.VaultRepository]), which is the layer that hosts
+     * rows and therefore the layer where an owner becomes load-bearing.
+     */
+    @Query("SELECT * FROM translations WHERE bookHash = :bookHash")
+    suspend fun translationsForBook(bookHash: String): List<TranslationEntity>
+
+    /** Every cached glossary row for [bookHash]. Companion to [translationsForBook]. */
+    @Query("SELECT * FROM glossaries WHERE bookHash = :bookHash")
+    suspend fun glossariesForBook(bookHash: String): List<GlossaryEntity>
+
     /** Returns the cached glossary term map (JSON-encoded), or `null` if not built yet. */
     @Query(
         "SELECT termsJson FROM glossaries WHERE bookHash = :bookHash AND model = :model " +

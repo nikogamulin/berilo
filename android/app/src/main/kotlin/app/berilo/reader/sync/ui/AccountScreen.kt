@@ -84,6 +84,8 @@ fun AccountScreen(
                 style = MaterialTheme.typography.bodyMedium,
             )
 
+            VaultStatement(enabledBooks = uiState.vaultEnabledBooks)
+
             when (val account = uiState.account) {
                 AccountState.Unconfigured ->
                     Text(
@@ -123,6 +125,39 @@ fun AccountScreen(
                 Text(text = it, color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+}
+
+/**
+ * What the vault does and does not do with the user's books (S3.7).
+ *
+ * This screen is the user's only honest account of where their books are, so the text is stated
+ * plainly and **not overstated**: `docs/sync_api.md` §8.2(4) makes the vault opt-in per book and
+ * off by default, §8.2(2) makes the bytes unreadable to the server, and §8.3(3) forbids any
+ * sharing surface. All three are claims the user can check, and `AccountScreenTest` asserts the
+ * copy against the implemented default rather than against itself.
+ *
+ * Deliberately carries no switch. The decision is per book and belongs on the book, not on a
+ * global toggle that would make "off for everything" one mistap away from "on for everything" —
+ * and CLAUDE.md §9 records what happens when an action is hosted somewhere other than the state
+ * it acts on.
+ */
+@Composable
+private fun VaultStatement(enabledBooks: Int) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = stringResource(R.string.account_vault_title),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text =
+                if (enabledBooks == VAULT_ENABLED_BOOKS_DEFAULT) {
+                    stringResource(R.string.account_vault_explainer)
+                } else {
+                    stringResource(R.string.account_vault_enabled_count, enabledBooks)
+                },
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
 
