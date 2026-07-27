@@ -777,3 +777,30 @@
   `@Index("bookId")` becomes `index_<table>_<column>`; a hand-written
   `CREATE INDEX` under any other name passes every row assertion and crashes on
   the first launch after upgrade.
+
+- [2026-07-27] **Copy migration DDL from Room's generated `AppDatabase_Impl`,
+  never hand-write it.** S3.7's first draft had
+  `enabled INTEGER NOT NULL DEFAULT 0`; Room emits no `DEFAULT`, and `TableInfo`
+  comparison is exact — the same defect class that shipped in B4's
+  `MIGRATION_5_6`. Reading
+  `build/generated/ksp/debug/.../AppDatabase_Impl.kt` catches it before it can
+  reach a device. This is the cheapest possible guard against the whole family.
+- [2026-07-27] **A schema bump breaks every existing migration test that reopens
+  through Room.** `Migration6To7Test` failed with "A migration from 6 to 8 was
+  required but not found" the moment v8 landed — Room migrates to whatever
+  `@Database` declares, not to the version the test is named after. Every reopen
+  test's `addMigrations` list must grow with each bump. S3.7 renamed its test to
+  `opens at the current schema version` so the name stays true next time.
+- [2026-07-27] **A truthful statement about unbuilt behaviour becomes misleading
+  if you "correct" it early.** Asked to amend the privacy statements alongside
+  authorising the vault, the literal move was to rewrite "book files never leave
+  this device" to describe a vault that did not exist — false in the opposite
+  direction. The form that survives the transition is **default-off phrasing**:
+  "book files stay on the device by default", true both before and after.
+  **Write the sentence that holds in both states, or wait.**
+- [2026-07-27] **The local `translations`/`glossaries` tables are not
+  user-scoped**, which is correct per `sync_api.md` §8.3(1) for a single-user
+  machine but means two accounts on one physical device could cross-pollinate
+  through the shared local cache when uploading. A device-sharing question, not
+  a hosting one — but it is the one place the per-user invariant is enforced by
+  circumstance rather than by structure.
