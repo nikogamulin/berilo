@@ -606,8 +606,27 @@ Two independent defects, either of which alone makes the feature unreachable:
 - [ ] `assemble.py:374-377` seeds the `dc:identifier` UUID5 on `berilo:{source_path}:{title}:{language}`. Measured on one book, same `Book`, only the path varying: absolute → `85e89f18…`/2 652 144 B · repo-relative → `3ff13117…`/2 652 144 B · `../`-relative → `16f34b3e…`/2 652 142 B · a device path → `5b320784…`/2 652 145 B. The length moves too, because `content.opf` is DEFLATED
 - [ ] **Consequence:** the device stores books at `filesDir/books/<sha256>.epub`, the workstation at `data/examples/<name>` — so the same book translated on both gets a different `dc:identifier` **and** a different file sha256, and `BookImporter` dedupes on exactly that sha256 (`BookImporter.kt:73`). It imports as **two separate books**, which also affects Phase-3 sync
 - [ ] **B3's gate stays correct** as a *writer-fidelity* test (same `Book` in → same bytes out, across languages). It is not, and cannot be, a cross-device guarantee
-- [ ] **Decision required:** reseed the identifier on something path-free such as `book_hash` — which changes `dc:identifier` for every EPUB already produced — or accept per-device identifiers and dedupe on `book_hash` instead of file bytes
-- **Verify:** the same `Book` written from two different `source_path` values produces byte-identical output, mutation-proven; existing translated EPUBs' identifiers reported before/after so the blast radius is known before anything ships.
+- [x] **Decided by Niko 2026-07-27: `book_hash` stays.** The fix reseeds `dc:identifier` on the existing `book_hash` (and dedupes on it rather than on file bytes) — `book_hash` itself is **not** removed, renamed or recomputed. It is the one identity 13,426 paid cache rows depend on, and this session proved six times over that it does not move
+- [ ] Reseed `dc:identifier` on `book_hash`, so the same book yields the same identifier on every device. This changes `dc:identifier` for every EPUB already produced — report the blast radius before shipping
+- [ ] `BookImporter` dedupes on `book_hash` rather than the file's sha256, so a book translated on both tablet and workstation imports **once**
+- **Verify:** the same `Book` written from two different `source_path` values produces byte-identical output, mutation-proven; `book_hash` byte-unchanged on all six example books (the §5 gate); the translation cache still resolves 13,426/13,426 against a real-cache copy; existing translated EPUBs' identifiers reported before/after.
+- **Blocked on** the copyright research below — if a personal cloud copy is viable, the dedupe identity and the sync design are one decision, not two.
+
+#### B10 — Personal cloud copy and cross-device sync (research first) — *researching*
+*Requested by Niko 2026-07-27: keep a person's own copy in the cloud, sync it across their own reading devices, and never pay to translate the same book twice.*
+- [ ] **Research landing at** `docs/research/2026-07-27-personal-copy-cloud-sync.md`: the EU private-copying exception (InfoSoc 2001/29/EC Art. 5(2)(b)) and the CJEU line that narrows it — Padawan, ACI Adam, Copydan, and **VCAST (C-265/16)**, which is directly on point for a cloud service that makes copies for users; Slovenia's ZASP; and the sharpest question, whether the exception covers **adaptation** at all, since a translation is a derivative work (Berne Art. 8, 12) and not merely a reproduction
+- [ ] The line that almost certainly must not be crossed: **a translation cache shared across users** means one person's translation is served to another — distribution, not private copying. Per-user isolation is the likely hard boundary, and the current cache is keyed on a content hash, so this is a real design edge
+- [ ] Design constraints that follow, mapped onto Berilo's architecture; then a decision on whether **CLAUDE.md §2's "books never leave the machine"** is amended or upheld
+- **Verify:** research document committed with primary sources cited by article and paragraph, unsettled questions stated as unsettled, and a list of questions worth putting to a Slovenian IP lawyer. **No code ships against this until Niko has decided.**
+
+#### B9 — Flag a bad translation from the reader (3 pt) — *in progress*
+*Requested by Niko 2026-07-27. The reader's own quality signal: mark a passage as badly translated, with an optional suggestion or comment.*
+- [ ] Selection action hosted **on the selection**, in S2.12's action bar — never in chrome, per §9's S2.6 rule
+- [ ] Flag-only and flag-with-comment variants; stored as first-class user data with `updatedAt`/`deletedAt` tombstones matching the sync convention, so Phase 3 can carry it
+- [ ] **Provenance where recoverable:** match the passage to a cached translation via `segmentHash` so the exact model, prompt version and glossary that produced it can be recovered — and store the flag anyway when it cannot
+- [ ] Room v6 → v7 migration on the `MIGRATION_4_5` precedent; never destructive
+- [ ] Reviewable on the existing notebook surface and carried into the Markdown export
+- **Verify:** `./gradlew test assembleDebug` green; **the end-to-end path walked in one test** — selection → flag action → stored row (both variants) → visible on the review surface → present in the export, against a real Room DB; the action's presence on the selection is mutation-proven; a v6 DB opens as v7 with every row intact including the translation cache; provenance recorded when matchable and the flag stored when not; screenshots at both qualifiers and themes.
 
 #### B7 — Translation UI, cost gate and background job (3 pt) ✅
 ***The last story of m4. B5's engine was complete, tested and unreachable — the exact position S2.6's highlights were in for two months. This makes it reachable and proves it.***
