@@ -36,6 +36,9 @@ import app.berilo.reader.R
 import app.berilo.reader.annotations.AnnotationEditorActions
 import app.berilo.reader.annotations.AnnotationEditorHost
 import app.berilo.reader.annotations.AnnotationEditorUiState
+import app.berilo.reader.annotations.FlagEditorActions
+import app.berilo.reader.annotations.FlagEditorHost
+import app.berilo.reader.annotations.FlagEditorUiState
 import app.berilo.reader.dictionary.DictionarySheet
 import app.berilo.reader.dictionary.DictionaryUiState
 import app.berilo.reader.interpretation.InterpretationSheet
@@ -133,6 +136,19 @@ fun ReaderChromeOverlay(
                     onNoteTextChanged = actions.onAnnotationNoteTextChanged,
                     onConfirmNote = actions.onConfirmAnnotationNote,
                     onDismiss = actions.onDismissAnnotationEditor,
+                ),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+
+        // Hosts bad-translation flagging (B9): "Bad translation" on the selection popup drives
+        // this state via TranslationFlagViewModel.
+        FlagEditorHost(
+            state = state.flagEditorState,
+            actions =
+                FlagEditorActions(
+                    onCommentChanged = actions.onFlagCommentChanged,
+                    onConfirm = actions.onConfirmFlag,
+                    onDismiss = actions.onDismissFlagEditor,
                 ),
             modifier = Modifier.align(Alignment.BottomCenter),
         )
@@ -374,6 +390,7 @@ data class ReaderChromeState(
     val dictionaryState: DictionaryUiState = DictionaryUiState.Idle,
     val interpretationState: InterpretationUiState = InterpretationUiState.Idle,
     val annotationEditorState: AnnotationEditorUiState = AnnotationEditorUiState.Idle,
+    val flagEditorState: FlagEditorUiState = FlagEditorUiState.Idle,
 )
 
 /** Callbacks the [ReaderScaffold] invokes; wired to the [ReaderViewModel]. */
@@ -401,4 +418,7 @@ data class ReaderChromeActions(
     val onAnnotationNoteTextChanged: (String) -> Unit = {},
     val onConfirmAnnotationNote: () -> Unit = {},
     val onDismissAnnotationEditor: () -> Unit = {},
+    val onFlagCommentChanged: (String) -> Unit = {},
+    val onConfirmFlag: () -> Unit = {},
+    val onDismissFlagEditor: () -> Unit = {},
 )

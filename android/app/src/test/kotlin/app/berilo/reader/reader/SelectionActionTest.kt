@@ -2,6 +2,7 @@ package app.berilo.reader.reader
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -29,10 +30,19 @@ class SelectionActionTest {
                 SelectionAction.NOTE,
                 SelectionAction.DEFINE,
                 SelectionAction.INTERPRET,
+                SelectionAction.FLAG,
                 SelectionAction.COPY,
             ),
             SelectionAction.entries.toList(),
         )
+    }
+
+    @Test
+    fun `flagging a bad translation is a selection action, not a chrome action`() {
+        // B9. The action consumes the live selection (its text is both what gets stored and
+        // the key the translation cache is matched on), so hosting it anywhere the chrome's
+        // own reveal destroys that selection makes it permanently unreachable — CLAUDE.md §9.
+        assertTrue(SelectionAction.FLAG in SelectionAction.entries)
     }
 
     @Test

@@ -102,3 +102,41 @@ val MIGRATION_5_6 =
             )
         }
     }
+
+/**
+ * Schema 6 -> 7 (B9): adds `translation_flags` — passages the reader marked as badly translated.
+ *
+ * Additive like [MIGRATION_5_6], and for a stricter reason: version 6 is where the on-device
+ * translation cache lives, so extending the destructive fallback to cover this bump would throw
+ * away paid translation work to add an empty table. Nothing pre-existing is read or rewritten
+ * here; the load-bearing property is that every row in `books`, `highlights`,
+ * `dictionary_entries`, `interpretation_entries`, `sync_state`, `translations`, `glossaries`
+ * and `calls` is still there afterwards.
+ *
+ * The index name is not cosmetic: Room derives `index_<table>_<columns>` from
+ * `@Entity(indices = [Index("bookId")])` and validates it when the database is opened, so a
+ * differently-named index here would surface as an `IllegalStateException` on the first open
+ * after upgrade rather than as a failing migration.
+ */
+val MIGRATION_6_7 =
+    object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS translation_flags (
+                    id TEXT NOT NULL, bookId TEXT NOT NULL, selectedText TEXT NOT NULL,
+                    comment TEXT, locatorJson TEXT NOT NULL, chapterTitle TEXT,
+                    cacheBookHash TEXT, cacheSegmentHash TEXT, cacheModel TEXT, cacheLang TEXT,
+                    cachePromptVersion TEXT, cacheGlossaryHash TEXT,
+                    createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, deletedAt INTEGER,
+                    PRIMARY KEY(id)
+                )
+                """
+                    .trimIndent(),
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_translation_flags_bookId " +
+                    "ON translation_flags (bookId)",
+            )
+        }
+    }

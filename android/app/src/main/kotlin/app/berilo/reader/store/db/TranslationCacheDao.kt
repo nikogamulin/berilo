@@ -82,4 +82,30 @@ interface TranslationCacheDao {
     /** Total EUR cost recorded for [bookHash] across every call. */
     @Query("SELECT COALESCE(SUM(costEur), 0.0) FROM calls WHERE bookHash = :bookHash")
     suspend fun totalCost(bookHash: String): Double
+
+    // --- reverse lookup, target text -> cache key (B9) ---------------------------------
+    //
+    // The reader only ever holds the *translated* text: the library row is keyed on the
+    // sha256 of the translated EPUB, while `translations` is keyed on `bookHash`, a hash over
+    // the *source* book's segment ids. Nothing joins the two, so a flagged passage can only be
+    // matched back to the run that produced it by its content. Both queries take the newest
+    // row, so a segment re-translated under a newer prompt reports the key actually on screen.
+
+    /** The most recently cached translation whose text is exactly [text], or null. */
+    @Query("SELECT * FROM translations WHERE text = :text ORDER BY createdAt DESC LIMIT 1")
+    suspend fun findTranslationByExactText(text: String): TranslationEntity?
+
+    /**
+     * The most recently cached translation whose text matches [pattern], or null.
+     *
+     * [pattern] is a SQL `LIKE` pattern; the caller builds it (see
+     * [app.berilo.reader.annotations.likeContainsPattern]) and is responsible for escaping any
+     * `%`, `_` or `\` the user's selection contains — unescaped, a passage containing a literal
+     * `%` would match half the book.
+     */
+    @Query(
+        "SELECT * FROM translations WHERE text LIKE :pattern ESCAPE '\\' " +
+            "ORDER BY createdAt DESC LIMIT 1",
+    )
+    suspend fun findTranslationMatching(pattern: String): TranslationEntity?
 }

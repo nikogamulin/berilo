@@ -13,12 +13,17 @@ import app.berilo.reader.R
  *
  * Declaration order is the order they appear in the floating toolbar — [HIGHLIGHT] and [NOTE]
  * lead because they are the ones that must survive an overflow on a narrow bar.
+ *
+ * B9 adds [FLAG] here for the same reason the others are here and not in the chrome: marking a
+ * passage as badly translated consumes the selection, so it must be hosted on it. It sits after
+ * the reading actions and before [COPY], which stays last as the terminal, non-Berilo one.
  */
 enum class SelectionAction(@StringRes val labelRes: Int) {
     HIGHLIGHT(R.string.reader_highlight),
     NOTE(R.string.reader_note),
     DEFINE(R.string.reader_define),
     INTERPRET(R.string.reader_interpret),
+    FLAG(R.string.reader_flag),
     COPY(R.string.reader_copy),
     ;
 

@@ -30,7 +30,12 @@ class NotebookActivity : ComponentActivity() {
 
     private val viewModel: NotebookViewModel by viewModels {
         val container = (application as BeriloApplication).container
-        NotebookViewModel.Factory(bookId, bookTitle, container.annotationsRepository)
+        NotebookViewModel.Factory(
+            bookId,
+            bookTitle,
+            container.annotationsRepository,
+            container.translationFlagRepository,
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,6 +51,8 @@ class NotebookActivity : ComponentActivity() {
                     onChangeColor = { highlight, color -> viewModel.updateColor(highlight.id, color) },
                     onDelete = { highlight -> viewModel.delete(highlight.id) },
                     onExport = ::exportMarkdown,
+                    onJumpToFlag = ::jumpToFlag,
+                    onDeleteFlag = { flag -> viewModel.deleteFlag(flag.id) },
                 )
             }
         }
@@ -53,6 +60,13 @@ class NotebookActivity : ComponentActivity() {
 
     private fun jumpToHighlight(highlight: Highlight) {
         startActivity(ReaderActivity.newIntent(this, bookId, targetLocatorJson = highlight.locatorJson))
+        finish()
+    }
+
+    /** Same jump-back as a highlight (B9): a flag stores the same Readium locator, so reviewing
+     * one means reading the passage in place, not just its excerpt. */
+    private fun jumpToFlag(flag: TranslationFlag) {
+        startActivity(ReaderActivity.newIntent(this, bookId, targetLocatorJson = flag.locatorJson))
         finish()
     }
 

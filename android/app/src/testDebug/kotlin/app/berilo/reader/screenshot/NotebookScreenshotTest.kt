@@ -4,10 +4,13 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.Surface
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onRoot
+import app.berilo.reader.annotations.ChapterFlags
 import app.berilo.reader.annotations.ChapterHighlights
 import app.berilo.reader.annotations.Highlight
 import app.berilo.reader.annotations.NotebookScreen
 import app.berilo.reader.annotations.NotebookUiState
+import app.berilo.reader.annotations.TranslationFlag
+import app.berilo.reader.annotations.TranslationProvenance
 import app.berilo.reader.store.db.HighlightColor
 import app.berilo.reader.ui.theme.BeriloTheme
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -43,6 +46,24 @@ class NotebookScreenshotTest {
             updatedAt = 0L,
         )
 
+    private fun flag(
+        id: String,
+        text: String,
+        comment: String?,
+        provenance: TranslationProvenance?,
+    ) =
+        TranslationFlag(
+            id = id,
+            bookId = "book-1",
+            selectedText = text,
+            comment = comment,
+            locatorJson = "{}",
+            chapterTitle = "Chapter 1",
+            provenance = provenance,
+            createdAt = 0L,
+            updatedAt = 0L,
+        )
+
     private fun sampleUiState() =
         NotebookUiState(
             bookTitle = "Sandworm",
@@ -72,6 +93,32 @@ class NotebookScreenshotTest {
                                     "attribution is the hardest problem in this field",
                                     note = "Worth quoting in the review.",
                                 ),
+                            ),
+                    ),
+                ),
+            // B9: both flag variants, so the review sees the badge, the error-tinted border,
+            // a comment and both the matched and unmatched provenance lines in one frame.
+            flagChapters =
+                listOf(
+                    ChapterFlags(
+                        chapterTitle = "Chapter 1 — Iron Curtain",
+                        flags =
+                            listOf(
+                                flag(
+                                    "f1",
+                                    "Geografija je usoda, ki je nihče ne izbere.",
+                                    comment = "Raje »obala« kot »breg«.",
+                                    provenance =
+                                        TranslationProvenance(
+                                            bookHash = "bookhash1",
+                                            segmentHash = "seghash1",
+                                            model = "gpt-5-mini",
+                                            lang = "sl",
+                                            promptVersion = "revise_v1",
+                                            glossaryHash = "glosshash1",
+                                        ),
+                                ),
+                                flag("f2", "Ta stavek ni smiseln.", comment = null, provenance = null),
                             ),
                     ),
                 ),

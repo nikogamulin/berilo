@@ -1,6 +1,7 @@
 package app.berilo.reader.reader
 
 import app.berilo.reader.annotations.AnnotationEditorUiState
+import app.berilo.reader.annotations.FlagEditorUiState
 import app.berilo.reader.dictionary.DictionaryErrorKind
 import app.berilo.reader.dictionary.DictionaryUiState
 import app.berilo.reader.interpretation.InterpretationErrorKind
@@ -32,12 +33,16 @@ class ReaderOverlayVisibilityTest {
             noteText = "",
         )
 
+    private val flagComposer =
+        FlagEditorUiState.Composer(selectedText = "sandworm", locatorJson = "{}", chapterTitle = "Ch 4")
+
     private fun visible(
         chromeVisible: Boolean = false,
         dictionary: DictionaryUiState = DictionaryUiState.Idle,
         interpretation: InterpretationUiState = InterpretationUiState.Idle,
         editor: AnnotationEditorUiState = AnnotationEditorUiState.Idle,
-    ) = readerOverlayVisible(chromeVisible, dictionary, interpretation, editor)
+        flagEditor: FlagEditorUiState = FlagEditorUiState.Idle,
+    ) = readerOverlayVisible(chromeVisible, dictionary, interpretation, editor, flagEditor)
 
     @Test
     fun `hidden while reading with nothing open`() {
@@ -74,6 +79,15 @@ class ReaderOverlayVisibilityTest {
     }
 
     @Test
+    fun `visible for the flag editor with chrome hidden`() {
+        // B9's sheet opens from the selection popup, so chrome is hidden by definition. Left
+        // out of the predicate, it would compose inside a GONE view: the user taps "Bad
+        // translation", nothing appears, and the gesture reads as broken — the exact S2.6
+        // failure this predicate exists to prevent (CLAUDE.md §9).
+        assertTrue(visible(flagEditor = flagComposer))
+    }
+
+    @Test
     fun `hidden again once every surface returns to idle`() {
         assertFalse(
             visible(
@@ -81,6 +95,7 @@ class ReaderOverlayVisibilityTest {
                 dictionary = DictionaryUiState.Idle,
                 interpretation = InterpretationUiState.Idle,
                 editor = AnnotationEditorUiState.Idle,
+                flagEditor = FlagEditorUiState.Idle,
             ),
         )
     }
