@@ -1,4 +1,4 @@
-# Berilo sync API contract — v1.3
+# Berilo sync API contract — v1.4
 
 > Implementation-ready contract for `berilo-cloud` (private repo). This
 > document is the boundary artifact: the private repo implements *from* this
@@ -66,11 +66,14 @@ Web app    ──┘        (Vercel)         (thin)      └─   auth = Clerk J
   never hard deletes, so a delete on one device propagates to every other
   device and to the web app on the next pull. Hard deletion (GDPR-style
   erasure) is an out-of-band admin operation, not part of this contract.
-- **Privacy boundary:** book *files* never leave the device/machine — only
+- **Privacy boundary:** by default, book *files* stay on the device and only
   user-created data (highlights/notes, vocabulary, progress) and book
-  *metadata* (title, authors, content hash, language) sync. The public
-  reading page (§6.1 of the spec) additionally publishes only what a user
-  explicitly opts in, per item.
+  *metadata* (title, authors, content hash, language) sync. **§8 adds one
+  opt-in exception — the personal book vault** — under which a user may store
+  *their own* files, encrypted client-side, in *their own* namespace. The
+  server cannot read them and no path exists by which one user's bytes reach
+  another. The public reading page (§6.1 of the spec) additionally publishes
+  only what a user explicitly opts in, per item.
 
 ### 1.2 Entity ⇄ Android-entity mapping
 
@@ -1155,6 +1158,113 @@ unknown fields. Any breaking change (removing/renaming a field, changing a
 type, tightening a previously-optional constraint, changing LWW/pagination
 semantics) requires `/api/v2` served alongside `/api/v1` until every
 client build in the field has migrated.
+
+---
+
+## 8. Personal book vault (v1.4)
+
+A user's own book files and their own translations, stored in their own
+namespace so the same person can read on more than one device without paying to
+translate the same book twice.
+
+**This section is normative and the constraints are load-bearing.** They derive
+from `docs/research/2026-07-27-personal-copy-cloud-sync.md`, which is research
+rather than legal advice — but the design lines below are the ones that keep the
+service on the settled side of the authorities it cites, and a change to any of
+them is a change to the legal posture, not a refactor.
+
+### 8.1 Why this is a vault and not a library
+
+*Austro-Mechana* (C-433/20, ¶29, ¶33) holds that saving copies for private
+purposes on a cloud server is private copying — "any medium" expressly covers
+"servers such as those used in cloud computing". *VCAST* (C-265/16) came out the
+other way because that service **supplied the content**: the Court found "dual
+functionality… ensuring both the reproduction and the making available of the
+works" (¶37–38), and *Austro-Mechana* ¶31 distinguishes it on exactly that
+ground.
+
+Berilo supplies nothing. The user supplies the file. **The single functionality
+is storage, and it stays single only while no path exists by which one user's
+content reaches another.** DSM Directive 2019/790 Art. 2(6) then excludes this
+service from Art. 17 in its own words — "cloud services that allow users to
+upload content for their own use".
+
+### 8.2 MUST
+
+1. **Per-user isolation lives in the primary key.** Every vault row and every
+   storage object is keyed `(user_id, …)`. Not a `WHERE` clause, not an RLS
+   policy alone, not a bucket prefix — **the key**, so that a future refactor
+   that drops a predicate cannot silently merge two users' data.
+2. **Client-side encryption.** Bytes are encrypted on the device with a key
+   derived from the user's own secret and never transmitted. The server stores
+   ciphertext it cannot read. This is what keeps the provider a conduit rather
+   than a party with editorial control (DSA Art. 6(2) withdraws the hosting safe
+   harbour where the recipient acts "under the authority or the control of the
+   provider").
+3. **User-initiated upload only.** The service never fetches, never ingests on
+   the user's behalf, and never translates on its own initiative. Translation
+   stays on the user's machine under the user's own API key — the existing BYO-key
+   invariant.
+4. **Opt-in, per book, off by default.** The default remains "files stay on the
+   device". Nothing is uploaded silently.
+
+### 8.3 MUST NOT
+
+1. **Never share a translation cache across users.** The cache is content-addressed
+   — `(book_hash, segment_hash, model, lang, prompt_version, glossary_hash)` with
+   no user column. That is correct on one machine and **dangerous on a server**:
+   two users importing the same ISBN collide on `book_hash`, and the second is
+   served the first's translated text. That is reproduction plus communication to
+   the public (InfoSoc Art. 3(1); *Tom Kabinet*, C-263/18, cited approvingly at
+   *Austro-Mechana* ¶31), it hands the service *VCAST*'s dual functionality, and it
+   breaks ZASP Art. 53(1)1 directly because the adaptation becomes "dostopna
+   javnosti".
+
+   **Cross-user deduplication is this same defect wearing a cost-optimisation
+   hat.** The goal — "don't pay to translate twice" — is legitimate *within one
+   user's account across their own devices* and is not legitimate across
+   accounts. No exception, however large the storage saving.
+2. **No content-addressed object storage keyed on book hash alone.** Same defect
+   at the blob layer. Namespace every object by user.
+3. **No sharing surface for vault contents.** No links, no public objects, no
+   "send to a friend". A sharing path converts storage into making-available.
+4. **No DRM circumvention and no acquisition helpers.** Already a stated
+   non-goal; the research (§1.11) finds no lawful self-help route, so it holds
+   even when inconvenient.
+
+### 8.4 The constraint no design choice fixes
+
+**ZASP Art. 50(4)** excludes written works "v obsegu celotne knjige" — whole
+books — from Slovenia's private-reproduction exception, and Art. 50(1) caps
+private copies at three. Berilo reproduces the whole book by construction.
+
+**This is not created by the vault.** The Phase 1 CLI, running locally with no
+server at all, already sits on it; the vault inherits the exposure rather than
+adding to it. The available routes are non-technical: Art. 50(5)1 where the
+print run has been exhausted two years or more, the source licence where it
+permits personal copies (Art. 50(4) yields to contract), or the untested
+argument that Art. 53 displaces Art. 50(4) for adaptation.
+
+**Consequence for scope:** the vault is built and shipped as a *personal* tool.
+Opening it to paying users is a different risk posture and a business decision,
+not a technical one — see the lawyer questions in the research document §4.
+
+### 8.5 Contract sketch
+
+| Object | Key | Notes |
+|---|---|---|
+| `vault_books` | `(user_id, book_hash)` | ciphertext metadata: size, nonce, algorithm, `updated_at`, `deleted_at` |
+| `vault_translations` | `(user_id, book_hash, segment_hash, model, lang, prompt_version, glossary_hash)` | **`user_id` first, and part of the PK** — this is the row that must never be shared |
+| storage object | `vault/{user_id}/{book_hash}.enc` | opaque ciphertext; no cross-user path exists |
+
+RLS on every table as §1.1 requires, with `user_id = auth.jwt() ->> 'sub'`, and
+the API layer never using the service-role key for user-scoped reads or writes.
+
+**Open:** the server half lives in `berilo-cloud` per CLAUDE.md §5 and is not
+implemented by this contract landing. This document is the surface; the
+implementation is not in this repo.
+
+---
 
 ## 7. Open decisions for Niko
 

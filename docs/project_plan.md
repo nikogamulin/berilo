@@ -409,7 +409,7 @@ Two independent defects, either of which alone makes the feature unreachable:
 - **Verify:** Playwright e2e: sign up → shelve book → share passage → rate → anonymous visitor sees only opted-in content; passage > 500 chars rejected server-side; UI strings render šumniki correctly (č/š/ž spot-check on live page); Lighthouse accessibility ≥ 95 on the reading page.
 
 ### S3.5 — Launch gate (2 pt)
-- [ ] Privacy policy (only user-created data syncs, books never leave device), free-tier limits, error monitoring
+- [ ] Privacy policy (user-created data syncs; book files stay on the device unless the user opts into the personal vault, `docs/sync_api.md` §8 — encrypted client-side, per-user namespace, off by default), free-tier limits, error monitoring
 - **Verify:** Rubric **S ≥ 85**; S2 and S3 gates at max; policy page live.
 
 ### S3.6 — Growth surface (16 pt) *(implemented as Phase C6 in `berilo-cloud`; evidence in its `docs/research/2026-07-25-virality/`)*
@@ -606,7 +606,7 @@ Two independent defects, either of which alone makes the feature unreachable:
 - [ ] `assemble.py:374-377` seeds the `dc:identifier` UUID5 on `berilo:{source_path}:{title}:{language}`. Measured on one book, same `Book`, only the path varying: absolute → `85e89f18…`/2 652 144 B · repo-relative → `3ff13117…`/2 652 144 B · `../`-relative → `16f34b3e…`/2 652 142 B · a device path → `5b320784…`/2 652 145 B. The length moves too, because `content.opf` is DEFLATED
 - [ ] **Consequence:** the device stores books at `filesDir/books/<sha256>.epub`, the workstation at `data/examples/<name>` — so the same book translated on both gets a different `dc:identifier` **and** a different file sha256, and `BookImporter` dedupes on exactly that sha256 (`BookImporter.kt:73`). It imports as **two separate books**, which also affects Phase-3 sync
 - [ ] **B3's gate stays correct** as a *writer-fidelity* test (same `Book` in → same bytes out, across languages). It is not, and cannot be, a cross-device guarantee
-- [x] **Decided by Niko 2026-07-27: `book_hash` stays.** The fix reseeds `dc:identifier` on the existing `book_hash` (and dedupes on it rather than on file bytes) — `book_hash` itself is **not** removed, renamed or recomputed. It is the one identity 13,426 paid cache rows depend on, and this session proved six times over that it does not move
+> **Decision, Niko 2026-07-27: `book_hash` stays.** The fix reseeds `dc:identifier` on the existing `book_hash` (and dedupes on it rather than on file bytes) — `book_hash` itself is **not** removed, renamed or recomputed. It is the one identity 13,426 paid cache rows depend on, and this session proved six times over that it does not move
 - [ ] Reseed `dc:identifier` on `book_hash`, so the same book yields the same identifier on every device. This changes `dc:identifier` for every EPUB already produced — report the blast radius before shipping
 - [ ] `BookImporter` dedupes on `book_hash` rather than the file's sha256, so a book translated on both tablet and workstation imports **once**
 - **Verify:** the same `Book` written from two different `source_path` values produces byte-identical output, mutation-proven; `book_hash` byte-unchanged on all six example books (the §5 gate); the translation cache still resolves 13,426/13,426 against a real-cache copy; existing translated EPUBs' identifiers reported before/after.
@@ -616,17 +616,35 @@ Two independent defects, either of which alone makes the feature unreachable:
 *Requested by Niko 2026-07-27: keep a person's own copy in the cloud, sync it across their own reading devices, and never pay to translate the same book twice.*
 - [ ] **Research landing at** `docs/research/2026-07-27-personal-copy-cloud-sync.md`: the EU private-copying exception (InfoSoc 2001/29/EC Art. 5(2)(b)) and the CJEU line that narrows it — Padawan, ACI Adam, Copydan, and **VCAST (C-265/16)**, which is directly on point for a cloud service that makes copies for users; Slovenia's ZASP; and the sharpest question, whether the exception covers **adaptation** at all, since a translation is a derivative work (Berne Art. 8, 12) and not merely a reproduction
 - [ ] The line that almost certainly must not be crossed: **a translation cache shared across users** means one person's translation is served to another — distribution, not private copying. Per-user isolation is the likely hard boundary, and the current cache is keyed on a content hash, so this is a real design edge
-- [ ] Design constraints that follow, mapped onto Berilo's architecture; then a decision on whether **CLAUDE.md §2's "books never leave the machine"** is amended or upheld
-- **Verify:** research document committed with primary sources cited by article and paragraph, unsettled questions stated as unsettled, and a list of questions worth putting to a Slovenian IP lawyer. **No code ships against this until Niko has decided.**
+- [x] Design constraints mapped onto Berilo's architecture and encoded normatively in **`docs/sync_api.md` §8**, which is the contract, not a note
+- [x] **Decided by Niko 2026-07-27: build it.** CLAUDE.md §2 amended — book files stay on the device *by default*, with the opt-in personal vault as the single exception. A second §2 invariant added: a hosted translation cache is per-user or it does not exist
+- **Verify:** research document committed with primary sources cited by article and paragraph, unsettled questions stated as unsettled, and a list of questions worth putting to a Slovenian IP lawyer.
+- **Verify run 2026-07-27:** `docs/research/2026-07-27-personal-copy-cloud-sync.md` committed in `8ec01f8` — 612 lines, CJEU judgments and ZASP articles cited by paragraph, §2 marks the unsettled questions as unsettled, §4 lists the lawyer questions ordered by how much each answer changes what gets built. **€0.**
+- **The finding that matters most is not about the cloud:** ZASP Art. 50(4) excludes whole books from Slovenia's private-reproduction exception and Art. 50(1) caps private copies at three. The Phase 1 CLI already sits on this; the vault inherits the exposure rather than creating it. Routes are non-technical (Art. 50(5)1 out-of-print ≥2 years; the source licence, since Art. 50(4) yields to contract) and it is why the vault ships as a personal tool — opening it to paying users is a different risk posture and a business decision.
 
-#### B9 — Flag a bad translation from the reader (3 pt) — *in progress*
+#### S3.7 — Personal book vault, Android client half (5 pt) — *in progress*
+*Authorised by Niko 2026-07-27 on the research. Contract: `docs/sync_api.md` §8. The server half lives in `berilo-cloud` per CLAUDE.md §5 and is not in this repo.*
+- [ ] Client-side AES-GCM encryption; the key derives from the user's own secret and is never transmitted — the server stores ciphertext it cannot read
+- [ ] **Per-user namespacing in the primary key**, structurally rather than by convention (§8.2(1)) — including any local mirror of translation-cache rows
+- [ ] Opt-in per book, **off by default**; nothing uploads silently
+- [ ] Upload / download / restore, such that a book restored on a second device re-bills **nothing**
+- [ ] The account screen tells the truth about the vault without overstating it
+- [ ] Room v7 → v8, additive, schema asserted via `PRAGMA table_info` — not just row counts
+- **Verify:** `./gradlew test assembleDebug` green; a book restored on a second device instance translates with **zero** API calls; two users pushing the same `book_hash` never see each other's rows, mutation-proven by removing `userId` from the key; ciphertext contains no source plaintext and the key is never transmitted; with the vault off the gateway receives zero calls; the migration preserves every row and matches the entities column-for-column; the account screen's privacy text matches implemented behaviour.
+
+#### B9 — Flag a bad translation from the reader (3 pt) ✅
 *Requested by Niko 2026-07-27. The reader's own quality signal: mark a passage as badly translated, with an optional suggestion or comment.*
-- [ ] Selection action hosted **on the selection**, in S2.12's action bar — never in chrome, per §9's S2.6 rule
-- [ ] Flag-only and flag-with-comment variants; stored as first-class user data with `updatedAt`/`deletedAt` tombstones matching the sync convention, so Phase 3 can carry it
-- [ ] **Provenance where recoverable:** match the passage to a cached translation via `segmentHash` so the exact model, prompt version and glossary that produced it can be recovered — and store the flag anyway when it cannot
-- [ ] Room v6 → v7 migration on the `MIGRATION_4_5` precedent; never destructive
-- [ ] Reviewable on the existing notebook surface and carried into the Markdown export
+- [x] Selection action hosted **on the selection**, in S2.12's action bar — never in chrome, per §9's S2.6 rule
+- [x] Flag-only and flag-with-comment variants; stored as first-class user data with `updatedAt`/`deletedAt` tombstones matching the sync convention, so Phase 3 can carry it
+- [x] **Provenance where recoverable:** match the passage to a cached translation via `segmentHash` so the exact model, prompt version and glossary that produced it can be recovered — and store the flag anyway when it cannot
+- [x] Room v6 → v7 migration on the `MIGRATION_4_5` precedent; never destructive
+- [x] Reviewable on the existing notebook surface and carried into the Markdown export
 - **Verify:** `./gradlew test assembleDebug` green; **the end-to-end path walked in one test** — selection → flag action → stored row (both variants) → visible on the review surface → present in the export, against a real Room DB; the action's presence on the selection is mutation-proven; a v6 DB opens as v7 with every row intact including the translation cache; provenance recorded when matchable and the flag stored when not; screenshots at both qualifiers and themes.
+- **Verify run 2026-07-27 on merged `main`:** **1161 JVM tests** (623 debug incl. 48 skipped + 538 release), **0 failures**, from a 1065 baseline the agent measured with `git stash -u`. 44 screenshots, S2.11's HSV scan clean on every new surface, `ThemeContrastTest` green. Lint 0 errors. **€0.**
+- **The end-to-end walk finds the menu item by its label**, never by an id the test computes, then drives the real callback → real chrome overlay → real text input → stored row → notebook grouping → Markdown export, for both variants. **The decisive mutation:** unhosting the flag editor from the chrome — *the exact S2.6 defect shape* — fails exactly the two end-to-end tests and nothing else.
+- **Provenance, honestly bounded.** Recovered: the full six-column cache key, naming the exact model, prompt version and glossary that produced the text. **Not** recovered: the source prose — `translations` stores `sha1(source)` and a hash cannot be inverted. No `sourceText` column was added, because it could only ever be null. Resolving a `segmentHash` back to prose needs the source EPUB re-read and is its own story.
+- **It found a defect in B4 that I had merged and verified:** `MIGRATION_5_6` declared `calls.id` nullable against a non-null entity, so **every existing install would have crashed on its first v5 → v6 open**. Fresh v6 installs were unaffected, which is why B4's own test, the full suite and my merge review all passed. Fixed in `54bd01a` and mutation-proven with a `PRAGMA table_info` assertion.
+- **Device residual:** the real WebView seam — the Boox must confirm a long-press raises the six-item bar (the label fitting alongside five others at 990 dp) and that the sheet renders over the navigator. Everything from `beginFlag` onward is covered offline.
 
 #### B7 — Translation UI, cost gate and background job (3 pt) ✅
 ***The last story of m4. B5's engine was complete, tested and unreachable — the exact position S2.6's highlights were in for two months. This makes it reachable and proves it.***

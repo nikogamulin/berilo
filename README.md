@@ -39,7 +39,7 @@ Concretely:
 
 - The key goes from your `.env` / your phone straight to `api.openai.com` or
   `api.anthropic.com`. There is no middleman, because there is no Berilo backend.
-- **Your books never leave your machine.** Only the text segments being
+- **Your books stay on your machine by default.** Only the text segments being
   translated are sent to the provider — the same as pasting a paragraph into a
   chat window, one batch at a time.
 - Keys are never logged. In the CLI, `Config` marks the key fields `repr=False`,

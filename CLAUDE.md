@@ -20,7 +20,8 @@ non-obvious command** — it is the register of what already went wrong here.
 - **Cheapest model that does the job** is the default (`gpt-5-mini`); every model is user-overridable through one provider interface. No provider lock-in.
 - **Meaning preservation over literalism** — the translate-and-verify prompt design *is* the product.
 - **Segment integrity:** source↔target mapping is 1:1. Nothing is silently dropped; failures are loud and resumable.
-- **Books never leave the machine** except as segment batches to the configured LLM API. Phase 3 syncs user-created data only.
+- **Book files stay on the device by default**, leaving only as segment batches to the configured LLM API. The one exception is the **opt-in personal vault** (`docs/sync_api.md` §8): a user's own files and translations, encrypted client-side, in their own namespace, off unless switched on per book. Phase 3 otherwise syncs user-created data only.
+- **A hosted translation cache is per-user or it does not exist.** The cache is content-addressed (`book_hash`, `segment_hash`) with no user column — correct on one machine, and on a server it serves one user's translation to another, which is communication to the public (*Tom Kabinet*, C-263/18), not private copying. **`user_id` belongs in the primary key**, never in a `WHERE` clause a refactor can drop; cross-user dedup is the same defect wearing a cost-optimisation hat. Reasoning: `docs/research/2026-07-27-personal-copy-cloud-sync.md`.
 - **EPUB is the canonical interchange format** — translator output = app input.
 
 ## 3. Design

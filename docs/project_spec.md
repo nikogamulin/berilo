@@ -144,7 +144,9 @@ this app lives. **Recommendation: native Kotlin.** Target: Android 8.0+
   for reading position. Sync is optional — the app remains fully functional
   offline; a free tier account is only needed for sync.
 - **Web app:** review/search notes and highlights across books, vocabulary
-  review, export. Book files never leave the device — only user-created data
+  review, export. Book files stay on the device unless the user opts into the
+  personal vault (`docs/sync_api.md` §8, encrypted client-side, per-user
+  namespace, off by default) — otherwise only user-created data
   (notes, highlights, progress, lookups) syncs.
 - **Boundary:** the open-source app talks to the service through a small,
   documented REST API; the service implementation stays private.
