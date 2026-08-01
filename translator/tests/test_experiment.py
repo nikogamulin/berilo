@@ -61,7 +61,11 @@ _VARIANT_PREFIX = "VAR::"
 def _make_book(
     *,
     chapters: int = 2,
-    paragraphs_per_chapter: int = 40,
+    # Sized in units of DEFAULT_RUN_LENGTH (= DEFAULT_BATCH_SIZE), not as a
+    # literal: an A/B run is deliberately one production-shaped batch, so a
+    # fixture pinned to a bare number silently stops supplying enough runs the
+    # day the production batch size changes.
+    paragraphs_per_chapter: int = 4 * DEFAULT_BATCH_SIZE,
     title: str = "Test Book",
     source_format: str = "epub",
     chapter_titles: list[str] | None = None,
@@ -295,11 +299,13 @@ def _plan(source: Book, translated: Book, **overrides):
 
 def test_runs_are_contiguous_same_chapter_prose():
     source = _make_book()
-    pool = candidate_runs(source, _control_book(source), run_length=10)
+    pool = candidate_runs(source, _control_book(source), run_length=DEFAULT_BATCH_SIZE)
     assert pool
     for run in pool:
         positions = [source.segments.index(seg) for seg in run.segments]
-        assert positions == list(range(positions[0], positions[0] + 10)), "run is not contiguous"
+        assert positions == list(
+            range(positions[0], positions[0] + DEFAULT_BATCH_SIZE)
+        ), "run is not contiguous"
         assert len({seg.chapter_index for seg in run.segments}) == 1
         assert all(seg.type == SegmentType.PARAGRAPH for seg in run.segments)
 
@@ -757,7 +763,7 @@ def test_paired_delta_is_computed_over_matched_pairs(scratch_cache):
     )
     by_key = {delta.key: delta for delta in result.deltas}
 
-    assert len(result.pairs) == 30
+    assert len(result.pairs) == 3 * DEFAULT_BATCH_SIZE
     for pair in result.pairs:
         assert pair.source and pair.control and pair.variant
         assert pair.control.startswith(_CONTROL_PREFIX)
@@ -996,8 +1002,9 @@ def test_uncached_book_context_memo_is_excluded_from_the_per_word_rate(scratch_c
 def test_plan_prices_the_run_without_any_call():
     source = _make_book()
     plan = _plan(source, _control_book(source), runs=3)
-    assert plan.judged_segments == 30
-    assert plan.judge_calls == 120
+    assert plan.judged_segments == 3 * DEFAULT_BATCH_SIZE
+    # Two arms x two dimensions per judged segment.
+    assert plan.judge_calls == 4 * plan.judged_segments
     assert plan.estimated_judge_cost_eur > 0
     assert plan.estimated_translation_cost_eur > 0
     assert plan.estimated_cost_eur == pytest.approx(
@@ -1006,7 +1013,7 @@ def test_plan_prices_the_run_without_any_call():
     text = format_plan(plan)
     assert "DRY RUN" in text
     assert "no cost" in text
-    assert "cluster-bootstrapped over 3 runs, not 30 segments" in text
+    assert f"cluster-bootstrapped over 3 runs, not {3 * DEFAULT_BATCH_SIZE} segments" in text
 
 
 def test_cli_dry_run_spends_nothing_and_makes_no_call(tmp_path, epub_builder, monkeypatch):

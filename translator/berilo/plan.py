@@ -87,10 +87,17 @@ class Wave:
         context_segment_ids: IDs of the segments whose source/target pairs make
             up this wave's context snapshot, oldest first. Recorded as IDs
             rather than text so a conformance vector can carry them.
+        preceding_pairs: ``(source, target)`` pairs from the cache hits sitting
+            immediately before this wave, in order. The executor must fold
+            these into its rolling context *before* taking the snapshot: a
+            cache hit feeds context exactly as a freshly translated segment
+            does, which is what makes a resumed run's prompts identical to an
+            uninterrupted run's.
     """
 
     batches: list[PositionedBatch]
     context_segment_ids: list[str]
+    preceding_pairs: list[tuple[str, str]] = field(default_factory=list)
 
 
 def build_translation_plan(
@@ -213,9 +220,11 @@ def plan_waves(
             del remembered[:-context_pairs]
 
     step = 0
+    pending_pairs: list[tuple[str, str]] = []
     while step < len(plan.steps):
         if plan.steps[step][0] == "pair":
             remember(plan.pair_ids[step])
+            pending_pairs.append(plan.steps[step][1])  # type: ignore[arg-type]
             step += 1
             continue
 
@@ -227,7 +236,17 @@ def plan_waves(
             batches.append(plan.steps[cursor][1])  # type: ignore[arg-type]
             cursor += 1
 
-        waves.append(Wave(batches=batches, context_segment_ids=list(remembered)))
+        # ``remembered`` already includes this wave's preceding cache hits, so
+        # the snapshot recorded here is exactly what the executor will hold
+        # once it has folded ``preceding_pairs`` in.
+        waves.append(
+            Wave(
+                batches=batches,
+                context_segment_ids=list(remembered),
+                preceding_pairs=pending_pairs,
+            )
+        )
+        pending_pairs = []
 
         for batch in batches:
             for _position, segment in batch:

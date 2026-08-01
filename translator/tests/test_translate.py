@@ -1644,3 +1644,47 @@ def test_cli_refuses_a_slovenian_style_against_a_german_target(epub_builder) -> 
     assert "revise_v1" in result.output
     assert "revise_generic_v1" in result.output, "the refusal must name what to use instead"
     assert "Dry run" not in result.output, "no estimate may be printed for a refused pair"
+
+
+# --------------------------------------------------------------------------
+# Wave execution (core-spec Surface 3).
+#
+# The first test here is the regression gate for the plan/execute refactor: it
+# asserts literal output and passes BEFORE the refactor as well as after, so a
+# change in how batches are cut shows up here rather than in a book.
+# --------------------------------------------------------------------------
+
+
+def _lettered_book(count: int, *, chapters: int = 1) -> Book:
+    """A book of ``count`` paragraphs spread over ``chapters`` chapters."""
+    segments = []
+    for position in range(count):
+        chapter = position * chapters // count
+        segments.append(
+            _segment(f"Sentence {position}.", chapter, position, f"Chapter {chapter}")
+        )
+    return _book(segments)
+
+
+def test_plan_backed_translation_matches_the_sequential_baseline() -> None:
+    """The refactor must be output-identical, not merely output-equivalent."""
+    segments = [
+        _segment("Alpha.", 0, 0, "Chapter One"),
+        _segment("Beta.", 0, 1, "Chapter One"),
+        _segment("   ", 0, 2, "Chapter One"),
+        _segment("Gamma.", 1, 3, "Chapter Two"),
+        _segment("Delta.", 1, 4, "Chapter Two"),
+    ]
+    book = _book(segments)
+    client = FakeLLMClient()
+    with _memory_cache() as cache:
+        out = translate_book(book, client=client, target_lang="sl", cache=cache)
+
+    assert [s.id for s in out.segments] == [s.id for s in book.segments]
+    assert [s.text for s in out.segments] == [
+        "SL::Alpha.",
+        "SL::Beta.",
+        "   ",
+        "SL::Gamma.",
+        "SL::Delta.",
+    ]

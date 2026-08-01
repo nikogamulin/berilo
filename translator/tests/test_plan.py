@@ -108,6 +108,27 @@ def test_a_pair_step_ends_a_wave_so_its_context_reaches_the_next_snapshot():
     assert waves[1].context_segment_ids == ["c0-1", "c0-2"]
 
 
+def test_a_wave_carries_the_cache_hits_that_precede_it():
+    """Cache hits must reach the executor, not just the vector.
+
+    A cache hit feeds the rolling context exactly as a freshly translated
+    segment does; that equality is what makes a resumed run's prompts identical
+    to an uninterrupted run's. Recording only the segment *id* is enough for a
+    conformance vector but leaves the executor with nothing to remember, which
+    silently drops the CONTEXT block from every prompt after a resume.
+    """
+    segments = [_seg(f"c0-{i}", f"t{i}", position=i) for i in range(4)]
+    plan = build_translation_plan(
+        segments,
+        lookup=lambda s: "PREVEDENO" if s.id in {"c0-0", "c0-1"} else None,
+        batch_size=10,
+    )
+    waves = plan_waves(plan, concurrency=4, context_pairs=2)
+    assert len(waves) == 1
+    assert waves[0].preceding_pairs == [("t0", "PREVEDENO"), ("t1", "PREVEDENO")]
+    assert waves[0].context_segment_ids == ["c0-0", "c0-1"]
+
+
 def test_concurrency_one_makes_every_wave_a_single_batch():
     segments = [_seg(f"c0-{i}", f"t{i}", position=i) for i in range(4)]
     plan = build_translation_plan(segments, lookup=lambda _s: None, batch_size=1)
