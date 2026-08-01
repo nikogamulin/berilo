@@ -200,7 +200,7 @@ normalizers and the assembler.*
 ### S2.7 — Design pass + walkthrough checklist (3 pt)
 - [x] Design pass + `docs/checklists/reader_walkthrough.md` landed 2026-07-24 (reviewer LAND; WCAG contrast verified computationally; 176 tests)
 - [ ] Device residual: full Rubric R scoring run on Boox (checklist ready)
-- [ ] Apply `design_guidelines.md`; create `docs/checklists/reader_walkthrough.md`; full rubric R scoring run
+- [ ] Apply `contracts/design_guidelines.md`; create `docs/checklists/reader_walkthrough.md`; full rubric R scoring run
 - **Verify:** Rubric **R ≥ 85** recorded in `rubric_scores.jsonl`; R6 checklist ≥ 10/12; screenshots archived in issue.
 
 ### S2.8 — Release v0.1 (1 pt)
@@ -304,10 +304,10 @@ scores contrast on e-ink and OLED).*
 > close; headline stories now:
 
 ### S3.1 — API contract + Supabase schema (3 pt)
-- [x] Contract half landed 2026-07-24: `docs/sync_api.md` v1.1 (plan-critic pass: 6 MAJOR + 7 MINOR fixed/elevated; DDL + delete-wins trigger functionally validated on throwaway Postgres; [OPEN-1..5] await Niko)
+- [x] Contract half landed 2026-07-24: `contracts/sync_api.md` v1.1 (plan-critic pass: 6 MAJOR + 7 MINOR fixed/elevated; DDL + delete-wins trigger functionally validated on throwaway Postgres; [OPEN-1..5] await Niko)
 - [ ] Infra half gated: live Supabase RLS audit + 2500-row pagination test (berilo-cloud)
 - [ ] OpenAPI spec for sync endpoints; Supabase schema (users, books-metadata, highlights, notes, vocabulary, progress, shelves, ratings, shared-passages) with RLS; every query paginated
-- **Verify:** contract committed in **this** repo (`docs/sync_api.md`); RLS audit script: user A gets 0 rows of user B across all tables; S6 synthetic 2500-row test returns complete data.
+- **Verify:** contract committed in **this** repo (`contracts/sync_api.md`); RLS audit script: user A gets 0 rows of user B across all tables; S6 synthetic 2500-row test returns complete data.
 
 ### S3.2 — App sync client (5 pt)
 - [ ] Auth (Clerk JWTs against Supabase RLS), background sync of notes/highlights/vocabulary/progress, last-write-wins with `updated_at` UTC, offline queue
@@ -318,7 +318,7 @@ scores contrast on e-ink and OLED).*
 - **Verify:** S4 checklist 10/10; S5 LCP ≤ 2.5 s on Vercel analytics; e2e Playwright suite green in CI.
 
 ### S3.4 — Reading page — social layer (5 pt) *(spec §6.1)*
-- [ ] Public reading page on berilo.app, Slovenian-first: profiles & shelves (book metadata only), shared passages (≤ 500-char excerpt, title+author attribution), 1–5 ratings + short reviews, per-item opt-in sharing (private by default), design per `design_guidelines.md`
+- [ ] Public reading page on berilo.app, Slovenian-first: profiles & shelves (book metadata only), shared passages (≤ 500-char excerpt, title+author attribution), 1–5 ratings + short reviews, per-item opt-in sharing (private by default), design per `contracts/design_guidelines.md`
 - **Verify:** Playwright e2e: sign up → shelve book → share passage → rate → anonymous visitor sees only opted-in content; passage > 500 chars rejected server-side; UI strings render šumniki correctly (č/š/ž spot-check on live page); Lighthouse accessibility ≥ 95 on the reading page.
 
 ### S3.5 — Launch gate (2 pt)

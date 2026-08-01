@@ -152,7 +152,7 @@ this app lives. **Recommendation: native Kotlin.** Target: Android 8.0+
 ### 6.1 Reading page — the social layer (Slovenian-first)
 
 A public web page on berilo.app where readers share what they read. Built to
-the bar in [`design_guidelines.md`](design_guidelines.md): the text is the
+the bar in [`design_guidelines.md`](../contracts/design_guidelines.md): the text is the
 hero, one accent color, no engagement mechanics — no infinite-scroll bait,
 no like-count theater, no algorithmic feed. A well-set page, not a network.
 
@@ -179,7 +179,7 @@ no like-count theater, no algorithmic feed. A well-set page, not a network.
 
 ## 8. Design direction
 
-See [`design_guidelines.md`](design_guidelines.md). Summary: the text is the
+See [`design_guidelines.md`](../contracts/design_guidelines.md). Summary: the text is the
 hero; chrome recedes. Apple-level restraint, e-ink-first palette (true
 black/white, no low-contrast grays), one accent color, no decorative
 animation. The app should feel like a well-set book, not an app.

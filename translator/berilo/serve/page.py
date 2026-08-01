@@ -4,7 +4,7 @@ One self-contained HTML document: inline CSS, no scripts, no external fonts.
 The tablet is on the LAN and may have no route to the internet at all, so
 anything it cannot fetch from this server must not be needed to read the page.
 
-Follows ``docs/design_guidelines.md``: serif body, one accent (deep amber),
+Follows ``contracts/design_guidelines.md``: serif body, one accent (deep amber),
 white background, high contrast, no animation, Slovenian UI strings.
 """
 

@@ -1,0 +1,140 @@
+{
+  "title": "Sintetična knjiga",
+  "authors": [
+    "Ana Novak",
+    "Boris Kovač"
+  ],
+  "language": "sl",
+  "source_path": "synthetic.epub",
+  "source_format": "epub",
+  "segments": [
+    {
+      "id": "a5fa095b00aadc20a352a987d4afb3e480d03770",
+      "type": "heading",
+      "text": "Prvo poglavje",
+      "chapter_index": 0,
+      "chapter_title": "Prvo poglavje",
+      "position": 0,
+      "heading_level": 1
+    },
+    {
+      "id": "04265e1340fa9a9504f2a9614157b81231996534",
+      "type": "paragraph",
+      "text": "Šumniki: čebela žveji šipek.",
+      "chapter_index": 0,
+      "chapter_title": "Prvo poglavje",
+      "position": 1,
+      "heading_level": null
+    },
+    {
+      "id": "f70ad73238767bdef20fe6d09a3770d72ebd0724",
+      "type": "paragraph",
+      "text": "  Vodilni in sledilni presledki se odstranijo.  ",
+      "chapter_index": 0,
+      "chapter_title": "Prvo poglavje",
+      "position": 2,
+      "heading_level": null
+    },
+    {
+      "id": "8a18feed519007286bf9403820d0302e4d6b9820",
+      "type": "paragraph",
+      "text": "\tU+0085 je presledek v Pythonu, ne v Javi.",
+      "chapter_index": 0,
+      "chapter_title": "Prvo poglavje",
+      "position": 3,
+      "heading_level": null
+    },
+    {
+      "id": "2fe921e3c46840232a613a863ec375e514b6e2a4",
+      "type": "paragraph",
+      "text": " Nepretrgani presledek se prav tako odstrani. ",
+      "chapter_index": 0,
+      "chapter_title": "Prvo poglavje",
+      "position": 4,
+      "heading_level": null
+    },
+    {
+      "id": "bee3d05ff6abac085499c436f505cab7aa0370f0",
+      "type": "list_item",
+      "text": "Prva postavka",
+      "chapter_index": 0,
+      "chapter_title": "Prvo poglavje",
+      "position": 5,
+      "heading_level": null
+    },
+    {
+      "id": "4590d69a1d4886aa1a9b04711cee93f291a49304",
+      "type": "list_item",
+      "text": "Druga postavka z <em>poudarkom</em>",
+      "chapter_index": 0,
+      "chapter_title": "Prvo poglavje",
+      "position": 6,
+      "heading_level": null
+    },
+    {
+      "id": "daa02c6a25ce795469fa34277da62577c0b58de9",
+      "type": "heading",
+      "text": "Drugo poglavje",
+      "chapter_index": 1,
+      "chapter_title": "Drugo poglavje",
+      "position": 7,
+      "heading_level": 2
+    },
+    {
+      "id": "88f1fef79c56bd2878db675db8f9d334ceea7647",
+      "type": "blockquote",
+      "text": "Navedek čez\ndve vrstici.",
+      "chapter_index": 1,
+      "chapter_title": "Drugo poglavje",
+      "position": 8,
+      "heading_level": null
+    },
+    {
+      "id": "a6fdf56546f5cea48f379d6b6882098bd876c4d6",
+      "type": "caption",
+      "text": "Slika 1: risba zmaja 🐉",
+      "chapter_index": 1,
+      "chapter_title": "Drugo poglavje",
+      "position": 9,
+      "heading_level": null
+    },
+    {
+      "id": "1cb19779f6b54c08f6415ebca41b15ef949914c4",
+      "type": "other",
+      "text": "Ljubljana, 26. julij — ostanek skeniranja",
+      "chapter_index": 1,
+      "chapter_title": "Drugo poglavje",
+      "position": 10,
+      "heading_level": null
+    },
+    {
+      "id": "c0b50b46922ca193a3340cfc118fcd4959a90532",
+      "type": "paragraph",
+      "text": "Zadnji odstavek tretjega poglavja.",
+      "chapter_index": 2,
+      "chapter_title": null,
+      "position": 11,
+      "heading_level": null
+    }
+  ],
+  "images": [
+    {
+      "id": "img0001",
+      "media_type": "image/png",
+      "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "source_href": "images/pika.png",
+      "chapter_index": 0,
+      "anchor_segment_id": null,
+      "alt": "Ena sama pika"
+    },
+    {
+      "id": "img0002",
+      "media_type": "image/gif",
+      "data": "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+      "source_href": "images/zmaj.gif",
+      "chapter_index": 1,
+      "anchor_segment_id": "88f1fef79c56bd2878db675db8f9d334ceea7647",
+      "alt": null
+    }
+  ]
+}

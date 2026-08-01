@@ -1,0 +1,15 @@
+{
+  "vectors_version": 1,
+  "pkg_version": "0.1.0",
+  "generated_from_tag": null,
+  "surfaces": {
+    "identity": "identity/",
+    "prompts": null,
+    "markers": null,
+    "models": null,
+    "normalize": null,
+    "epub_writer": null,
+    "cache_keys": null
+  },
+  "note": "generated_from_tag is null until the first contracts-v1 release tag exists on this repo. A null surface has no vectors yet; see ../../conformance.md for what each one must eventually assert."
+}

@@ -1,0 +1,865 @@
+{
+  "version": 1,
+  "generator": "contracts/gen/generate_assemble_vectors.py",
+  "id_namespace": "2c1e7b0a-2f3e-4a9b-8a3b-6a5b0c9d7e1f",
+  "uuid5": [
+    {
+      "namespace": "2c1e7b0a-2f3e-4a9b-8a3b-6a5b0c9d7e1f",
+      "name": "",
+      "uuid": "21f1eb2b-3d38-5f35-80a9-cfb79ab94e1e"
+    },
+    {
+      "namespace": "2c1e7b0a-2f3e-4a9b-8a3b-6a5b0c9d7e1f",
+      "name": "berilo:synthetic.epub:Sintetična knjiga:sl",
+      "uuid": "ab06b965-52a6-5fef-9e7f-d285d8e075d2"
+    },
+    {
+      "namespace": "2c1e7b0a-2f3e-4a9b-8a3b-6a5b0c9d7e1f",
+      "name": "berilo:/pot/knjiga.epub:Čebela žveji šipek 🐉:sl",
+      "uuid": "07c5ac24-ad44-5999-9550-134ab2b05393"
+    },
+    {
+      "namespace": "2c1e7b0a-2f3e-4a9b-8a3b-6a5b0c9d7e1f",
+      "name": "berilo:::",
+      "uuid": "1e280774-4ff1-5b74-866a-882c8d053317"
+    },
+    {
+      "namespace": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "name": "python.org",
+      "uuid": "886313e1-3b8a-5372-9b90-0c9aee199e5d"
+    },
+    {
+      "namespace": "6ba7b811-9dad-11d1-80b4-00c04fd430c8",
+      "name": "https://berilo.app/šumniki",
+      "uuid": "7f0ef895-aa95-5838-a891-b53817366f10"
+    }
+  ],
+  "cases": [
+    {
+      "name": "synthetic",
+      "book_resource": "identity/synthetic.book.json",
+      "bilingual": false,
+      "sha256": "9dd8a94fc0e280ccab4d572d2f285053951347b3fe87e3eab35fc22b24c67dbe",
+      "size": 3431,
+      "entries": [
+        {
+          "name": "mimetype",
+          "method": "stored",
+          "crc32": "2cab616f",
+          "size": 20,
+          "compressed_size": 20
+        },
+        {
+          "name": "META-INF/container.xml",
+          "method": "deflated",
+          "crc32": "892cd2d0",
+          "size": 244,
+          "compressed_size": 169
+        },
+        {
+          "name": "OEBPS/content.opf",
+          "method": "deflated",
+          "crc32": "df9a6c39",
+          "size": 1199,
+          "compressed_size": 510
+        },
+        {
+          "name": "OEBPS/nav.xhtml",
+          "method": "deflated",
+          "crc32": "28d4be56",
+          "size": 493,
+          "compressed_size": 286
+        },
+        {
+          "name": "OEBPS/stylesheet.css",
+          "method": "deflated",
+          "crc32": "1b862dbf",
+          "size": 264,
+          "compressed_size": 164
+        },
+        {
+          "name": "OEBPS/chap_0001.xhtml",
+          "method": "deflated",
+          "crc32": "bdb6fc5a",
+          "size": 647,
+          "compressed_size": 421
+        },
+        {
+          "name": "OEBPS/chap_0002.xhtml",
+          "method": "deflated",
+          "crc32": "82b5d311",
+          "size": 528,
+          "compressed_size": 363
+        },
+        {
+          "name": "OEBPS/chap_0003.xhtml",
+          "method": "deflated",
+          "crc32": "f1ae99a2",
+          "size": 307,
+          "compressed_size": 214
+        },
+        {
+          "name": "OEBPS/images/img_0001.png",
+          "method": "stored",
+          "crc32": "0795a426",
+          "size": 70,
+          "compressed_size": 70
+        },
+        {
+          "name": "OEBPS/images/img_0002.gif",
+          "method": "stored",
+          "crc32": "27951378",
+          "size": 42,
+          "compressed_size": 42
+        }
+      ],
+      "documents": {
+        "mimetype": "application/epub+zip",
+        "META-INF/container.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles>\n<rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n</rootfiles>\n</container>\n",
+        "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"bookid\" xml:lang=\"sl\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\">\n<dc:identifier id=\"bookid\">urn:uuid:ab06b965-52a6-5fef-9e7f-d285d8e075d2</dc:identifier>\n<dc:title>[SL] Sintetična knjiga</dc:title>\n<dc:creator>Ana Novak</dc:creator><dc:creator>Boris Kovač</dc:creator><dc:language>sl</dc:language>\n<meta property=\"dcterms:modified\">2000-01-01T00:00:00Z</meta>\n</metadata>\n<manifest><item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/><item id=\"css\" href=\"stylesheet.css\" media-type=\"text/css\"/><item id=\"chap0001\" href=\"chap_0001.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"chap0002\" href=\"chap_0002.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"chap0003\" href=\"chap_0003.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"img0001\" href=\"images/img_0001.png\" media-type=\"image/png\"/><item id=\"img0002\" href=\"images/img_0002.gif\" media-type=\"image/gif\"/></manifest>\n<spine><itemref idref=\"chap0001\"/><itemref idref=\"chap0002\"/><itemref idref=\"chap0003\"/></spine>\n</package>\n",
+        "OEBPS/nav.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Sintetična knjiga</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<nav epub:type=\"toc\" id=\"toc\">\n<h1>Contents</h1>\n<ol><li><a href=\"chap_0001.xhtml\">Prvo poglavje</a></li><li><a href=\"chap_0002.xhtml\">Drugo poglavje</a></li><li><a href=\"chap_0003.xhtml\">Chapter 3</a></li></ol>\n</nav>\n</body>\n</html>\n",
+        "OEBPS/stylesheet.css": "body { font-family: serif; }\np.caption { font-style: italic; font-size: 0.9em; }\np.source { color: #666666; font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }\ndiv.figure { margin: 1em 0; text-align: center; }\ndiv.figure img { max-width: 100%; height: auto; }\n",
+        "OEBPS/chap_0001.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Prvo poglavje</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<div class=\"figure\"><img src=\"images/img_0001.png\" alt=\"Ena sama pika\"/></div><h1>Prvo poglavje</h1><p>Šumniki: čebela žveji šipek.</p><p>  Vodilni in sledilni presledki se odstranijo.  </p><p>\tU+0085 je presledek v Pythonu, ne v Javi.</p><p> Nepretrgani presledek se prav tako odstrani. </p><ul><li>Prva postavka</li><li>Druga postavka z <em>poudarkom</em></li></ul>\n</body>\n</html>\n",
+        "OEBPS/chap_0002.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Drugo poglavje</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<h2>Drugo poglavje</h2><blockquote><p>Navedek čez\ndve vrstici.</p></blockquote><div class=\"figure\"><img src=\"images/img_0002.gif\" alt=\"\"/></div><p class=\"caption\">Slika 1: risba zmaja 🐉</p><p class=\"other\">Ljubljana, 26. julij — ostanek skeniranja</p>\n</body>\n</html>\n",
+        "OEBPS/chap_0003.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Chapter 3</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<p>Zadnji odstavek tretjega poglavja.</p>\n</body>\n</html>\n"
+      }
+    },
+    {
+      "name": "inline",
+      "book": {
+        "title": "Vzorci & <oznake>",
+        "authors": [
+          "Ana Novak",
+          "Boris Kovač"
+        ],
+        "language": "sl",
+        "source_path": "inline.epub",
+        "source_format": "epub",
+        "segments": [
+          {
+            "id": "620a3d545c8423a4802dce7627c56c5d9f3c387f",
+            "type": "heading",
+            "text": "Brez ravni: prvi je h1",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 0,
+            "heading_level": null
+          },
+          {
+            "id": "55420a743057b431ebf213af6f8f2ce71ae0306a",
+            "type": "heading",
+            "text": "Brez ravni: drugi je h2",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 1,
+            "heading_level": null
+          },
+          {
+            "id": "22c508668ac91567240ca031526f006144713429",
+            "type": "heading",
+            "text": "Raven 7 se obreze na 3",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 2,
+            "heading_level": 7
+          },
+          {
+            "id": "62679f22f4cac93106a1aea6a4939f3f3be08e38",
+            "type": "heading",
+            "text": "Raven 0 se dvigne na 1",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 3,
+            "heading_level": 0
+          },
+          {
+            "id": "2b72ac95e8f87a325d9353c3262b019578852232",
+            "type": "paragraph",
+            "text": "Uravnotezeno <em>poudarjeno</em> besedilo",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 4,
+            "heading_level": null
+          },
+          {
+            "id": "2217261b91912d7d83daea6d8f291a605e680b31",
+            "type": "paragraph",
+            "text": "Ugnezdeno <strong><em>oboje</em></strong> tukaj",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 5,
+            "heading_level": null
+          },
+          {
+            "id": "54081ba0fde1ef2ba776beb30b605ff343aaf4b4",
+            "type": "paragraph",
+            "text": "Velike crke <EM>se pomanjsajo</EM> nazaj",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 6,
+            "heading_level": null
+          },
+          {
+            "id": "06434546c9313f734ba543032018504b12e2304e",
+            "type": "paragraph",
+            "text": "Nezaprto <em>ubeži cel segment",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 7,
+            "heading_level": null
+          },
+          {
+            "id": "000aa3dba5bcd497add1c29bc8644a449ea16add",
+            "type": "paragraph",
+            "text": "Neujemajoce <em>ubeži</strong> cel segment",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 8,
+            "heading_level": null
+          },
+          {
+            "id": "a9de52cd350c196c553fa16c0d278d41641e4c55",
+            "type": "paragraph",
+            "text": "Odvecni zapiralnik</em> ubeži cel segment",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 9,
+            "heading_level": null
+          },
+          {
+            "id": "e17391f3367823e37b8934b86b5ff67c6a7e2f6d",
+            "type": "paragraph",
+            "text": "Veljaven <em>par</em> nato odvecni</strong> zapiralnik",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 10,
+            "heading_level": null
+          },
+          {
+            "id": "0cbfc953edd4c97ead791a290a4e1e9fd481593a",
+            "type": "paragraph",
+            "text": "Neubrani znaki: 5 > 3 in \"narekovaji\" in 'apostrofi'",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 11,
+            "heading_level": null
+          },
+          {
+            "id": "76f8501eaa7e2c16cef36930e764ce715d70161c",
+            "type": "paragraph",
+            "text": "Ubrani znaki: AT&T in a < b",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 12,
+            "heading_level": null
+          },
+          {
+            "id": "e705653c428f72e045ea052c35af46f975c35b55",
+            "type": "list_item",
+            "text": "Prva postavka",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 13,
+            "heading_level": null
+          },
+          {
+            "id": "8e9cf15904bae708f8d0cf83da3e5c0b11638730",
+            "type": "list_item",
+            "text": "Druga postavka",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 14,
+            "heading_level": null
+          },
+          {
+            "id": "65c42e8d7a25c9be33811521d19f97250ba255aa",
+            "type": "paragraph",
+            "text": "Odstavek prekine seznam",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 15,
+            "heading_level": null
+          },
+          {
+            "id": "f30fbd3e7b9aaaf308c1d53145cbd5d4712e32d8",
+            "type": "list_item",
+            "text": "Tretja postavka po prekinitvi",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 16,
+            "heading_level": null
+          },
+          {
+            "id": "ca4529ef0d709eb24a86c365e8db9985675b6dec",
+            "type": "blockquote",
+            "text": "Navedek se zavije v odstavek",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 17,
+            "heading_level": null
+          },
+          {
+            "id": "80611a91809775c7ac4e0fac475dde4ce1ce67ee",
+            "type": "caption",
+            "text": "Podnapis nosi razred caption",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 18,
+            "heading_level": null
+          },
+          {
+            "id": "12984eed64569cbb31adf3cda5342cb3e7f5d07f",
+            "type": "other",
+            "text": "Ostanek nosi razred other",
+            "chapter_index": 0,
+            "chapter_title": "Prvo poglavje",
+            "position": 19,
+            "heading_level": null
+          },
+          {
+            "id": "80a6cf3326a64027077086a9a176e380e2d4b418",
+            "type": "paragraph",
+            "text": "Poglavje brez naslova.",
+            "chapter_index": 1,
+            "chapter_title": null,
+            "position": 20,
+            "heading_level": null
+          }
+        ],
+        "images": []
+      },
+      "bilingual": false,
+      "sha256": "3c93912a114e633c511af2ddea7871e2a259e5494b5ac47ee662de4c3988e937",
+      "size": 2716,
+      "entries": [
+        {
+          "name": "mimetype",
+          "method": "stored",
+          "crc32": "2cab616f",
+          "size": 20,
+          "compressed_size": 20
+        },
+        {
+          "name": "META-INF/container.xml",
+          "method": "deflated",
+          "crc32": "892cd2d0",
+          "size": 244,
+          "compressed_size": 169
+        },
+        {
+          "name": "OEBPS/content.opf",
+          "method": "deflated",
+          "crc32": "64e40c1b",
+          "size": 959,
+          "compressed_size": 476
+        },
+        {
+          "name": "OEBPS/nav.xhtml",
+          "method": "deflated",
+          "crc32": "6a4bfc11",
+          "size": 446,
+          "compressed_size": 277
+        },
+        {
+          "name": "OEBPS/stylesheet.css",
+          "method": "deflated",
+          "crc32": "1b862dbf",
+          "size": 264,
+          "compressed_size": 164
+        },
+        {
+          "name": "OEBPS/chap_0001.xhtml",
+          "method": "deflated",
+          "crc32": "4e4ca546",
+          "size": 1151,
+          "compressed_size": 602
+        },
+        {
+          "name": "OEBPS/chap_0002.xhtml",
+          "method": "deflated",
+          "crc32": "40ff155d",
+          "size": 295,
+          "compressed_size": 206
+        }
+      ],
+      "documents": {
+        "mimetype": "application/epub+zip",
+        "META-INF/container.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles>\n<rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n</rootfiles>\n</container>\n",
+        "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"bookid\" xml:lang=\"sl\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\">\n<dc:identifier id=\"bookid\">urn:uuid:61733f76-d60b-5a62-84fc-0710317745f2</dc:identifier>\n<dc:title>[SL] Vzorci &amp; &lt;oznake></dc:title>\n<dc:creator>Ana Novak</dc:creator><dc:creator>Boris Kovač</dc:creator><dc:language>sl</dc:language>\n<meta property=\"dcterms:modified\">2000-01-01T00:00:00Z</meta>\n</metadata>\n<manifest><item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/><item id=\"css\" href=\"stylesheet.css\" media-type=\"text/css\"/><item id=\"chap0001\" href=\"chap_0001.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"chap0002\" href=\"chap_0002.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>\n<spine><itemref idref=\"chap0001\"/><itemref idref=\"chap0002\"/></spine>\n</package>\n",
+        "OEBPS/nav.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Vzorci &amp; &lt;oznake></title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<nav epub:type=\"toc\" id=\"toc\">\n<h1>Contents</h1>\n<ol><li><a href=\"chap_0001.xhtml\">Prvo poglavje</a></li><li><a href=\"chap_0002.xhtml\">Chapter 2</a></li></ol>\n</nav>\n</body>\n</html>\n",
+        "OEBPS/stylesheet.css": "body { font-family: serif; }\np.caption { font-style: italic; font-size: 0.9em; }\np.source { color: #666666; font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }\ndiv.figure { margin: 1em 0; text-align: center; }\ndiv.figure img { max-width: 100%; height: auto; }\n",
+        "OEBPS/chap_0001.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Prvo poglavje</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<h1>Brez ravni: prvi je h1</h1><h2>Brez ravni: drugi je h2</h2><h3>Raven 7 se obreze na 3</h3><h1>Raven 0 se dvigne na 1</h1><p>Uravnotezeno <em>poudarjeno</em> besedilo</p><p>Ugnezdeno <strong><em>oboje</em></strong> tukaj</p><p>Velike crke <em>se pomanjsajo</em> nazaj</p><p>Nezaprto &lt;em>ubeži cel segment</p><p>Neujemajoce &lt;em>ubeži&lt;/strong> cel segment</p><p>Odvecni zapiralnik&lt;/em> ubeži cel segment</p><p>Veljaven &lt;em>par&lt;/em> nato odvecni&lt;/strong> zapiralnik</p><p>Neubrani znaki: 5 > 3 in \"narekovaji\" in 'apostrofi'</p><p>Ubrani znaki: AT&amp;T in a &lt; b</p><ul><li>Prva postavka</li><li>Druga postavka</li></ul><p>Odstavek prekine seznam</p><ul><li>Tretja postavka po prekinitvi</li></ul><blockquote><p>Navedek se zavije v odstavek</p></blockquote><p class=\"caption\">Podnapis nosi razred caption</p><p class=\"other\">Ostanek nosi razred other</p>\n</body>\n</html>\n",
+        "OEBPS/chap_0002.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Chapter 2</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<p>Poglavje brez naslova.</p>\n</body>\n</html>\n"
+      }
+    },
+    {
+      "name": "images",
+      "book": {
+        "title": "Knjiga s slikami",
+        "authors": [],
+        "language": "sl",
+        "source_path": "images.epub",
+        "source_format": "epub",
+        "segments": [
+          {
+            "id": "af74d058949e6f1af6ced1ee15b08bfcf95e4001",
+            "type": "paragraph",
+            "text": "Prvi odstavek prvega poglavja.",
+            "chapter_index": 0,
+            "chapter_title": "Slike",
+            "position": 0,
+            "heading_level": null
+          },
+          {
+            "id": "43bde23673e933a5fb8737fd564a7187c961616f",
+            "type": "list_item",
+            "text": "Postavka seznama",
+            "chapter_index": 0,
+            "chapter_title": "Slike",
+            "position": 1,
+            "heading_level": null
+          },
+          {
+            "id": "d61ca698ecceaf28f6bb21fcf824bdefe57cad92",
+            "type": "list_item",
+            "text": "Druga postavka seznama",
+            "chapter_index": 0,
+            "chapter_title": "Slike",
+            "position": 2,
+            "heading_level": null
+          },
+          {
+            "id": "bc26c89f88b5a167fcdc896f6074c2e61d536c4f",
+            "type": "paragraph",
+            "text": "Edini odstavek drugega poglavja.",
+            "chapter_index": 1,
+            "chapter_title": "Druge slike",
+            "position": 3,
+            "heading_level": null
+          }
+        ],
+        "images": [
+          {
+            "id": "img0001",
+            "media_type": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+            "source_href": "a.png",
+            "chapter_index": 0,
+            "anchor_segment_id": null,
+            "alt": "Alt z \"narekovaji\" & <oznakami> in 5 > 3"
+          },
+          {
+            "id": "img0002",
+            "media_type": "image/jpeg",
+            "data": "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",
+            "source_href": "b.jpg",
+            "chapter_index": 0,
+            "anchor_segment_id": "af74d058949e6f1af6ced1ee15b08bfcf95e4001",
+            "alt": null
+          },
+          {
+            "id": "img0003",
+            "media_type": "image/svg+xml",
+            "data": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiPjxyZWN0IHdpZHRoPSIxIiBoZWlnaHQ9IjEiLz48L3N2Zz4=",
+            "source_href": "c.svg",
+            "chapter_index": 0,
+            "anchor_segment_id": "43bde23673e933a5fb8737fd564a7187c961616f",
+            "alt": ""
+          },
+          {
+            "id": "img0004",
+            "media_type": "image/webp",
+            "data": "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+            "source_href": "d.webp",
+            "chapter_index": 1,
+            "anchor_segment_id": "af74d058949e6f1af6ced1ee15b08bfcf95e4001",
+            "alt": "Sirota"
+          },
+          {
+            "id": "img0005",
+            "media_type": "image/heic",
+            "data": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/wABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj9AQUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVpbXF1eX2BhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ent8fX5/gIGCg4SFhoeIiYqLjI2Oj5CRkpOUlZaXmJmam5ydnp+goaKjpKWmp6ipqqusra6vsLGys7S1tre4ubq7vL2+v8DBwsPExcbHyMnKy8zNzs/Q0dLT1NXW19jZ2tvc3d7f4OHi4+Tl5ufo6err7O3u7/Dx8vP09fb3+Pn6+/z9/v8AAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKywtLi8wMTIzNDU2Nzg5Ojs8PT4/QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl9gYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXp7fH1+f4CBgoOEhYaHiImKi4yNjo+QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr/AwcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8/f7/AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn+AgYKDhIWGh4iJiouMjY6PkJGSk5SVlpeYmZqbnJ2en6ChoqOkpaanqKmqq6ytrq+wsbKztLW2t7i5uru8vb6/wMHCw8TFxsfIycrLzM3Oz9DR0tPU1dbX2Nna29zd3t/g4eLj5OXm5+jp6uvs7e7v8PHy8/T19vf4+fr7/P3+/w==",
+            "source_href": "e.heic",
+            "chapter_index": 1,
+            "anchor_segment_id": "bc26c89f88b5a167fcdc896f6074c2e61d536c4f",
+            "alt": null
+          }
+        ]
+      },
+      "bilingual": false,
+      "sha256": "f9ddc39b33da6e67d3ccd1c6e04700a33a13748f705393cf689c32bbd1b0867a",
+      "size": 5680,
+      "entries": [
+        {
+          "name": "mimetype",
+          "method": "stored",
+          "crc32": "2cab616f",
+          "size": 20,
+          "compressed_size": 20
+        },
+        {
+          "name": "META-INF/container.xml",
+          "method": "deflated",
+          "crc32": "892cd2d0",
+          "size": 244,
+          "compressed_size": 169
+        },
+        {
+          "name": "OEBPS/content.opf",
+          "method": "deflated",
+          "crc32": "535d0f43",
+          "size": 1238,
+          "compressed_size": 499
+        },
+        {
+          "name": "OEBPS/nav.xhtml",
+          "method": "deflated",
+          "crc32": "100579f6",
+          "size": 432,
+          "compressed_size": 264
+        },
+        {
+          "name": "OEBPS/stylesheet.css",
+          "method": "deflated",
+          "crc32": "1b862dbf",
+          "size": 264,
+          "compressed_size": 164
+        },
+        {
+          "name": "OEBPS/chap_0001.xhtml",
+          "method": "deflated",
+          "crc32": "f16f82dd",
+          "size": 616,
+          "compressed_size": 344
+        },
+        {
+          "name": "OEBPS/chap_0002.xhtml",
+          "method": "deflated",
+          "crc32": "0db4d1f9",
+          "size": 444,
+          "compressed_size": 273
+        },
+        {
+          "name": "OEBPS/images/img_0001.png",
+          "method": "stored",
+          "crc32": "0795a426",
+          "size": 70,
+          "compressed_size": 70
+        },
+        {
+          "name": "OEBPS/images/img_0002.jpg",
+          "method": "stored",
+          "crc32": "9f5edd58",
+          "size": 2048,
+          "compressed_size": 2048
+        },
+        {
+          "name": "OEBPS/images/img_0003.svg",
+          "method": "deflated",
+          "crc32": "24eeb87e",
+          "size": 95,
+          "compressed_size": 73
+        },
+        {
+          "name": "OEBPS/images/img_0004.webp",
+          "method": "stored",
+          "crc32": "27951378",
+          "size": 42,
+          "compressed_size": 42
+        },
+        {
+          "name": "OEBPS/images/img_0005.img",
+          "method": "deflated",
+          "crc32": "b70b4c26",
+          "size": 1024,
+          "compressed_size": 280
+        }
+      ],
+      "documents": {
+        "mimetype": "application/epub+zip",
+        "META-INF/container.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles>\n<rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n</rootfiles>\n</container>\n",
+        "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"bookid\" xml:lang=\"sl\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\">\n<dc:identifier id=\"bookid\">urn:uuid:c7017705-0a59-55f9-995a-f747defde845</dc:identifier>\n<dc:title>[SL] Knjiga s slikami</dc:title>\n<dc:language>sl</dc:language>\n<meta property=\"dcterms:modified\">2000-01-01T00:00:00Z</meta>\n</metadata>\n<manifest><item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/><item id=\"css\" href=\"stylesheet.css\" media-type=\"text/css\"/><item id=\"chap0001\" href=\"chap_0001.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"chap0002\" href=\"chap_0002.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"img0001\" href=\"images/img_0001.png\" media-type=\"image/png\"/><item id=\"img0002\" href=\"images/img_0002.jpg\" media-type=\"image/jpeg\"/><item id=\"img0003\" href=\"images/img_0003.svg\" media-type=\"image/svg+xml\"/><item id=\"img0004\" href=\"images/img_0004.webp\" media-type=\"image/webp\"/><item id=\"img0005\" href=\"images/img_0005.img\" media-type=\"image/heic\"/></manifest>\n<spine><itemref idref=\"chap0001\"/><itemref idref=\"chap0002\"/></spine>\n</package>\n",
+        "OEBPS/nav.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Knjiga s slikami</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<nav epub:type=\"toc\" id=\"toc\">\n<h1>Contents</h1>\n<ol><li><a href=\"chap_0001.xhtml\">Slike</a></li><li><a href=\"chap_0002.xhtml\">Druge slike</a></li></ol>\n</nav>\n</body>\n</html>\n",
+        "OEBPS/stylesheet.css": "body { font-family: serif; }\np.caption { font-style: italic; font-size: 0.9em; }\np.source { color: #666666; font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }\ndiv.figure { margin: 1em 0; text-align: center; }\ndiv.figure img { max-width: 100%; height: auto; }\n",
+        "OEBPS/chap_0001.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Slike</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<div class=\"figure\"><img src=\"images/img_0001.png\" alt=\"Alt z &quot;narekovaji&quot; &amp; &lt;oznakami> in 5 > 3\"/></div><p>Prvi odstavek prvega poglavja.</p><div class=\"figure\"><img src=\"images/img_0002.jpg\" alt=\"\"/></div><ul><li>Postavka seznama</li><li>Druga postavka seznama</li></ul><div class=\"figure\"><img src=\"images/img_0003.svg\" alt=\"\"/></div>\n</body>\n</html>\n",
+        "OEBPS/chap_0002.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Druge slike</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<p>Edini odstavek drugega poglavja.</p><div class=\"figure\"><img src=\"images/img_0005.img\" alt=\"\"/></div><div class=\"figure\"><img src=\"images/img_0004.webp\" alt=\"Sirota\"/></div>\n</body>\n</html>\n"
+      }
+    },
+    {
+      "name": "chapter-order",
+      "book": {
+        "title": "Vrstni red poglavij",
+        "authors": [
+          "Ana Novak"
+        ],
+        "language": "sl",
+        "source_path": "order.epub",
+        "source_format": "epub",
+        "segments": [
+          {
+            "id": "2b3886eab1b4630b5f4f5f545d491fb070779759",
+            "type": "paragraph",
+            "text": "Peto poglavje se pojavi prvo.",
+            "chapter_index": 5,
+            "chapter_title": "Peto",
+            "position": 0,
+            "heading_level": null
+          },
+          {
+            "id": "23c14321929895c34deaba84a1887bf49c03672e",
+            "type": "paragraph",
+            "text": "Drugo poglavje se pojavi drugo.",
+            "chapter_index": 2,
+            "chapter_title": "Drugo",
+            "position": 1,
+            "heading_level": null
+          },
+          {
+            "id": "9c50e9fc522a29743e0e2b098f1d271bb6330f9f",
+            "type": "paragraph",
+            "text": "Nadaljevanje petega poglavja.",
+            "chapter_index": 5,
+            "chapter_title": "Peto",
+            "position": 2,
+            "heading_level": null
+          },
+          {
+            "id": "e5590f8e2fc50a38973834aa95cc1ef1b565793a",
+            "type": "paragraph",
+            "text": "Deveto poglavje je zadnje.",
+            "chapter_index": 9,
+            "chapter_title": "Deveto",
+            "position": 3,
+            "heading_level": null
+          }
+        ],
+        "images": []
+      },
+      "bilingual": false,
+      "sha256": "0228eb939123512048710a45ea692d41322d1c9ccb5cdf82c1c88266942c41d9",
+      "size": 2633,
+      "entries": [
+        {
+          "name": "mimetype",
+          "method": "stored",
+          "crc32": "2cab616f",
+          "size": 20,
+          "compressed_size": 20
+        },
+        {
+          "name": "META-INF/container.xml",
+          "method": "deflated",
+          "crc32": "892cd2d0",
+          "size": 244,
+          "compressed_size": 169
+        },
+        {
+          "name": "OEBPS/content.opf",
+          "method": "deflated",
+          "crc32": "4fdae5f9",
+          "size": 1023,
+          "compressed_size": 461
+        },
+        {
+          "name": "OEBPS/nav.xhtml",
+          "method": "deflated",
+          "crc32": "4f34fdfc",
+          "size": 473,
+          "compressed_size": 270
+        },
+        {
+          "name": "OEBPS/stylesheet.css",
+          "method": "deflated",
+          "crc32": "1b862dbf",
+          "size": 264,
+          "compressed_size": 164
+        },
+        {
+          "name": "OEBPS/chap_0001.xhtml",
+          "method": "deflated",
+          "crc32": "217178bd",
+          "size": 333,
+          "compressed_size": 222
+        },
+        {
+          "name": "OEBPS/chap_0002.xhtml",
+          "method": "deflated",
+          "crc32": "de82564e",
+          "size": 300,
+          "compressed_size": 204
+        },
+        {
+          "name": "OEBPS/chap_0003.xhtml",
+          "method": "deflated",
+          "crc32": "fdbfa65d",
+          "size": 296,
+          "compressed_size": 203
+        }
+      ],
+      "documents": {
+        "mimetype": "application/epub+zip",
+        "META-INF/container.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles>\n<rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n</rootfiles>\n</container>\n",
+        "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"bookid\" xml:lang=\"sl\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\">\n<dc:identifier id=\"bookid\">urn:uuid:09c4bd5f-2046-5bed-8747-db4f29e2fe8f</dc:identifier>\n<dc:title>[SL] Vrstni red poglavij</dc:title>\n<dc:creator>Ana Novak</dc:creator><dc:language>sl</dc:language>\n<meta property=\"dcterms:modified\">2000-01-01T00:00:00Z</meta>\n</metadata>\n<manifest><item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/><item id=\"css\" href=\"stylesheet.css\" media-type=\"text/css\"/><item id=\"chap0001\" href=\"chap_0001.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"chap0002\" href=\"chap_0002.xhtml\" media-type=\"application/xhtml+xml\"/><item id=\"chap0003\" href=\"chap_0003.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>\n<spine><itemref idref=\"chap0001\"/><itemref idref=\"chap0002\"/><itemref idref=\"chap0003\"/></spine>\n</package>\n",
+        "OEBPS/nav.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Vrstni red poglavij</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<nav epub:type=\"toc\" id=\"toc\">\n<h1>Contents</h1>\n<ol><li><a href=\"chap_0001.xhtml\">Peto</a></li><li><a href=\"chap_0002.xhtml\">Drugo</a></li><li><a href=\"chap_0003.xhtml\">Deveto</a></li></ol>\n</nav>\n</body>\n</html>\n",
+        "OEBPS/stylesheet.css": "body { font-family: serif; }\np.caption { font-style: italic; font-size: 0.9em; }\np.source { color: #666666; font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }\ndiv.figure { margin: 1em 0; text-align: center; }\ndiv.figure img { max-width: 100%; height: auto; }\n",
+        "OEBPS/chap_0001.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Peto</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<p>Peto poglavje se pojavi prvo.</p><p>Nadaljevanje petega poglavja.</p>\n</body>\n</html>\n",
+        "OEBPS/chap_0002.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Drugo</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<p>Drugo poglavje se pojavi drugo.</p>\n</body>\n</html>\n",
+        "OEBPS/chap_0003.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Deveto</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<p>Deveto poglavje je zadnje.</p>\n</body>\n</html>\n"
+      }
+    },
+    {
+      "name": "bilingual",
+      "book": {
+        "title": "Dvojezično",
+        "authors": [
+          "Ana Novak"
+        ],
+        "language": "sl",
+        "source_path": "bilingual.epub",
+        "source_format": "epub",
+        "segments": [
+          {
+            "id": "1efdf76dd6e8aaf11dac8e72b67c32498fe0a64a",
+            "type": "heading",
+            "text": "Naslov poglavja",
+            "chapter_index": 0,
+            "chapter_title": "Poglavje",
+            "position": 0,
+            "heading_level": 1
+          },
+          {
+            "id": "15649f3dff144554f94298ba6e0255e53d17c29b",
+            "type": "paragraph",
+            "text": "Prevedeni odstavek s <em>poudarkom</em>.",
+            "chapter_index": 0,
+            "chapter_title": "Poglavje",
+            "position": 1,
+            "heading_level": null
+          },
+          {
+            "id": "a38e554c7efb728e23556844ccb18da9d05d3794",
+            "type": "list_item",
+            "text": "Prevedena postavka",
+            "chapter_index": 0,
+            "chapter_title": "Poglavje",
+            "position": 2,
+            "heading_level": null
+          },
+          {
+            "id": "965cdaf7a982eb61624aff22356bb3d4d7d08145",
+            "type": "blockquote",
+            "text": "Prevedeni navedek",
+            "chapter_index": 0,
+            "chapter_title": "Poglavje",
+            "position": 3,
+            "heading_level": null
+          }
+        ],
+        "images": []
+      },
+      "source_book": {
+        "title": "Bilingual",
+        "authors": [
+          "Ana Novak"
+        ],
+        "language": "en",
+        "source_path": "bilingual.epub",
+        "source_format": "epub",
+        "segments": [
+          {
+            "id": "1efdf76dd6e8aaf11dac8e72b67c32498fe0a64a",
+            "type": "heading",
+            "text": "Chapter heading",
+            "chapter_index": 0,
+            "chapter_title": "Chapter",
+            "position": 0,
+            "heading_level": 1
+          },
+          {
+            "id": "15649f3dff144554f94298ba6e0255e53d17c29b",
+            "type": "paragraph",
+            "text": "Translated paragraph with <em>emphasis</em>.",
+            "chapter_index": 0,
+            "chapter_title": "Chapter",
+            "position": 1,
+            "heading_level": null
+          },
+          {
+            "id": "a38e554c7efb728e23556844ccb18da9d05d3794",
+            "type": "list_item",
+            "text": "Translated list item",
+            "chapter_index": 0,
+            "chapter_title": "Chapter",
+            "position": 2,
+            "heading_level": null
+          },
+          {
+            "id": "965cdaf7a982eb61624aff22356bb3d4d7d08145",
+            "type": "blockquote",
+            "text": "Translated blockquote",
+            "chapter_index": 0,
+            "chapter_title": "Chapter",
+            "position": 3,
+            "heading_level": null
+          }
+        ],
+        "images": []
+      },
+      "bilingual": true,
+      "sha256": "9b01d53d46396c9101153244ba5e42c4de5f89044eeadb2581614d36892b0feb",
+      "size": 2059,
+      "entries": [
+        {
+          "name": "mimetype",
+          "method": "stored",
+          "crc32": "2cab616f",
+          "size": 20,
+          "compressed_size": 20
+        },
+        {
+          "name": "META-INF/container.xml",
+          "method": "deflated",
+          "crc32": "892cd2d0",
+          "size": 244,
+          "compressed_size": 169
+        },
+        {
+          "name": "OEBPS/content.opf",
+          "method": "deflated",
+          "crc32": "051f71c5",
+          "size": 803,
+          "compressed_size": 438
+        },
+        {
+          "name": "OEBPS/nav.xhtml",
+          "method": "deflated",
+          "crc32": "9d6f0c5a",
+          "size": 380,
+          "compressed_size": 252
+        },
+        {
+          "name": "OEBPS/stylesheet.css",
+          "method": "deflated",
+          "crc32": "1b862dbf",
+          "size": 264,
+          "compressed_size": 164
+        },
+        {
+          "name": "OEBPS/chap_0001.xhtml",
+          "method": "deflated",
+          "crc32": "94f2f314",
+          "size": 609,
+          "compressed_size": 332
+        }
+      ],
+      "documents": {
+        "mimetype": "application/epub+zip",
+        "META-INF/container.xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n<rootfiles>\n<rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n</rootfiles>\n</container>\n",
+        "OEBPS/content.opf": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"bookid\" xml:lang=\"sl\">\n<metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\">\n<dc:identifier id=\"bookid\">urn:uuid:926890c1-4c30-5e7a-8134-8e0f81b4f098</dc:identifier>\n<dc:title>[SL] Dvojezično</dc:title>\n<dc:creator>Ana Novak</dc:creator><dc:language>sl</dc:language>\n<meta property=\"dcterms:modified\">2000-01-01T00:00:00Z</meta>\n</metadata>\n<manifest><item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/><item id=\"css\" href=\"stylesheet.css\" media-type=\"text/css\"/><item id=\"chap0001\" href=\"chap_0001.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>\n<spine><itemref idref=\"chap0001\"/></spine>\n</package>\n",
+        "OEBPS/nav.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Dvojezično</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<nav epub:type=\"toc\" id=\"toc\">\n<h1>Contents</h1>\n<ol><li><a href=\"chap_0001.xhtml\">Poglavje</a></li></ol>\n</nav>\n</body>\n</html>\n",
+        "OEBPS/stylesheet.css": "body { font-family: serif; }\np.caption { font-style: italic; font-size: 0.9em; }\np.source { color: #666666; font-size: 0.85em; margin-top: 0; margin-bottom: 1em; }\ndiv.figure { margin: 1em 0; text-align: center; }\ndiv.figure img { max-width: 100%; height: auto; }\n",
+        "OEBPS/chap_0001.xhtml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"sl\">\n<head>\n<title>Poglavje</title>\n<link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n</head>\n<body>\n<h1>Naslov poglavja</h1><p class=\"source\">Chapter heading</p><p>Prevedeni odstavek s <em>poudarkom</em>.</p><p class=\"source\">Translated paragraph with <em>emphasis</em>.</p><ul><li>Prevedena postavka<p class=\"source\">Translated list item</p></li></ul><blockquote><p>Prevedeni navedek</p></blockquote><p class=\"source\">Translated blockquote</p>\n</body>\n</html>\n"
+      }
+    }
+  ]
+}

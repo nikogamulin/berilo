@@ -38,7 +38,7 @@ token dies with the process, which covers the same risk).
   (truncated sha256 of the resolved path) and a clean download filename.
 - **`berilo/serve/page.py`** — `list[CatalogEntry]` → one self-contained HTML
   document. Inline CSS, no scripts, no external fonts: the tablet may have no
-  route to the internet while on this Wi-Fi. Follows `design_guidelines.md`
+  route to the internet while on this Wi-Fi. Follows `contracts/design_guidelines.md`
   (serif body, deep amber `#B45309`, white, no animation), Slovenian strings.
 - **`berilo/serve/server.py`** — `BookServer` over `ThreadingHTTPServer`:
   routing, token check, headers, streaming.

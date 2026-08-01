@@ -1,0 +1,27 @@
+{
+  "fixture_version": 1,
+  "source": {"slug": "synthetic", "format": "epub"},
+  "language": "sl",
+  "book_hash": "9a67442d73c88b59e426d50d0c9d89cd6818de57",
+  "segment_count": 12,
+  "chapter_count": 3,
+  "image_count": 2,
+  "segments": [
+    {"chapter_index": 0, "position": 0, "type": "heading", "heading_level": 1, "id": "a5fa095b00aadc20a352a987d4afb3e480d03770", "segment_hash": "f2b09405e1691877e8c67a457dd93ddb58b8405b"},
+    {"chapter_index": 0, "position": 1, "type": "paragraph", "heading_level": null, "id": "04265e1340fa9a9504f2a9614157b81231996534", "segment_hash": "ef99028144feebd8ab3fa83d3388b2e79f4906a2"},
+    {"chapter_index": 0, "position": 2, "type": "paragraph", "heading_level": null, "id": "f70ad73238767bdef20fe6d09a3770d72ebd0724", "segment_hash": "4e88e3a800f4567440fdc49919ee01b7221e3c8d"},
+    {"chapter_index": 0, "position": 3, "type": "paragraph", "heading_level": null, "id": "8a18feed519007286bf9403820d0302e4d6b9820", "segment_hash": "4b60290dba9d91b766364bff13528f48fafec61a"},
+    {"chapter_index": 0, "position": 4, "type": "paragraph", "heading_level": null, "id": "2fe921e3c46840232a613a863ec375e514b6e2a4", "segment_hash": "e3791c9708196700c13a1d41932f88757f4c0840"},
+    {"chapter_index": 0, "position": 5, "type": "list_item", "heading_level": null, "id": "bee3d05ff6abac085499c436f505cab7aa0370f0", "segment_hash": "2df5084de0b67862f05184a6ba5ec6440d19061f"},
+    {"chapter_index": 0, "position": 6, "type": "list_item", "heading_level": null, "id": "4590d69a1d4886aa1a9b04711cee93f291a49304", "segment_hash": "5268245e344be5a3e15090a1ced4eb4b319fc297"},
+    {"chapter_index": 1, "position": 7, "type": "heading", "heading_level": 2, "id": "daa02c6a25ce795469fa34277da62577c0b58de9", "segment_hash": "2e794954cd55eefd54c9838151d02986e0befe75"},
+    {"chapter_index": 1, "position": 8, "type": "blockquote", "heading_level": null, "id": "88f1fef79c56bd2878db675db8f9d334ceea7647", "segment_hash": "ee0db024acd0e4008e91fe753e13eb4b9c36f348"},
+    {"chapter_index": 1, "position": 9, "type": "caption", "heading_level": null, "id": "a6fdf56546f5cea48f379d6b6882098bd876c4d6", "segment_hash": "14f2c4394993eccf53e7da355937f03584bf3bf4"},
+    {"chapter_index": 1, "position": 10, "type": "other", "heading_level": null, "id": "1cb19779f6b54c08f6415ebca41b15ef949914c4", "segment_hash": "3e8d6c44409f86059186e3e06079eb38845fdb87"},
+    {"chapter_index": 2, "position": 11, "type": "paragraph", "heading_level": null, "id": "c0b50b46922ca193a3340cfc118fcd4959a90532", "segment_hash": "6d1ff322007f62acf8c3eb8a3db85cd654c4334e"}
+  ],
+  "images": [
+    {"id": "img0001", "media_type": "image/png", "chapter_index": 0, "anchor_segment_id": null, "data_sha1": "b2bbe763c7e1828c750d53f78550709a6fea19be"},
+    {"id": "img0002", "media_type": "image/gif", "chapter_index": 1, "anchor_segment_id": "88f1fef79c56bd2878db675db8f9d334ceea7647", "data_sha1": "d5fceb6532643d0d84ffe09c40c481ecdf59e15a"}
+  ]
+}

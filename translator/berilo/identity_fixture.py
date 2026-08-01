@@ -14,6 +14,10 @@ carry only *derived* identity — sha1 digests, counts, structural indices — f
 which the source text cannot be recovered. The one fixture that does carry text
 is built from the synthetic book defined here.
 
+The fixtures are written to ``contracts/vectors/v1/identity/`` in this repo,
+which owns them. Each port vendors a copy under its own test resources and is
+responsible for keeping that copy current; see ``contracts/conformance.md``.
+
 Regenerate with::
 
     python3 -m berilo.identity_fixture
@@ -55,10 +59,18 @@ EXAMPLE_SOURCES: dict[str, str] = {
 #: ``data/examples`` — never a fixture source.
 _TRANSLATED_SUFFIXES = (".sl.epub", ".si.epub")
 
-#: Path of the fixture directory relative to the repository root. The Kotlin
-#: suite reads these off the unit-test classpath, which is the only zero-config
-#: way for a JVM test to reach them.
-FIXTURE_DIR_PARTS = ("android", "app", "src", "test", "resources", "identity")
+#: Path of the fixture directory relative to the repository root. These are
+#: conformance vectors: this repo generates them from the Python reference and
+#: every port vendors a copy under its own test resources — the Kotlin suite
+#: reads its copy off the unit-test classpath, the only zero-config way for a
+#: JVM test to reach them. Before the Android split they were written straight
+#: into ``android/app/src/test/resources/identity``; that path left this repo
+#: with the app, so the vectors now live at their owner and travel outward.
+FIXTURE_DIR_PARTS = ("contracts", "vectors", "v1", "identity")
+
+#: A file that exists only at the repository root, used to find it. The fixture
+#: directory itself cannot serve as the marker: it is the thing being created.
+ROOT_MARKER = Path("translator", "pyproject.toml")
 
 #: Keys whose value is a list of records rendered one per line. Keeps a
 #: 2309-segment fixture diffable without exploding it to 16k lines.
@@ -353,6 +365,25 @@ def build_legacy_book_json(book_json: str) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def repo_root(start: Path | None = None) -> Path:
+    """Locate the repository root by walking up from ``start``.
+
+    Args:
+        start: Path to start from; defaults to this module's location.
+
+    Returns:
+        The directory holding ``translator/pyproject.toml``.
+
+    Raises:
+        FileNotFoundError: If no ancestor holds that file.
+    """
+    origin = (start or Path(__file__)).resolve()
+    for parent in origin.parents:
+        if (parent / ROOT_MARKER).is_file():
+            return parent
+    raise FileNotFoundError(f"could not locate {ROOT_MARKER} above {origin}")
+
+
 def default_fixture_dir(start: Path | None = None) -> Path:
     """Locate the committed fixture directory by walking up from ``start``.
 
@@ -360,18 +391,12 @@ def default_fixture_dir(start: Path | None = None) -> Path:
         start: Path to start from; defaults to this module's location.
 
     Returns:
-        The fixture directory path (which need not exist yet; its Android test
-        source set must).
+        The fixture directory path, which need not exist yet.
 
     Raises:
-        FileNotFoundError: If no ancestor holds ``android/app/src/test``.
+        FileNotFoundError: If the repository root cannot be found.
     """
-    origin = (start or Path(__file__)).resolve()
-    marker = Path(*FIXTURE_DIR_PARTS[:4])
-    for parent in origin.parents:
-        if (parent / marker).is_dir():
-            return parent.joinpath(*FIXTURE_DIR_PARTS)
-    raise FileNotFoundError(f"could not locate {marker} above {origin}")
+    return repo_root(start).joinpath(*FIXTURE_DIR_PARTS)
 
 
 def resolve_example(examples_dir: Path, prefix: str) -> Path | None:
@@ -475,13 +500,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--out",
         type=Path,
         default=None,
-        help="Fixture output directory (default: android/app/src/test/resources/identity)",
+        help="Fixture output directory (default: contracts/vectors/v1/identity)",
     )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     fixture_dir = args.out or default_fixture_dir()
-    examples_dir = args.examples or default_fixture_dir().parents[5] / "data" / "examples"
+    examples_dir = args.examples or repo_root() / "data" / "examples"
 
     for path in write_synthetic_fixtures(fixture_dir):
         logger.info("wrote %s", path.name)
