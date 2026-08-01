@@ -37,7 +37,7 @@ diverges.
 |---|---|---|---|---|
 | 1 | Identity | by construction | **gated** — `IdentityFixtureTest`, `SegmentIdentityTest` | **gated** — `IdentityFixtureTests` |
 | 2 | Prompts | by construction | **gated** — `PromptTextTest` *(see §5)* | port present, not gated |
-| 3 | Markers & batching | by construction | **gated** — `BatchPlanVectorsTest` (batching); markers not gated | vectors published (`v2`), port not yet asserting; **batch composition is a declared exception** (`core-spec.md` §3) |
+| 3 | Markers & batching | by construction | **gated** — `BatchPlanVectorsTest` (batching); markers not gated | not gated, and `v2` cannot gate it — **batch composition is a declared exception** (`core-spec.md` §3) |
 | 4 | Models & pricing | by construction | not gated | not gated |
 | 5 | Normalization | by construction | not gated | not gated |
 | 6 | EPUB writer determinism | by construction | **gated** — `EpubWriterByteIdentityTest` | in progress |
@@ -105,12 +105,20 @@ committing work in progress that is not this reorganization's to commit.
   asking. Surface 3 gained `vectors/v2/batch_plan/` on 2026-08-01, which is what
   turned a suspected divergence into a measured one — the ports still have to
   vendor them and assert.
-- **`vectors/v2/batch_plan/` records `waves[].batches`, which iOS is excepted
-  from** (`core-spec.md` §3). A port skipping that one field must still assert
-  every other field in the file. The risk this creates is specific and worth
-  naming: an iOS suite that skipped the whole vector, rather than the one field,
-  would silently stop gating the wave rules iOS *does* satisfy — which is how an
-  exception turns into a hole.
+- **`vectors/v2/batch_plan/` cannot gate iOS at all**, and the reason is worth
+  stating precisely because it was got wrong once already. Every field in that
+  vector — wave count, batch membership, per-wave context provenance — derives
+  from batch composition, which iOS is excepted from (`core-spec.md` §3). There
+  is no subset of the file iOS can assert. "Except one field" was the first
+  formulation and it was wrong.
+- **iOS has no extractable batch planner.** `TranslationPlanner.swift` is the
+  cost estimator; the batching lives inline in `translateBook`, so a conformance
+  test has nothing to call. Extracting it — as `berilo/plan.py` and Android's
+  `TranslationPlan.kt` already are — is the prerequisite for gating the two
+  composition-independent properties that *would* survive the exception: the
+  pass-through classification (empty / skipped / cached) and the **work set**,
+  the segments needing a call, which must match across ports even when the
+  partition does not. Until that exists, Surface 3 on iOS rests on review.
 - **The regenerate-and-diff CI gate does not exist here.** This repo should
   regenerate every vector on CI and fail if the tree differs, which is what
   makes it impossible for a vector to drift from the Python that produced it.

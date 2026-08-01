@@ -202,9 +202,28 @@ Surface 3 still binds iOS, and iOS already implements it:
 - each lane committing its own batch inside the lane;
 - results folded in batch order, never completion order.
 
-So iOS asserts against every `batch_plan` field except `waves[].batches`. A port
-may not widen this exception to skip the wave rules; those are what make a run
-reproducible, and iOS satisfies them today.
+Those four are **binding but not currently vector-gated on iOS**, and the
+distinction is worth stating plainly rather than implying otherwise:
+
+`vectors/v2/batch_plan/` records waves, batch membership and per-wave context
+provenance. *All* of those derive from batch composition — a different partition
+yields different waves and different snapshots — so excepting the partition
+leaves no field of that vector assertable on iOS. The vector cannot express
+"different batches, same rules".
+
+What *is* composition-independent, and is what an iOS gate should assert once it
+can, is narrower and still worth having:
+
+- the pass-through classification — which segments resolve as empty, skipped or
+  cached, and therefore cost nothing;
+- the **work set** — the set of segments needing a call, which must be identical
+  across ports even when its partition is not. This is the segment-integrity
+  property: same work, different packaging.
+
+That gate does not exist yet because iOS's batching is inline in
+`translateBook` rather than an extracted function, so a test has nothing to
+call. Extracting it is the prerequisite, and is filed in `conformance.md` §5.
+Until then Surface 3 on iOS rests on review, and the table says so.
 
 Bounded because: batch composition changes **cost, not correctness**. Segment
 identity, cache keys, and the 1:1 mapping are Surfaces 1 and 7 and are
