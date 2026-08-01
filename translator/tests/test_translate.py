@@ -1924,3 +1924,19 @@ def test_batching_constants_are_reachable_from_berilo_translate() -> None:
     """
     assert DEFAULT_BATCH_SIZE == 20
     assert DEFAULT_CONCURRENCY == 4
+
+
+def test_batching_kwargs_omits_unset_flags() -> None:
+    """An unset flag must not become a second definition of the default.
+
+    If the CLI substituted its own number for an unset flag, that number would
+    be a second place for the default to drift from the engine's — and because
+    the dry-run estimate is priced from the same values, the drift would quote
+    a cost the run does not incur.
+    """
+    from berilo.cli import _batching_kwargs
+
+    assert _batching_kwargs(None, None) == {}
+    assert _batching_kwargs(1, None) == {"concurrency": 1}
+    assert _batching_kwargs(None, 10) == {"batch_size": 10}
+    assert _batching_kwargs(2, 5) == {"concurrency": 2, "batch_size": 5}
