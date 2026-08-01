@@ -40,6 +40,43 @@ jobs:
 
   # The Android job moved to the berilo-android repository along with the app.
 
+  vectors:
+    name: Conformance vectors are not stale
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install
+        working-directory: translator
+        run: pip install -e ".[dev]"
+
+      # The vectors in contracts/ are what holds the Kotlin and Swift ports to
+      # this Python. Regenerating them here and failing on any diff is what
+      # makes it impossible for them to drift from the code that produced them:
+      # a change to the core that forgets to regenerate goes red at once,
+      # instead of going unnoticed until a port is verified against a fiction.
+      #
+      # The four real-book identity vectors are not regenerated: they derive
+      # from the copyrighted corpus in data/, which is gitignored and absent
+      # here, so the generator skips them and leaves them untouched.
+      - name: Regenerate
+        run: |
+          PYTHONPATH=translator python -m berilo.identity_fixture
+          PYTHONPATH=translator python contracts/gen/generate_assemble_vectors.py
+
+      - name: Fail if anything changed
+        run: |
+          if ! git diff --exit-code -- contracts/vectors; then
+            echo "::error::contracts/vectors is stale — regenerate and commit"
+            exit 1
+          fi
+          echo "vectors current"
+
   secrets:
     name: Secret scan (CLAUDE.md §7)
     runs-on: ubuntu-latest
@@ -55,8 +92,12 @@ jobs:
           # scanner is the wrong trade.
           PATTERN='sk-(proj|ant)|api[0]3|/home/nik[o]'
           # Exclusions are exactly the docs that describe the scan itself.
+          # docs/rubric.md was on this list for a home path in Rubric R's
+          # device procedure; R moved to berilo-android and the path went with
+          # it, so the exclusion goes too. An exclusion that outlives its cause
+          # is how a scan reports clean over a real leak.
           if git grep -nIE "$PATTERN" -- \
-               ':!CLAUDE.md' ':!docs/rubric.md' ':!.claude/'; then
+               ':!CLAUDE.md' ':!.claude/'; then
             echo "::error::possible secret or local path in a tracked file"
             exit 1
           fi
