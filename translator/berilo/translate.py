@@ -853,6 +853,7 @@ def translate_book(
     on_progress: ProgressCallback | None = None,
     fallback_client: LLMClient | None = None,
     style: TranslationStyle = BASELINE,
+    book_context: str | None = None,
 ) -> Book:
     """Translate every eligible segment of ``book`` into ``target_lang``.
 
@@ -886,6 +887,11 @@ def translate_book(
             ``version`` participates in the cache key, so switching styles
             re-translates instead of serving text produced by another prompt.
             Defaults to :data:`~berilo.prompts.BASELINE`.
+        book_context: Pre-derived per-book style memo. When given, the
+            derivation is skipped entirely. A caller translating a book in
+            *slices* — which is what the cloud worker does — would otherwise
+            re-derive and re-bill the once-per-book memo on every slice. When
+            ``None`` the memo is derived (and cached) exactly as before.
 
     Returns:
         A new :class:`~berilo.models.Book` with the same segments (count, order,
@@ -909,19 +915,20 @@ def translate_book(
     ghash = glossary_identity(glossary)
     stats = TranslationStats(total_segments=len(book.segments))
 
-    book_context, context_result = build_book_context(
-        book,
-        client=client,
-        style=style,
-        target_lang=target_lang,
-        model=model,
-        cache=cache,
-    )
-    if context_result is not None:
-        stats.api_calls += 1
-        stats.input_tokens += context_result.input_tokens
-        stats.output_tokens += context_result.output_tokens
-        stats.cost_eur += context_result.cost_eur
+    if book_context is None:
+        book_context, context_result = build_book_context(
+            book,
+            client=client,
+            style=style,
+            target_lang=target_lang,
+            model=model,
+            cache=cache,
+        )
+        if context_result is not None:
+            stats.api_calls += 1
+            stats.input_tokens += context_result.input_tokens
+            stats.output_tokens += context_result.output_tokens
+            stats.cost_eur += context_result.cost_eur
 
     resolved: dict[int, str] = {}
     recent_pairs: list[tuple[str, str]] = []

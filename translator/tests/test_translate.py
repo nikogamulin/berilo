@@ -1561,6 +1561,42 @@ def test_wave_context_is_stale_by_at_most_one_wave() -> None:
     assert "Paragraph 4." not in last, "a wave cannot see its own siblings' output"
 
 
+def test_a_supplied_book_context_is_not_re_derived() -> None:
+    """Slice-by-slice callers must not re-bill the once-per-book memo."""
+    book = _paragraph_book(4)
+    client = FakeLLMClient()
+
+    translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        style=get_style("book_context_v1"),
+        book_context="Register: formal. Period: 1930s.",
+    )
+
+    assert not [c for c in client.calls if c["kind"] == "book_context"]
+
+
+def test_a_supplied_book_context_reaches_every_prompt() -> None:
+    """Skipping the derivation must not mean skipping the memo."""
+    book = _paragraph_book(4)
+    client = FakeLLMClient()
+
+    translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        style=get_style("book_context_v1"),
+        book_context="Register: formal. Period: 1930s.",
+    )
+
+    batch_prompts = [c["prompt"] for c in client.calls if c["kind"] == "batch"]
+    assert batch_prompts
+    assert all("Register: formal. Period: 1930s." in p for p in batch_prompts)
+
+
 def test_translate_book_refuses_a_style_bound_to_another_language() -> None:
     """Finding 4: a Slovenian editor pass over a German draft never reaches the API."""
     from berilo.prompts import StyleLanguageError, get_style
