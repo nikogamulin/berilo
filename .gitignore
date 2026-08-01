@@ -36,10 +36,7 @@ node_modules/
 .vercel/
 out/
 
-# Android
-android/**/build/
-android/.gradle/
-android/local.properties
+# Android build artifacts (the app itself lives in the berilo-android repo)
 *.apk
 *.aab
 .kotlin/

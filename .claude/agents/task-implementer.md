@@ -58,7 +58,7 @@ Supervisor.
 
 ## Definition of done (all four, verified with fresh command output — no stale claims)
 
-1. Component suite green (`make test` in `translator/`, or `./gradlew test` in `android/`).
+1. Component suite green (`make test` in `translator/`).
    Report the exact count.
 2. Lint clean on touched files (`make lint` / `ruff check` / ktlint).
 3. The offline portion of the story's Verify line demonstrably passes (show command +

@@ -15,8 +15,8 @@ First user: Niko, English → Slovenian, Boox e-ink tablet.
 
 **Three phases, shipped gradually — each verified before the next starts:**
 
-1. **Translator CLI** (`translator/`, Python) — file in, translated EPUB out. Open source.
-2. **Reader app** (`android/`, Kotlin/Compose/Readium) — offline reader with LLM features. Open source.
+1. **Translator CLI** (`translator/`, Python) — file in, translated EPUB out. Open source. **This repo.**
+2. **Reader apps** — Android (separate **private** repo `berilo-android`, Kotlin/Compose/Readium) and iOS (separate **private** repo `berilo-ios`, Swift). Offline readers with LLM features. Closed source.
 3. **Cloud service** (separate **private** repo `berilo-cloud`) — Vercel/Next.js + Supabase sync and web note review. Closed source; only the API contract lives here.
 
 Full spec: [`docs/project_spec.md`](docs/project_spec.md).
@@ -24,10 +24,16 @@ Full spec: [`docs/project_spec.md`](docs/project_spec.md).
 ## 2. Architecture Overview
 
 ```
-translator/ (Python CLI)        android/ (Kotlin app)         berilo-cloud (private)
+translator/ (Python CLI)        berilo-android (private)      berilo-cloud (private)
  pdf|epub|mobi → normalize →     Readium reader + Room  ⇄     Next.js/Vercel + Supabase
  translate → verify → EPUB       LLM dictionary/notes          notes/highlights sync
+        │                       berilo-ios (private)
+        │                        Swift port of the same
         └── user's own LLM API key; cheap models by default; every model user-overridable
+
+This repo is the **reference implementation** of the translation core. The
+apps are ports of it; `berilo-cloud` imports it as a package. See the
+`berilo-project` workspace repo for the full map.
 ```
 
 **Key architectural rules:**
@@ -133,9 +139,8 @@ berilo inspect data/examples/<file>      # extraction preview, no API cost
 berilo translate <file> --to sl --dry-run  # cost estimate — ALWAYS before a full run
 berilo eval <translated.epub> --sample 40 --seed 42   # Rubric T score + CI
 
-# Phase 2
-cd android && ./gradlew assembleDebug test
-adb install -r app/build/outputs/apk/debug/app-debug.apk   # Boox over USB
+# Phase 2 — the Android app lives in the private berilo-android repo now.
+# cd ../berilo-android && ./gradlew assembleDebug test
 
 # Secret scan — run before EVERY commit (exclusions = docs that describe the scan itself)
 git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!docs/rubric.md' ':!.claude/' && echo LEAK || echo clean

@@ -17,12 +17,21 @@ Pet knjig je šlo skozi celoten postopek, iz angleščine v slovenščino, po
 €0,60–€1,45 na knjigo. Kakovost prevoda je izmerjena, ne zatrjena: 85,0–88,5 na
 100-točkovni rubriki z bootstrap intervali zaupanja.
 
-## Je zastonj?
+## Kaj je v tem repozitoriju
 
-**Da.** Berilo je programska oprema pod licenco MIT. Ni računa, ni naročnine, ni
-strežnika Berilo in ni telemetrije. Android aplikacija zahteva natanko eno
-dovoljenje — `INTERNET` — in ga uporabi samo za dostop do ponudnika modela, ki si
-ga nastavil sam.
+**Prevajalnik** in pogodbe (contracts), ki jih uresničuje vsak odjemalec Berila.
+To je referenčna izvedba prevajalskega jedra: `berilo-cloud` ga uvozi kot paket,
+namesto da bi ga znova napisal, bralniki pa so njegove predelave.
+
+**Bralnikov tukaj ni.** Živita v ločenih, zasebnih repozitorijih —
+`berilo-android` in `berilo-ios` — in nista odprtokodna. Vse spodaj opisuje
+prevajalnik (CLI), razen kjer je izrecno navedeno drugače.
+
+## Je prevajalnik zastonj?
+
+**Da.** Prevajalnik je programska oprema pod licenco MIT. Ni računa, ni
+naročnine, ni strežnika Berilo in ni telemetrije. Poganjaš ga na svoji napravi,
+pri svojem ponudniku jezikovnega modela.
 
 Plačaš enemu samemu naslovniku, in to nismo mi: **svojemu ponudniku jezikovnega
 modela**, po žetonih, po njihovem ceniku. Cela knjiga stane približno €1. Glej
@@ -33,7 +42,6 @@ modela**, po žetonih, po njihovem ceniku. Cela knjiga stane približno €1. Gl
 | Kje | Shramba | Ali gre z naprave? |
 |-----|---------|--------------------|
 | Prevajalnik (CLI) | `.env` v mapi projekta (v `.gitignore`) | Nikoli — samo do API-ja ponudnika |
-| Android aplikacija | `EncryptedSharedPreferences`, `allowBackup=false` | Nikoli — samo do API-ja ponudnika |
 
 Konkretno:
 
@@ -105,7 +113,7 @@ Preveri jih pri svojem ponudniku, preden se zaneseš na absolutne zneske.
 | Faza | Kaj | Stanje |
 |------|-----|--------|
 | 1 | Prevajalnik CLI (`translator/`) — knjiga noter, prevedeni EPUB ven | deluje; 5 knjig prevedenih, rubrika T ≥ 85 pri vseh |
-| 2 | Android bralnik (`android/`) — brez povezave, prijazen do e-črnila (Boox) | koda dokončana, 180 testov zelenih; preverjanje na napravi še teče |
+| 2 | Android bralnik — brez povezave, prijazen do e-črnila (Boox) | preseljen v zasebni repozitorij `berilo-android` |
 | 3 | Sinhronizacija v oblaku + spletni pregled zapiskov (zaprta koda) | načrtovano |
 
 Načrt in merljiva merila sprejemljivosti: [`docs/project_plan.md`](docs/project_plan.md).
@@ -148,19 +156,9 @@ ni potreben.
 Grajen najprej za e-črnilo: brez animacij, obračanje strani s polnim osvežitvijo,
 čista črno-bela tema, tipne tarče ≥ 48 dp, kontrast po WCAG AA.
 
-**Prevedi iz izvorne kode** (dokler izdaja v0.1 ni objavljena):
-
-```bash
-cd android
-./gradlew assembleRelease
-adb install -r app/build/outputs/apk/release/app-release.apk
-```
-
-**Namestitev APK z izdaje** na Boox, ko bo na
-[Releases](https://github.com/nikogamulin/berilo/releases) na voljo: v
-**Nastavitve → Aplikacije → Poseben dostop → Namesti neznane aplikacije**
-dovoli namestitev brskalniku ali upravitelju datotek, nato na napravi odpri
-prenesen APK.
+**Izvorne kode aplikacije v tem repozitoriju ni.** Preselila se je v zasebni
+repozitorij `berilo-android`. Ta razdelek opisuje, kaj aplikacija počne, ker je
+izhod prevajalnika napisan tako, da se bere v njej; ni navodilo za prevajanje.
 
 ## Kako je nastalo
 
@@ -185,13 +183,7 @@ ter kaj so naučile — je opisana tu:
 cd translator && pip install -e ".[dev]"
 make test && make lint
 
-# Android — 180 testov
-cd android
-./gradlew assembleDebug test lintDebug   # vsakodnevna zanka
-./gradlew assembleRelease                # minificirana izdaja (podpisana z debug
-                                          # ključem, dokler ne obstaja
-                                          # android/keystore.properties —
-                                          # glej keystore.properties.example)
+# Android aplikacija ima svoj repozitorij in svojo razvojno zanko.
 ```
 
 ## Načela

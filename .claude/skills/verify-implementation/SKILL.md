@@ -33,8 +33,7 @@ up as success.
 
 ### Stage 1 — Deterministic scenarios → all green (the quality gate)
 
-1. Add the N scenarios as tests (translator: `translator/tests/`, pytest; app:
-   `android/app/src/test/`, JUnit/robolectric). One test per capability, each docstring
+1. Add the N scenarios as tests (`translator/tests/`, pytest). One test per capability, each docstring
    stating its criterion. Drive the **real** production code; double only the
    non-deterministic seam (the LLM client — a deterministic fake that returns tagged
    pseudo-translations, so segment mapping and cache behavior are fully checkable).

@@ -17,12 +17,22 @@ Five books have gone through the pipeline end to end, English → Slovenian, at
 €0.60–€1.45 each. Translation quality is scored, not asserted: 85.0–88.5 on a
 100-point rubric with bootstrap confidence intervals.
 
-## Is it free?
+## What is in this repository
 
-**Yes.** Berilo is MIT-licensed software. There is no account, no subscription,
-no Berilo server, and no telemetry. The Android app requests exactly one
-permission — `INTERNET` — and uses it only to reach the LLM provider you
-configured.
+**The translator**, and the contracts every Berilo client implements. This is
+the reference implementation of the translation core: `berilo-cloud` imports it
+as a package rather than reimplementing it, and the reader apps are ports held
+to it.
+
+The **reader apps are not here.** They live in separate, private repositories —
+`berilo-android` and `berilo-ios` — and are not open source. Everything below
+describes the translator CLI unless it says otherwise.
+
+## Is the translator free?
+
+**Yes.** The translator is MIT-licensed software. There is no account, no
+subscription, no Berilo server, and no telemetry. You run it on your own
+machine, against your own LLM provider.
 
 You pay one party, and it is not us: **your own LLM provider**, per token, at
 their list price. A full book costs roughly €1. See
@@ -33,7 +43,6 @@ their list price. A full book costs roughly €1. See
 | Where | Storage | Leaves the device? |
 |-------|---------|--------------------|
 | Translator CLI | `.env` in the project folder (gitignored) | Never — only to the provider's API |
-| Android app | `EncryptedSharedPreferences`, `allowBackup=false` | Never — only to the provider's API |
 
 Concretely:
 
@@ -102,7 +111,7 @@ Verify against your provider's current rates before relying on absolute figures.
 | Phase | What | Status |
 |-------|------|--------|
 | 1 | Translator CLI (`translator/`) — book in, translated EPUB out | working; 5 books shipped, Rubric T ≥ 85 on all |
-| 2 | Android reader (`android/`) — offline, e-ink friendly (Boox) | code complete, 180 tests green; on-device verification pending |
+| 2 | Android reader — offline, e-ink friendly (Boox) | moved to the private `berilo-android` repository |
 | 3 | Cloud sync + web note review (closed-source service) | planned |
 
 Plan and objective acceptance criteria: [`docs/project_plan.md`](docs/project_plan.md).
@@ -144,18 +153,9 @@ produced — no cloud dependency.
 Built for e-ink first: no animations, full-refresh page turns, pure black-on-white
 theme, ≥ 48 dp touch targets, WCAG AA contrast.
 
-**Build from source** (until the v0.1 release is published):
-
-```bash
-cd android
-./gradlew assembleRelease
-adb install -r app/build/outputs/apk/release/app-release.apk
-```
-
-**Install a release APK** on a Boox, once
-[Releases](https://github.com/nikogamulin/berilo/releases) has one: enable
-**Settings → Apps → Special app access → Install unknown apps** for your browser
-or file manager, then open the downloaded APK on-device.
+**The app's source is not in this repository.** It moved to the private
+`berilo-android` repository. This section describes what the app does, because
+the translator's output is written to be read in it; it is not a build guide.
 
 ## How it was built
 
@@ -180,12 +180,7 @@ went wrong and what they taught — is written up here:
 cd translator && pip install -e ".[dev]"
 make test && make lint
 
-# Android — 180 tests
-cd android
-./gradlew assembleDebug test lintDebug   # everyday dev loop
-./gradlew assembleRelease                # minified release build (debug-signed
-                                          # unless android/keystore.properties exists —
-                                          # see keystore.properties.example)
+# The Android app has its own repository and its own dev loop.
 ```
 
 ## Principles
