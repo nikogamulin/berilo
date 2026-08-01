@@ -94,7 +94,7 @@ ASSEMBLE ─── EPUB out (reader-ready), optional bilingual EPUB (source + ta
 - No MOBI example present — MOBI path is covered by `ebook-convert → EPUB` and
   tested with a converted fixture.
 
-## 5. Phase 2 — Reader app (`android/`)
+## 5. Phase 2 — Reader app (private repo `berilo-android`)
 
 ### 5.1 Stack decision
 
