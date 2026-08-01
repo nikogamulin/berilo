@@ -70,15 +70,54 @@ prose is just worse on one platform than the other, and no test says so.
 
 ### Surface 3 — Markers and batching
 
-**Reference:** `translator/berilo/translate.py`.
+**Reference:** `translator/berilo/plan.py`, `translator/berilo/translate.py`.
 
-The marker format that delimits segments inside one LLM request, the parser that
-reads them back, and the recovery path when a response is truncated, empty, or
-malformed. Degrade — never abort, never silently drop.
+Two things, both normative.
 
-**Cost of divergence:** segments are dropped or misaligned, so the translated
-book carries the wrong text under the wrong heading. This is the failure that
-survives review, because the output is fluent.
+**Markers.** The format that delimits segments inside one LLM request, the
+parser that reads them back, and the recovery path when a response is
+truncated, empty, or malformed. Degrade — never abort, never silently drop.
+
+**Batching.** Which segments share a call, and which calls share a wave. This is
+a pure function of `(segments, cache state, skip list, batch_size, concurrency,
+context_pairs)` — `berilo.plan` — and is gated by `vectors/v2/batch_plan/`.
+
+A batch ends at the first of: a chapter boundary, a skip-list member, an empty
+segment, a cache hit, or `batch_size`.
+
+A cache hit emits a **pair** step, which feeds the rolling context without
+costing a call. This equality is load-bearing: it is what makes a resumed run's
+prompts identical to an uninterrupted run's, and dropping it silently removes
+the context block from every prompt after a resume.
+
+Consecutive batch steps group into a wave up to `concurrency` wide. A pair step
+ends the wave it meets, so the context that cache hit contributes reaches the
+next wave's snapshot in the right order.
+
+Three rules inside a wave, each learned by paying for it:
+
+1. **One context snapshot per wave, taken before the wave runs**, shared by
+   every lane. Otherwise a batch's prompt depends on which sibling returned
+   first, and the run stops being reproducible.
+2. **Each lane commits its own batch to the cache inside the lane.** Committing
+   after the barrier discards batches the provider has already billed whenever
+   any sibling fails.
+3. **Fold results back in batch order, never completion order.** Position-keyed
+   output is order-independent, but the rolling context, the reported chapter
+   and the revision-failure count are sequential state; folding those by
+   completion makes progress depend on network latency.
+
+Defaults: `batch_size = 20`, `concurrency = 4`, `context_pairs = 2`. Context
+staleness is therefore bounded to `concurrency * batch_size = 80` segments —
+the only continuity a wave gives up, and less than a chapter. `concurrency = 1`
+must reproduce strictly sequential translation exactly.
+
+**Cost of divergence:** for markers, segments are dropped or misaligned, so the
+translated book carries the wrong text under the wrong heading — the failure
+that survives review, because the output is fluent. Batching divergence is
+quieter: it costs only latency and money, which is why it went unnoticed until
+the Python reference, the Kotlin port and the Swift port sat at 10/1, 10/1 and
+20/4 simultaneously, a 10x spread, with nothing red anywhere.
 
 ### Surface 4 — Models and pricing
 
