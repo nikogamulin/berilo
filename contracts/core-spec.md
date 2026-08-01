@@ -185,6 +185,46 @@ Decided 2026-07-27. Revisit only if the MuPDF licence is bought. Until then, do
 not "fix" the iOS PDF hash to match Python: it cannot be done with PDFKit, and
 an attempt that looked close would be worse than a difference that is declared.
 
+### Batch composition on iOS
+
+`berilo-ios` cuts batches from a **flat, document-ordered list of segments still
+needing a call**. The reference cuts them from the document itself, ending a
+batch at a chapter boundary, an empty segment, a skip-list member, or a cache
+hit. Measured against `vectors/v2/batch_plan/` on 2026-08-01, the `default`
+case yields `[20, 14]` on iOS against `[7, 4, 20, 3]` here.
+
+**Exactly what is excepted, and what is not.** This exception covers *batch
+composition only* — which segments end up in which batch. Everything else in
+Surface 3 still binds iOS, and iOS already implements it:
+
+- the marker format, the parser, and the retry ladder;
+- one context snapshot per wave, taken before the wave runs;
+- each lane committing its own batch inside the lane;
+- results folded in batch order, never completion order.
+
+So iOS asserts against every `batch_plan` field except `waves[].batches`. A port
+may not widen this exception to skip the wave rules; those are what make a run
+reproducible, and iOS satisfies them today.
+
+Bounded because: batch composition changes **cost, not correctness**. Segment
+identity, cache keys, and the 1:1 mapping are Surfaces 1 and 7 and are
+untouched — a segment translated on an iPhone still shares a cache row with one
+translated on the workstation, because the key is content-derived and carries no
+batch. What differs is how many calls a book takes and how much context a batch
+carries, both bounded and both already declared elsewhere: staleness by
+`concurrency * batch_size`, cost by the estimate the user approves.
+
+The divergence is also the cheaper direction. Flat batching produces fewer,
+fuller calls; conforming would cost iOS roughly 25% more calls on a book with
+20–40 chapters, and calls are what a reader pays for.
+
+Decided 2026-08-01. **Revisit if either becomes true:** a measured Rubric T
+difference is attributed to batches straddling chapters, or the reference itself
+moves to flat batching — at which point this exception disappears rather than
+inverting. Until then, do not "fix" iOS to match: the difference is declared,
+and a partial fix that made some vectors pass would be worse than a divergence
+that is written down.
+
 ## 4. Changing this document
 
 Changing the core means changing the Python first, regenerating the vectors, and
