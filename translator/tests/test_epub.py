@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import zipfile
 from collections import Counter
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from click.testing import CliRunner
 from berilo.cli import cli
 from berilo.models import SegmentType
 from berilo.normalize import normalize
-from berilo.normalize.epub import normalize_epub
+from berilo.normalize.epub import EpubParseError, _repair_xhtml, normalize_epub
 
 EXAMPLE_EPUB = Path(__file__).parents[2] / "data" / "examples" / "The New Rules of War.epub"
 KAPLAN_EPUB_NAME = (
@@ -554,3 +555,222 @@ def test_example_epub_meets_verify_thresholds() -> None:
     assert payload["segment_count"] >= MIN_EXAMPLE_SEGMENTS
     assert payload["chapter_count"] >= MIN_EXAMPLE_CHAPTERS
     assert payload["empty_segment_count"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# The leniency rule (review finding 2): malformed XHTML must not silently
+# swallow a whole spine document, and an unrecoverable one must be LOUD.
+# --------------------------------------------------------------------------- #
+
+#: A chapter document that is valid HTML and invalid XML in three independent
+#: ways at once: a bare ``&nbsp;`` (undeclared entity), an unclosed ``<br>``
+#: (void element), and a stray ``&`` (bare ampersand). Each is repaired by one
+#: numbered repair of the rule; all three together prove they compose.
+_MALFORMED_CHAPTER = """<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Chapter Two</title></head>
+  <body>
+    <h1>Chapter Two</h1>
+    <p>Salt&nbsp;and pepper.</p>
+    <p>First line<br>second line.</p>
+    <p>Meyer & Sons, ironmongers.</p>
+  </body>
+</html>
+"""
+
+
+def _two_chapter_epub(epub_builder, second: dict) -> Path:
+    """A 2-chapter EPUB whose second document is supplied by the caller."""
+    return epub_builder(
+        items=[
+            {
+                "id": "c1",
+                "href": "c1.xhtml",
+                "nav_title": "Chapter One",
+                "body": "<h1>Chapter One</h1><p>Chapter one prose.</p>",
+            },
+            {"id": "c2", "href": "c2.xhtml", "nav_title": "Chapter Two", **second},
+        ]
+    )
+
+
+def _replace_archive_member(path: Path, name: str, content: str) -> None:
+    """Rewrite one member of an existing EPUB, leaving the others untouched."""
+    with zipfile.ZipFile(path) as archive:
+        members = [(item.filename, archive.read(item.filename)) for item in archive.infolist()]
+    with zipfile.ZipFile(path, "w") as archive:
+        for filename, data in members:
+            archive.writestr(filename, content if filename == name else data)
+
+
+def test_malformed_xhtml_document_is_recovered_with_its_content_intact(
+    epub_builder, caplog
+) -> None:
+    """The finding-2 fix: the document is recovered, not lost with a warning.
+
+    Before the fix ``ET.fromstring`` raised, the ``ParseError`` was swallowed
+    and the whole document was ``continue``d — every paragraph, heading and
+    image in it gone for a log line.
+    """
+    path = _two_chapter_epub(epub_builder, {"body": "", "raw": _MALFORMED_CHAPTER})
+
+    with caplog.at_level(logging.WARNING, logger="berilo.normalize.epub"):
+        book = normalize_epub(path)
+
+    texts = [segment.text for segment in book.segments]
+    # The recovered NBSP collapses to a space like any other whitespace, and a
+    # recovered <br> is unwrapped exactly as an already-well-formed <br/> is —
+    # recovery reproduces the strict path's output, it does not invent its own.
+    assert texts == [
+        "Chapter One",
+        "Chapter one prose.",
+        "Chapter Two",
+        "Salt and pepper.",
+        "First linesecond line.",
+        "Meyer & Sons, ironmongers.",
+    ]
+    assert any("Recovered malformed document" in record.message for record in caplog.records)
+
+
+def test_unrecoverable_spine_document_raises_and_names_itself(epub_builder) -> None:
+    """Loudness, asserted on the ERROR — not on a log line.
+
+    Leniency that still fails quietly has not fixed the defect: an
+    unrecoverable document must stop the run and say which one it was.
+    """
+    broken = "<html><body><p>Chapter two opens<div></p></body></html>"
+    path = _two_chapter_epub(epub_builder, {"body": "", "raw": broken})
+
+    with pytest.raises(EpubParseError) as excinfo:
+        normalize_epub(path)
+
+    assert excinfo.value.document == "c2.xhtml"
+    assert "c2.xhtml" in str(excinfo.value)
+
+
+def test_spine_document_absent_from_archive_raises(epub_builder) -> None:
+    """The same silent-loss class: a spine entry with no file behind it."""
+    path = _two_chapter_epub(
+        epub_builder, {"body": "<h1>Chapter Two</h1><p>Gone.</p>", "absent": True}
+    )
+
+    with pytest.raises(EpubParseError) as excinfo:
+        normalize_epub(path)
+
+    assert excinfo.value.document == "c2.xhtml"
+    assert "absent from the archive" in str(excinfo.value)
+
+
+def test_well_formed_documents_are_parsed_strictly_and_never_repaired(
+    epub_builder, monkeypatch
+) -> None:
+    """Step 1 of the rule, and the reason ``book_hash`` cannot move.
+
+    Recovery runs ONLY after a strict parse has already failed, so a book made
+    of well-formed documents takes byte-for-byte the same path it did before
+    leniency existed. Asserted on the mechanism — a repair pass that cannot be
+    reached — rather than on output, because the repairs are near-idempotent on
+    valid markup and an output comparison would pass even if they always ran.
+    """
+    path = _two_chapter_epub(
+        epub_builder,
+        {"body": "<h1>Chapter Two</h1><p>Meyer &amp; Sons &#38; Co.<br/></p>"},
+    )
+
+    def _must_not_run(data: bytes) -> tuple[bytes, list[str]]:
+        raise AssertionError("recovery ran on a well-formed document")
+
+    monkeypatch.setattr("berilo.normalize.epub._repair_xhtml", _must_not_run)
+
+    book = normalize_epub(path)
+
+    assert book.segments[-1].text == "Meyer & Sons & Co."
+
+
+def test_repairs_do_not_corrupt_a_literal_gt_inside_an_attribute() -> None:
+    """R3 is quote-aware: a legal ``>`` in an attribute is not a tag end.
+
+    A naive ``[^<>]*`` attribute scan ends the tag at the ``>`` inside the alt
+    text and self-closes mid-attribute, silently rewriting the document.
+    """
+    repaired, applied = _repair_xhtml(b'<p><img src="x.png" alt="3 > 2"></p>')
+
+    assert repaired == b'<p><img src="x.png" alt="3 > 2"/></p>'
+    assert any(name.startswith("R3") for name in applied)
+
+
+def test_void_repair_does_not_fire_on_a_longer_tag_name() -> None:
+    """``<imgfoo>`` is not ``<img>``: the element name is anchored."""
+    repaired, applied = _repair_xhtml(b"<imgfoo>x</imgfoo>")
+
+    assert repaired == b"<imgfoo>x</imgfoo>"
+    assert applied == []
+
+
+def test_repairs_are_individually_sufficient() -> None:
+    """Each numbered repair fixes its own case, so the rule can be ported.
+
+    The Kotlin reader must reproduce R0-R3 exactly; pinning them one by one
+    makes a divergence a test failure rather than a segment-id mismatch found
+    much later.
+    """
+    nbsp, applied = _repair_xhtml(b"<p>a&nbsp;b</p>")
+    assert nbsp == b"<p>a&#160;b</p>"
+    assert any(name.startswith("R1") for name in applied)
+
+    ampersand, applied = _repair_xhtml(b"<p>Meyer & Sons</p>")
+    assert ampersand == b"<p>Meyer &amp; Sons</p>"
+    assert any(name.startswith("R2") for name in applied)
+
+    void, applied = _repair_xhtml(b'<p>a<br>b<img src="x.png" alt="">c</p>')
+    assert void == b'<p>a<br/>b<img src="x.png" alt=""/>c</p>'
+    assert any(name.startswith("R3") for name in applied)
+
+    declaration, applied = _repair_xhtml(b'<?xml version="1.0"?><p>x</p>')
+    assert declaration == b"<p>x</p>"
+    assert any(name.startswith("R0") for name in applied)
+
+    # A valid reference of every form survives R1/R2 untouched.
+    untouched, applied = _repair_xhtml(b"<p>&amp; &#38; &#x26; &lt;</p>")
+    assert untouched == b"<p>&amp; &#38; &#x26; &lt;</p>"
+    assert applied == []
+
+
+def test_malformed_toc_document_is_recovered_rather_than_ignored(epub_builder) -> None:
+    """A TOC document gets the same leniency; titles survive a bare entity."""
+    path = epub_builder(
+        items=[
+            {"id": "c1", "href": "c1.xhtml", "body": "<p>One.</p>"},
+            {"id": "c2", "href": "c2.xhtml", "body": "<p>Two.</p>"},
+        ],
+        include_ncx=False,
+        nav_toc=[("c1.xhtml", "Fish&nbsp;and Chips"), ("c2.xhtml", "Bread & Butter")],
+    )
+
+    book = normalize_epub(path)
+
+    assert book.segments[0].chapter_title == "Fish\xa0and Chips"
+    assert book.segments[1].chapter_title == "Bread & Butter"
+
+
+def test_unrecoverable_toc_document_degrades_without_raising(epub_builder, caplog) -> None:
+    """A TOC carries no content, so its loss is a degradation, not data loss.
+
+    Deliberate asymmetry with a spine document: chapter titles fall back to
+    the resolution ladder and every segment survives, so this one warns.
+    """
+    path = epub_builder(
+        items=[
+            {"id": "c1", "href": "c1.xhtml", "nav_title": "One", "body": "<p>One prose.</p>"},
+            {"id": "c2", "href": "c2.xhtml", "nav_title": "Two", "body": "<p>Two prose.</p>"},
+        ],
+        include_ncx=False,
+        nav_toc=[("c1.xhtml", "One"), ("c2.xhtml", "Two")],
+    )
+    _replace_archive_member(path, "nav.xhtml", "<html><body><nav><ol><li></ol></nav></body></html>")
+
+    with caplog.at_level(logging.WARNING, logger="berilo.normalize.epub"):
+        book = normalize_epub(path)
+
+    assert [segment.text for segment in book.segments] == ["One prose.", "Two prose."]
+    assert any("Could not parse nav document" in record.message for record in caplog.records)

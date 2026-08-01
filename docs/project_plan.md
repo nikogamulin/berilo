@@ -161,142 +161,14 @@ normalizers and the assembler.*
 
 ---
 
-## Phase 2 — Android reader (milestone `m2`) — target: Rubric R ≥ 85 on Boox
+## Phase 2 — Android reader (milestone `m2`)
 
-### S2.1 — App skeleton + library (3 pt)
-- [ ] Kotlin/Compose project (minSdk 26), Readium integration; import EPUB via SAF; library grid with covers + progress; Room DB
-- **Verify:** `./gradlew assembleDebug test` green; APK installs on Boox; all 3 translated books import and show covers.
-
-### S2.2 — Reader core (5 pt)
-- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES: open-path hang + publication leak, folded; 44 JVM tests)
-- [ ] Device residual: R1 walkthrough 25/25 + R2 latencies on Boox
-- [ ] Paginated Readium rendering; e-ink mode (no animations, full-refresh turns, pure B/W theme); font/margin settings; position persistence; chapter nav
-- **Verify:** Rubric R1 walkthrough = 25/25 on Boox; R2 measurements meet all 3 thresholds (debug overlay logs attached to issue).
-
-### S2.3 — API key settings (2 pt)
-- [x] Code landed 2026-07-24 (reviewer LAND; 45 JVM tests incl. no-key-in-exception audits; allowBackup=false)
-- [ ] Device residual: R7 logcat/backup audit on Boox
-- [ ] Key entry + validation (`doctor`-style test call), EncryptedSharedPreferences storage, model picker (cheap default, user-selectable), target language
-- **Verify:** R7 audit passes: `adb logcat` during a lookup session contains no key substring; backup extract contains no plaintext key; invalid key shows actionable error.
-
-### S2.4 — LLM dictionary (3 pt)
-- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES, folded; 107 JVM tests; capture = select + Define action)
-- [ ] Device residual: R3 latency/disambiguation thresholds on Boox
-- [ ] Tap word → bottom-sheet definition in context (sentence sent along); Room cache; offline + error states
-- **Verify:** R3 thresholds met (p50 ≤ 4 s over 10 logged lookups, cached ≤ 300 ms, 5/5 ambiguous words disambiguated — word list fixed in test doc).
-
-### S2.5 — Paragraph interpretation (2 pt)
-- [x] Code landed 2026-07-24 (reviewer LAND, no fixes; 138 JVM tests incl. proven dismiss-cancellation)
-- [ ] Device residual: R4 thresholds on 5 dense *Active Measures* paragraphs on Boox
-- [ ] Long-press paragraph → interpretation sheet; cached; streaming render if provider supports
-- **Verify:** R4 thresholds met on 5 pre-selected dense paragraphs from *Active Measures*.
-
-### S2.6 — Highlights & notes (3 pt)
-- [x] Code landed 2026-07-24 (reviewer LAND-WITH-FIXES: e-ink luma-separated fills, folded; 173 JVM tests)
-- [ ] Device residual: R5 10-action sequence + Obsidian export render on Boox
-- [ ] Text selection → highlight (4 colors)/note; per-book notebook screen; Markdown export via share sheet
-- **Verify:** R5 scripted 10-action sequence 15/15; export file renders correctly in Obsidian.
-
-### S2.7 — Design pass + walkthrough checklist (3 pt)
-- [x] Design pass + `docs/checklists/reader_walkthrough.md` landed 2026-07-24 (reviewer LAND; WCAG contrast verified computationally; 176 tests)
-- [ ] Device residual: full Rubric R scoring run on Boox (checklist ready)
-- [ ] Apply `design_guidelines.md`; create `docs/checklists/reader_walkthrough.md`; full rubric R scoring run
-- **Verify:** Rubric **R ≥ 85** recorded in `rubric_scores.jsonl`; R6 checklist ≥ 10/12; screenshots archived in issue.
-
-### S2.8 — Release v0.1 (1 pt)
-- [x] Build wiring + README landed 2026-07-24 (reviewer LAND-WITH-FIXES, folded; minified release APK 4.6 MiB builds; 352 tests)
-- [ ] Gated: real keystore (Niko), GitHub release publish after the Boox R pass, fresh-install R1 on device
-- [ ] Signed APK, GitHub release, README install instructions
-- **Verify:** `gh release view` shows APK asset; fresh install from the release artifact passes R1 on Boox.
-
-### S2.9 — Curated book icons + library polish (2 pt)
-- [x] Generate cohesive, text-free 2:3 cover icons for the five translated example books and use them as title-matched fallbacks when an imported EPUB has no usable embedded cover
-- [x] Library polish landed `429017f` (`LibraryScreen.kt` +187) — audited on `main` 2026-07-25: `CardShape`/border `:60-63,197-199`, `RoundedCornerShape(12.dp)`+`clip` cover treatment, author hierarchy one weight down on the pinned `onSurfaceVariant` role `:226,235-237`, distinct LOADING/EMPTY states `:94-95,141,330`, `GridCells.Adaptive(minSize=140.dp)` `:172`; `IconButton` supplies the ≥48 dp target
-- [x] Cross-screen consistency landed `c04b573` — annotation editor, notebook, dictionary, interpretation and settings all touched, with ~591 lines of Compose tests
-- [ ] Verify residual: screenshots at both widths now exist via S2.10 and surfaced **3 defects → S2.11** (baseline-purple FAB, purple progress track, reader-chrome title collapse at phone width); TalkBack labels and the R6 checklist remain device-gated
-- **Verify:** `./gradlew test assembleDebug` green; all five translated books show either their embedded cover or the correct curated fallback; screenshot comparison at phone and Boox widths has no clipping, uneven grid rhythm, or low-contrast controls; TalkBack labels and R6 checklist remain passing.
-
-### S2.10 — JVM screenshot harness at phone + Boox widths (2 pt) ✅
-*Enabling work for S2.9's Verify line, which demands "screenshot comparison at
-phone and Boox widths" — impossible today: no Boox attached and no emulator
-installed on this box (`~/Android/Sdk/emulator/` and `~/.android/avd/` absent).
-Compose UI tests already run JVM-side under Robolectric
-(`gradle/libs.versions.toml:17,35-36`; no `androidTest` source set), so
-screenshots are reachable offline.*
-- [x] Renders 6 surfaces (library, reader chrome ×2, notebook, dictionary
-      sheet, interpretation sheet, settings) to 26 PNGs at two qualifiers —
-      phone 411×914dp@420dpi → 1078×2399px, Boox `w990dp-h1319dp…227dpi` →
-      1404×1871px (1871 not 1872 is dp round-tripping, verified) — light + dark
-- [x] Screenshots written to gitignored `app/build/outputs/roborazzi/s2.10/`;
-      no binaries committed (diff is 9 files, all source)
-- [x] **Deterministic — verified over 5 consecutive runs, all 10 pairwise
-      comparisons identical across all 26 PNGs.** First cut was NOT: Coil's
-      `AsyncImage` decodes on `Dispatchers.IO`, outside Robolectric's looper, so
-      `waitForIdle()` could return before covers painted and `library_boox_dark`
-      flapped between two states (23,008 px, `(0,0,0)` raw canvas vs `#121212`
-      `PaperDark`). Fixed by a JVM-scoped Coil `ImageLoader` on
-      `Dispatchers.Unconfined` — deterministic by construction, not a poll
-- [x] Capture cannot silently no-op: tests report **SKIPPED** (JUnit `Assume`)
-      when `roborazzi.test.record` is unset and assert the PNG exists and is
-      non-empty when it is set. "Passed" can no longer mean "wrote nothing"
-- [x] **Scope honesty:** this does NOT substitute for Rubric R6. R6 is a
-      12-item human visual checklist scored on real e-ink hardware (contrast,
-      ghosting, full-refresh behaviour) — `docs/rubric.md:58`. This harness
-      closes S2.9's screenshot clause only
-- **Verify:** `cd android && JAVA_HOME=… ANDROID_HOME=… ./gradlew <task>` emits
-  a PNG per surface per width with zero test failures; each PNG opens and is
-  visually reviewed for clipping, grid rhythm and control contrast; existing
-  JVM test count does not regress (390 green today).
-- **Verify run 2026-07-25 on merged `main`:** `./gradlew screenshots test` →
-  `screenshots` 26/26 pass, `testDebugUnitTest` 232 (26 skipped, 0 failures),
-  `testReleaseUnitTest` 184 — 416 unique vs the 390 baseline, no regression.
-  26 PNGs: 13 at 1078×2399, 13 at 1404×1871. All 26 programmatically confirmed
-  non-blank (484–28,897 distinct colours, 2.9–65.2% ink); library, reader chrome
-  and settings reviewed visually in depth. Found 3 real defects → **S2.11**.
-
-### S2.11 — Fix defects caught by the screenshot harness (2 pt) ✅
-*Found by S2.10 on its first run, 2026-07-25 — measured from the PNGs, not
-eyeballed. Both classes would cost R6 points on the device (`docs/rubric.md:58`
-scores contrast on e-ink and OLED).*
-- [x] **Baseline-purple leak via component defaults.** `Theme.kt` pins only
-      `background, error, onBackground, onError, onPrimary, onSurface,
-      onSurfaceVariant, outline, primary, surface, surfaceVariant`. Every role
-      referenced explicitly through `colorScheme.` in app code is pinned — the
-      leak is entirely from **Material3 component defaults** referencing
-      unpinned roles: `FloatingActionButton` → `primaryContainer`/
-      `onPrimaryContainer` (`#EADDFF` on `#210050`, the library's primary
-      action), `LinearProgressIndicator` track → `secondaryContainer`
-      (`#E8DEF8`, reader chrome), `HorizontalDivider` → `outlineVariant`
-      (`#CAC4D0`, settings + reader settings panel). Fix by CLASS: pin every
-      role of both schemes, not just the ones currently referenced
-- [x] **Reader top bar collapses at phone width.** In `reader/ReaderChrome.kt`
-      the chapter-title `Text` at `weight(1f)` competes with a
-      `horizontalScroll` Row of 6 action buttons; the scrollable sibling
-      measures at its unconstrained preferred width and starves the title,
-      which **disappears entirely rather than ellipsising** despite
-      `overflow = TextOverflow.Ellipsis`. The action row is also clipped
-      mid-word. Renders correctly at Boox width (990 dp) — phone-width only
-- [x] Regression cover: assert no unpinned-role colour reaches a rendered
-      surface, so this class cannot silently return
-- **Verify:** regenerate via S2.10's `./gradlew screenshots test` and re-run the
-  violet-pixel scan over all 26 PNGs — **zero** pixels matching the M3 baseline
-  violet family (`#EADDFF`, `#210050`, `#E8DEF8`, `#CAC4D0`, `#4F378B`,
-  `#4A4458`); `reader_chrome_phone_light.png` shows the chapter title present
-  and the action row not clipped; JVM test count does not regress (416 with
-  S2.10 landed).
-
----
-- **Verify run 2026-07-25 on merged `main`** (merge `299014b`): `./gradlew
-  screenshots test` → `screenshots` 26/26, `testDebugUnitTest` 235 (26 skipped),
-  `testReleaseUnitTest` 187 = **422 unique**, 0 failures (390 at session start,
-  416 after S2.10). Violet scan over all 26 PNGs: **0 exact M3-baseline pixels**,
-  down from hits on 5 surfaces. The 364 residual "violet-band" pixels are
-  bundled cover artwork, not palette — they appear at identical counts in light
-  AND dark (34/34 boox, 148/148 phone), which theme colours never would, and the
-  agent independently traced them to the `cover_*.webp` drawables. Determinism
-  re-verified: 5 runs, all 10 pairwise comparisons identical.
-  `ThemeContrastTest` now enumerates all 48 roles as a permanent guard and was
-  proven to fail without the fix (catching `#EADDFF` and `#4F378B` by name).
+> **Moved.** The reader app lives in the private `berilo-android` repository,
+> and its stories moved with it: `berilo-android/docs/project_plan.md`. Rubric
+> R, which scores them, is at `berilo-android/docs/rubric.md`.
+>
+> They are not restated here. A plan that describes an app this repository does
+> not contain is a plan nobody updates.
 
 ## Phase 3 — Cloud sync & web review (milestone `m3`) — target: Rubric S ≥ 85
 > Lives in **private repo `berilo-cloud`**; this repo only gains the app-side
@@ -304,10 +176,10 @@ scores contrast on e-ink and OLED).*
 > close; headline stories now:
 
 ### S3.1 — API contract + Supabase schema (3 pt)
-- [x] Contract half landed 2026-07-24: `docs/sync_api.md` v1.1 (plan-critic pass: 6 MAJOR + 7 MINOR fixed/elevated; DDL + delete-wins trigger functionally validated on throwaway Postgres; [OPEN-1..5] await Niko)
+- [x] Contract half landed 2026-07-24: `contracts/sync_api.md` v1.1 (plan-critic pass: 6 MAJOR + 7 MINOR fixed/elevated; DDL + delete-wins trigger functionally validated on throwaway Postgres; [OPEN-1..5] await Niko)
 - [ ] Infra half gated: live Supabase RLS audit + 2500-row pagination test (berilo-cloud)
 - [ ] OpenAPI spec for sync endpoints; Supabase schema (users, books-metadata, highlights, notes, vocabulary, progress, shelves, ratings, shared-passages) with RLS; every query paginated
-- **Verify:** contract committed in **this** repo (`docs/sync_api.md`); RLS audit script: user A gets 0 rows of user B across all tables; S6 synthetic 2500-row test returns complete data.
+- **Verify:** contract committed in **this** repo (`contracts/sync_api.md`); RLS audit script: user A gets 0 rows of user B across all tables; S6 synthetic 2500-row test returns complete data.
 
 ### S3.2 — App sync client (5 pt)
 - [ ] Auth (Clerk JWTs against Supabase RLS), background sync of notes/highlights/vocabulary/progress, last-write-wins with `updated_at` UTC, offline queue
@@ -318,7 +190,7 @@ scores contrast on e-ink and OLED).*
 - **Verify:** S4 checklist 10/10; S5 LCP ≤ 2.5 s on Vercel analytics; e2e Playwright suite green in CI.
 
 ### S3.4 — Reading page — social layer (5 pt) *(spec §6.1)*
-- [ ] Public reading page on berilo.app, Slovenian-first: profiles & shelves (book metadata only), shared passages (≤ 500-char excerpt, title+author attribution), 1–5 ratings + short reviews, per-item opt-in sharing (private by default), design per `design_guidelines.md`
+- [ ] Public reading page on berilo.app, Slovenian-first: profiles & shelves (book metadata only), shared passages (≤ 500-char excerpt, title+author attribution), 1–5 ratings + short reviews, per-item opt-in sharing (private by default), design per `contracts/design_guidelines.md`
 - **Verify:** Playwright e2e: sign up → shelve book → share passage → rate → anonymous visitor sees only opted-in content; passage > 500 chars rejected server-side; UI strings render šumniki correctly (č/š/ž spot-check on live page); Lighthouse accessibility ≥ 95 on the reading page.
 
 ### S3.5 — Launch gate (2 pt)

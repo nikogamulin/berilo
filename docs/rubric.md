@@ -1,4 +1,4 @@
-# Berilo — Rubrics
+# Berilo — Rubric T
 
 > The development process optimizes these scores. Every score is produced by a
 > **defined, repeatable procedure** — never by feel. Scores are appended to
@@ -6,6 +6,12 @@
 > `{"date", "rubric", "version", "score", "dimensions": {...}, "commit", "notes"}`.
 > A change that lowers a rubric score without an explicit tradeoff decision is
 > discarded.
+
+This file once held all four rubrics, from when Berilo was one repository. Each
+is now kept by whoever can actually run it: **T** here, **R** in
+`berilo-android`, **S** in `berilo-cloud`, **D** in the workspace repo. The
+three that left leave a pointer below rather than a copy — a rubric stated twice
+is a rubric that will disagree with itself.
 
 ---
 
@@ -41,55 +47,24 @@ three example books before Phase 1 is declared done.
 
 ---
 
-## Rubric R — Reader Experience (Phase 2) — 0–100
+## Rubric R — Reader Experience — scored elsewhere
 
-Scoring procedure: manual timed walkthrough on the Boox device using the
-checklist script `docs/checklists/reader_walkthrough.md` (created with the
-Phase 2 test story); latencies measured with the app's built-in debug timing
-overlay (logcat markers), not a stopwatch.
+> **Moved to `berilo-android/docs/rubric.md`.** R scores the Android reader,
+> which is no longer in this repository, and a rubric scored against something
+> you cannot run is a rubric that goes stale silently.
+>
+> **S** (Sync & Cloud) is scored in `berilo-cloud`; **D** (process health) is
+> the workspace repo's, at `../docs/rubrics.md`. **T**, below, is this repo's
+> and stays.
 
-| Dim | What | Weight | Measurement |
-|-----|------|--------|-------------|
-| R1 | **Core reading reliability** | 25 | 3 example books: import, open, page through 3 full chapters, close, reopen at exact position. Any crash/misrender = per-incident −5. |
-| R2 | **E-ink performance** | 15 | Page turn ≤ 150 ms render call on Boox (measured via debug overlay); no ghosting-inducing animation in e-ink mode; cold start to last page ≤ 3 s. Each of 3 criteria ≈ 5 pts. |
-| R3 | **Dictionary UX** | 15 | Tap-to-definition ≤ 4 s online (p50 over 10 lookups); cached lookup ≤ 300 ms; context disambiguation verified on 5 ambiguous words; graceful offline message. |
-| R4 | **Interpretation UX** | 10 | Long-press → interpretation ≤ 8 s p50; result cached; renders long answers readably. |
-| R5 | **Notes & highlights** | 15 | Create/edit/delete highlight and note; survive app restart; notebook lists all; Markdown export opens correctly. 10 scripted actions, each 1.5 pts. |
-| R6 | **Design quality** | 15 | 12-item visual checklist (typography scale, spacing rhythm, contrast on e-ink and OLED, empty states, dark mode) — each pass/fail. |
-| R7 | **Key & settings safety** | 5 | API key never appears in logs/backups (audit `adb logcat` + backup extract); model switch takes effect without restart. |
+## Rubric S — Sync & Cloud — scored elsewhere
 
-**Gates:** R1 ≥ 20 and R7 = 5 are release gates. Target: **R ≥ 85** before
-Phase 2 is declared done.
+> **Moved to `berilo-cloud/docs/rubric.md`.** S scores the sync service and the
+> web layer, neither of which is in this repository.
 
----
+## Rubric D — Development Process Health — scored elsewhere
 
-## Rubric S — Sync & Cloud (Phase 3) — 0–100
-
-Scoring procedure: automated e2e suite (Playwright + device emulator) plus RLS
-audit; runs in CI of the private repo.
-
-| Dim | What | Weight | Measurement |
-|-----|------|--------|-------------|
-| S1 | **Sync correctness** | 30 | Scripted scenario matrix (create/edit/delete on device A → visible on web and device B; offline edits reconcile; DST-crossing timestamps): % of scenarios passing. |
-| S2 | **Data isolation** | 20 | RLS audit: authenticated user A attempting every endpoint/table against user B's rows — 0 leaks required for any points (all-or-nothing). |
-| S3 | **Durability** | 15 | No data loss across 3 sync round-trips with induced network failures (airplane-mode chaos test); byte-identical note bodies. |
-| S4 | **Web review UX** | 15 | Notes searchable across books; filter by book/color/date; export; 10-item checklist. |
-| S5 | **Performance** | 10 | Full sync of 1000 notes ≤ 10 s; web notes page LCP ≤ 2.5 s (Vercel analytics). |
-| S6 | **Pagination discipline** | 10 | Audit: every Supabase query paginated; synthetic 2500-row account returns complete data. |
-
-**Gates:** S2 = 20 and S3 = 15 are release gates. Target: **S ≥ 85**.
-
----
-
-## Rubric D — Development Process Health — continuous
-
-Checked at every session close; recorded in the ledger, not scored 0–100.
-All must hold:
-
-- [ ] Every completed task in `project_plan.md` has its **Verify** command run
-      in the session that closed it, with output recorded (issue comment or
-      ledger note).
-- [ ] No secrets or local paths in any committed file (`git grep -iE 'sk-(proj|ant)|/home/niko'` on HEAD is empty).
-- [ ] Tests green at HEAD (`make test` per phase).
-- [ ] Numbers reported with uncertainty (CIs on sampled metrics).
-- [ ] `docs/findings.md` updated if anything non-obvious was learned.
+> **Moved to the workspace repo, `../docs/rubrics.md`.** D judges how work is
+> done across every repository, not what any one of them produces, so it
+> belongs to the map rather than to a member. It also gained two conditions
+> that only exist in a multi-repo workspace.

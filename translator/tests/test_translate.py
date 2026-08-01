@@ -21,7 +21,11 @@ from berilo.cli import cli
 from berilo.glossary import Glossary, build_glossary
 from berilo.models import Book, ImageResource, Segment, SegmentType, make_segment_id
 from berilo.prompts import BASELINE, get_style, style_names
-from berilo.providers.base import CompletionResult, LLMClient
+from berilo.providers.base import (
+    CompletionResult,
+    LLMClient,
+    TruncatedCompletionError,
+)
 from berilo.providers.pricing import cost_eur
 from berilo.translate import (
     REASONING_TOKENS_PER_CALL,
@@ -37,6 +41,7 @@ from berilo.translate import (
 _MARKER_RE = re.compile(r"\[\[(\d+)\]\]")
 _PREFIX = "SL::"
 _REVISED_PREFIX = "ED::"
+FAKE_ANTHROPIC_KEY = "test-anthropic-key-not-a-real-secret-0000000000"
 
 #: System prompts that identify an extra pass, taken from the registry itself
 #: so the fakes classify calls exactly rather than by guessing at wording.
@@ -181,6 +186,77 @@ class BrokenClient(MismatchClient):
 
     def _single_response(self, prompt: str) -> CompletionResult:
         return self._result("")
+
+
+class _EmptyBookContextClient(FakeLLMClient):
+    """Book-context call returns an empty memo; everything else is normal."""
+
+    def _book_context_response(self) -> str:
+        return ""
+
+
+class _TruncatingBookContextClient(FakeLLMClient):
+    """The book-context call is billed but truncated; everything else is normal.
+
+    Same regression class as ``_TruncatingClient``/``_ReviseTruncatingClient``:
+    the once-per-book memo call has no smaller unit to retry into, but — like
+    a genuinely blank memo reply — it is a best-effort pass, not a
+    correctness requirement, so it must degrade to "no memo" rather than
+    aborting the whole run.
+    """
+
+    def complete(self, prompt=None, messages=None, *, max_tokens=None, system=None):
+        if self._kind(prompt, system) == "book_context":
+            raise TruncatedCompletionError(
+                "truncated mid-generation",
+                result=CompletionResult(
+                    text="",
+                    input_tokens=50,
+                    output_tokens=999,
+                    cost_eur=cost_eur(self.model, 50, 999),
+                    model=self.model,
+                ),
+            )
+        return super().complete(prompt, messages, max_tokens=max_tokens, system=system)
+
+
+class _TruncatingClient(FakeLLMClient):
+    """Raises TruncatedCompletionError on the first ``fail_batch_calls``
+    batch-level ([[n]] numbered prompt) calls, then answers normally.
+
+    Optionally also truncates every per-segment fallback call
+    (``fail_single``), to drive the ladder's very last rung. Mirrors
+    ``MismatchClient``'s shape but for review finding 7's guard (a provider
+    billing a call while returning no usable text) rather than a bad mapping.
+    """
+
+    def __init__(self, *, fail_batch_calls: int = 0, fail_single: bool = False, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.fail_batch_calls = fail_batch_calls
+        self.fail_single = fail_single
+        self._batch_attempts = 0
+
+    def _truncated(self) -> TruncatedCompletionError:
+        return TruncatedCompletionError(
+            "truncated mid-generation",
+            result=CompletionResult(
+                text="",
+                input_tokens=50,
+                output_tokens=999,
+                cost_eur=cost_eur(self.model, 50, 999),
+                model=self.model,
+            ),
+        )
+
+    def complete(self, prompt=None, messages=None, *, max_tokens=None, system=None):
+        kind = self._kind(prompt, system)
+        if kind == "batch":
+            self._batch_attempts += 1
+            if self._batch_attempts <= self.fail_batch_calls:
+                raise self._truncated()
+        elif kind == "single" and self.fail_single:
+            raise self._truncated()
+        return super().complete(prompt, messages, max_tokens=max_tokens, system=system)
 
 
 class _KillSwitch(Exception):
@@ -395,6 +471,63 @@ def test_persistent_failure_raises_translation_error_naming_segment() -> None:
     message = str(excinfo.value)
     assert "Test Book" in message
     assert "chapter 0" in message
+
+
+# --------------------------------------------------------------------------
+# review finding 7 regression: a billed-but-truncated/empty response must
+# degrade through the SAME retry ladder as a bad mapping, not abort the run.
+# --------------------------------------------------------------------------
+
+
+def test_batch_truncation_on_first_attempt_recovers_via_strict_retry() -> None:
+    """A truncated first batch response degrades to the strict-retry rung.
+
+    Regression test for the finding-7 fix's own bug: EmptyCompletionError/
+    TruncatedCompletionError used to propagate straight out of
+    ``client.complete()`` with no handler, aborting the whole book instead
+    of being treated like a bad mapping.
+    """
+    book = _paragraph_book(2)
+    client = _TruncatingClient(fail_batch_calls=1)
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2
+    )
+
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    assert not any(
+        call["kind"] == "single" for call in client.calls
+    ), "the strict retry must have succeeded without needing per-segment fallback"
+
+
+def test_batch_truncation_on_both_attempts_falls_back_to_per_segment() -> None:
+    """A batch that truncates on both batch-level attempts falls through to
+    the per-segment fallback and completes the book, exactly like a batch
+    that persistently mismatches (test_batch_mismatch_retries_then_falls_back_
+    per_segment) — truncation must never be a smaller-granularity dead end.
+    """
+    book = _paragraph_book(2)
+    client = _TruncatingClient(fail_batch_calls=2)
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2
+    )
+
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    single_calls = [call for call in client.calls if call["kind"] == "single"]
+    assert len(single_calls) == 2, "per-segment fallback must have run for both segments"
+
+
+def test_single_segment_truncation_still_raises_translation_error() -> None:
+    """The finding-7 guarantee survives at the level with no smaller retry
+    unit: once the ladder reaches per-segment translation, a truncated/empty
+    response there is a loud TranslationError, same as a plain empty reply.
+    """
+    book = _paragraph_book(1)
+    client = _TruncatingClient(fail_batch_calls=2, fail_single=True)
+
+    with pytest.raises(TranslationError, match="Empty translation"):
+        translate_book(book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=1)
 
 
 def test_parse_numbered_response_rejects_bad_mappings() -> None:
@@ -623,6 +756,29 @@ class _ReviseMismatchClient(FakeLLMClient):
         return self._result("\n".join(parts))
 
 
+class _ReviseTruncatingClient(FakeLLMClient):
+    """Translates fine but every editor-pass call is billed and truncated.
+
+    Same regression class as ``_TruncatingClient`` (review finding 7's
+    guard escaping unhandled), applied to the revise pass rather than the
+    batch-translate ladder.
+    """
+
+    def complete(self, prompt=None, messages=None, *, max_tokens=None, system=None):
+        if self._kind(prompt, system) == "revise":
+            raise TruncatedCompletionError(
+                "truncated mid-generation",
+                result=CompletionResult(
+                    text="",
+                    input_tokens=50,
+                    output_tokens=999,
+                    cost_eur=cost_eur(self.model, 50, 999),
+                    model=self.model,
+                ),
+            )
+        return super().complete(prompt, messages, max_tokens=max_tokens, system=system)
+
+
 def test_default_style_is_baseline_and_sends_the_pre_refactor_prompt() -> None:
     """With no style argument the engine sends baseline_v1's system prompts."""
     book = _paragraph_book(3)
@@ -784,6 +940,35 @@ def test_revise_failure_keeps_the_draft_and_is_counted() -> None:
     assert seen[-1].revision_failures == 1
 
 
+def test_revise_pass_truncation_keeps_the_unrevised_translation_instead_of_aborting() -> None:
+    """review finding 7 regression, same class as the batch ladder: a
+    truncated/empty revise-pass response must degrade to 'keep the
+    un-revised translation' (exactly like a bad-mapping revise reply, see
+    ``test_revise_failure_keeps_the_draft_and_is_counted`` above), not
+    escape ``_revise_batch`` and abort the book. revise_v1 is the DEFAULT
+    style, so this path is not an edge case.
+    """
+    book = _paragraph_book(2)
+    style = get_style("revise_v1")
+    client = _ReviseTruncatingClient()
+    seen: list[TranslationStats] = []
+
+    result = translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=2,
+        style=style,
+        on_progress=seen.append,
+    )
+
+    assert len(result.segments) == 2
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    assert not any(seg.text.startswith(_REVISED_PREFIX) for seg in result.segments)
+    assert seen[-1].revision_failures == 1
+
+
 def test_book_context_memo_is_derived_once_and_injected_everywhere() -> None:
     """book_context_v1 derives one memo, injects it in every prompt, caches it."""
     book = _paragraph_book(6)
@@ -819,6 +1004,50 @@ def test_book_context_memo_reaches_the_single_segment_fallback() -> None:
     singles = [call for call in client.calls if call["kind"] == "single"]
     assert len(singles) == 2
     assert all("Reportorial nonfiction" in call["prompt"] for call in singles)
+
+
+def test_empty_book_context_memo_is_cached_and_not_rebilled_on_resume() -> None:
+    """review finding 20: an empty memo must still be cached.
+
+    Without the fix, only a non-empty memo is stored, so a killed-and-resumed
+    run repeats the derivation call on every resume — contradicting the
+    "resumed run neither re-bills the memo call" guarantee.
+    """
+    book = _paragraph_book(2)
+    style = get_style("book_context_v1")
+    cache = _memory_cache()
+    client = _EmptyBookContextClient()
+
+    translate_book(book, client=client, target_lang="sl", cache=cache, batch_size=2, style=style)
+    assert client.book_context_calls == 1
+
+    # The empty memo must be a cache HIT (row exists), not merely absent.
+    cached = cache.get_book_context(book_hash(book), "gpt-5-mini", "sl", "book_context_v1")
+    assert cached == ""
+
+    resumed = _EmptyBookContextClient()
+    translate_book(book, client=resumed, target_lang="sl", cache=cache, batch_size=2, style=style)
+    assert resumed.book_context_calls == 0, "resumed run must not re-derive a cached empty memo"
+
+
+def test_truncated_book_context_memo_degrades_to_no_memo_instead_of_aborting() -> None:
+    """review finding 7 regression, same class as the batch ladder and the
+    revise pass: a billed-but-truncated book-context call must degrade to
+    "translate without a memo" — the pre-existing behavior for a genuinely
+    blank reply — rather than let TruncatedCompletionError escape
+    ``build_book_context`` and abort the whole book.
+    """
+    book = _paragraph_book(2)
+    style = get_style("book_context_v1")
+    client = _TruncatingBookContextClient()
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=2, style=style
+    )
+
+    assert len(result.segments) == 2
+    assert all(seg.text.startswith(_PREFIX) for seg in result.segments)
+    assert all("BOOK STYLE MEMO" not in prompt for prompt in client.batch_prompts)
 
 
 def test_baseline_style_asks_for_no_extra_passes() -> None:
@@ -955,6 +1184,81 @@ def test_cli_skip_back_matter_reports_and_passes_through(monkeypatch, epub_build
     assert all(not s.text.startswith(_PREFIX) for s in index_segments)
     story_segments = [s for s in book.segments if s.chapter_title == "Chapter One"]
     assert any(s.text.startswith(_PREFIX) for s in story_segments)
+
+
+def test_cli_prints_fallback_spend_in_the_total(
+    monkeypatch: pytest.MonkeyPatch, epub_builder
+) -> None:
+    """review finding 5: a content-policy fallback's spend must reach the printed total.
+
+    Before the fix, ``_CostTrackingClient`` wrapped only the primary client, so
+    a batch retried via the fallback provider was real spend absent from the
+    CLI's "€ total" line. The printed total must equal ``stats.cost_eur``,
+    computed independently here via a direct ``translate_book`` call against
+    equivalent fresh clients/cache.
+    """
+    import berilo.assemble as assemble_module
+    import berilo.providers as providers_module
+    from berilo.normalize import normalize
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_ANTHROPIC_KEY)
+
+    def _fake_create_client(model, config):
+        if model == "claude-haiku-4-5":
+            return FakeLLMClient(model=model)
+        return _PolicyRefusingClient(model=model)
+
+    def _fake_build_epub(book, output_path, *, bilingual=False, source_book=None):
+        return output_path
+
+    monkeypatch.setattr(providers_module, "create_client", _fake_create_client)
+    monkeypatch.setattr(assemble_module, "build_epub", _fake_build_epub, raising=False)
+
+    epub = _write_epub(None, epub_builder)
+
+    # Independently compute the total translate_book actually spends against
+    # equivalent fresh clients/cache — this is what the CLI-printed total must
+    # equal once the fallback client's spend is included.
+    book = normalize(str(epub))
+    captured_stats: dict = {}
+    translate_book(
+        book,
+        client=_PolicyRefusingClient(model="gpt-5-mini"),
+        target_lang="sl",
+        cache=_memory_cache(),
+        glossary=None,
+        fallback_client=FakeLLMClient(model="claude-haiku-4-5"),
+        on_progress=lambda stats: captured_stats.__setitem__("stats", stats),
+        style=get_style("baseline_v1"),
+    )
+    expected_cost = captured_stats["stats"].cost_eur
+    assert expected_cost > 0, "the fallback batch must have real, nonzero cost"
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "translate",
+                str(epub),
+                "--model",
+                "gpt-5-mini",
+                "--to",
+                "sl",
+                "--yes",
+                "--no-glossary",
+                "--style",
+                "baseline_v1",
+                "--cache-db",
+                "cache.db",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    match = re.search(r"€([\d.]+) total", result.output)
+    assert match is not None, result.output
+    printed_total = float(match.group(1))
+    assert printed_total == pytest.approx(expected_cost, abs=1e-4)
 
 
 # --------------------------------------------------------------------------
@@ -1109,3 +1413,234 @@ def test_cli_default_style_also_skips_back_matter(monkeypatch, epub_builder) -> 
     assert any(
         s.text.startswith(_REVISED_PREFIX) for s in story_segments
     ), "under the default style, body prose must come back through the revision pass"
+
+
+# --------------------------------------------------------------------------
+# A3 — language-bound styles, anchored markers, and context_pairs=0.
+# Review findings 4 (HIGH), 14, 10.
+# --------------------------------------------------------------------------
+
+
+class _StrayMarkerClient(FakeLLMClient):
+    """Answers correctly, but segment 2's translation contains a literal ``[[2]]``.
+
+    This is review finding 14's exact scenario: the reply is a perfect 1:1
+    mapping, yet an unanchored scan counts a fourth marker and forces a strict
+    retry plus possibly a per-segment fallback — pure wasted spend.
+    """
+
+    def _batch_response(self, prompt: str) -> CompletionResult:
+        parts = []
+        for n, text in _extract_numbered(prompt):
+            body = f"{_PREFIX}{text}"
+            if n == 2:
+                body += " (element [[2]] of the array)"
+            parts.append(f"[[{n}]] {body}")
+        return self._result("\n".join(parts))
+
+
+def test_a_marker_inside_a_translation_does_not_force_a_strict_retry() -> None:
+    """Finding 14: prose containing ``[[2]]`` costs exactly one call, not three.
+
+    The call count IS the assertion — the defect's whole cost is the needless
+    retry ladder it triggers.
+    """
+    book = _paragraph_book(3)
+    client = _StrayMarkerClient()
+
+    result = translate_book(
+        book, client=client, target_lang="sl", cache=_memory_cache(), batch_size=3
+    )
+
+    assert client.translation_calls == 1, "one batch call: no strict retry, no per-segment fallback"
+    assert [call["kind"] for call in client.calls] == ["batch"]
+    # The stray marker stays inside its own translation rather than splitting it.
+    assert result.segments[1].text == f"{_PREFIX}Paragraph 1. (element [[2]] of the array)"
+    assert len(result.segments) == 3
+
+
+def test_parse_numbered_response_anchors_markers_to_line_starts() -> None:
+    """A mid-line ``[[n]]`` is prose; a line-leading one is a marker."""
+    reply = "[[1]] a\n[[2]] see [[2]] in the array\n[[3]] c"
+    assert parse_numbered_response(reply, 3) == ["a", "see [[2]] in the array", "c"]
+    # Leading indentation still marks a segment.
+    assert parse_numbered_response("  [[1]] a\n\t[[2]] b", 2) == ["a", "b"]
+
+
+def test_anchoring_never_adds_a_retry_for_a_single_line_reply() -> None:
+    """Markers packed onto one line parse exactly as they did before anchoring.
+
+    Anchoring may only remove needless retries; introducing one for a reply the
+    old parser accepted would just move finding 14's cost somewhere else.
+    """
+    assert parse_numbered_response("[[1]] a [[2]] b [[3]] c", 3) == ["a", "b", "c"]
+    # A genuinely broken mapping still fails, under either scan.
+    with pytest.raises(ValueError):
+        parse_numbered_response("[[1]] a [[3]] c", 2)
+
+
+def test_context_pairs_zero_produces_no_context_block() -> None:
+    """Finding 10: ``0`` disables rolling context instead of feeding the whole book."""
+    book = _paragraph_book(6)
+    client = FakeLLMClient()
+
+    translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=1,
+        context_pairs=0,
+    )
+
+    assert len(client.batch_prompts) == 6
+    for prompt in client.batch_prompts:
+        assert "CONTEXT (already translated" not in prompt
+    # The defect's signature: the last batch carrying every prior pair.
+    assert "Paragraph 0." not in client.batch_prompts[-1]
+
+
+def test_context_pairs_two_still_trims_to_two() -> None:
+    """The positive case is unchanged: at most N pairs ride along."""
+    book = _paragraph_book(6)
+    client = FakeLLMClient()
+
+    translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=1,
+        context_pairs=2,
+    )
+
+    last = client.batch_prompts[-1]
+    assert last.count("SOURCE: ") == 2, "exactly two pairs, never the whole book"
+    assert "Paragraph 4." in last and "Paragraph 3." in last
+    assert "Paragraph 0." not in last
+
+
+def test_translate_book_refuses_a_style_bound_to_another_language() -> None:
+    """Finding 4: a Slovenian editor pass over a German draft never reaches the API."""
+    from berilo.prompts import StyleLanguageError, get_style
+
+    book = _paragraph_book(3)
+    client = FakeLLMClient()
+
+    with pytest.raises(StyleLanguageError, match="revise_v1"):
+        translate_book(
+            book,
+            client=client,
+            target_lang="de",
+            cache=_memory_cache(),
+            style=get_style("revise_v1"),
+        )
+
+    assert client.calls == [], "the refusal must happen before anything is billed"
+
+
+def test_estimate_cost_refuses_a_style_bound_to_another_language() -> None:
+    """The dry run refuses too: quoting a price invites the user to approve it."""
+    from berilo.prompts import StyleLanguageError, get_style
+
+    with pytest.raises(StyleLanguageError):
+        estimate_cost(
+            _paragraph_book(3),
+            model="gpt-5-mini",
+            target_lang="de",
+            style=get_style("revise_v1"),
+        )
+
+
+def test_translate_book_accepts_the_generic_two_pass_style_for_any_target() -> None:
+    """revise_generic_v1 covers --to de with a second pass and no language contract."""
+    from berilo.prompts import get_style
+
+    book = _paragraph_book(3)
+    client = FakeLLMClient()
+    style = get_style("revise_generic_v1")
+
+    result = translate_book(
+        book,
+        client=client,
+        target_lang="de",
+        cache=_memory_cache(),
+        batch_size=3,
+        style=style,
+    )
+
+    assert client.revise_calls == 1, "the generic style still runs its editor pass"
+    for prompt in client.batch_prompts:
+        assert "Translate into: de." in prompt
+    for call in client.calls:
+        assert "Slovenian" not in (call["system"] or "")
+        assert "šumniki" not in (call["system"] or "")
+    assert all(seg.text.startswith(_REVISED_PREFIX) for seg in result.segments)
+
+
+def test_cli_to_de_resolves_a_generic_style_and_runs_no_slovenian_editor_pass(
+    monkeypatch, epub_builder
+) -> None:
+    """The Verify line, end to end: ``--to de`` must not run a Slovenian editor pass."""
+    import berilo.assemble as assemble_module
+    import berilo.providers as providers_module
+
+    clients: list[FakeLLMClient] = []
+
+    def _make_client(model, config):
+        client = FakeLLMClient(model=model)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(providers_module, "create_client", _make_client)
+    monkeypatch.setattr(
+        assemble_module,
+        "build_epub",
+        lambda book, output_path, *, bilingual=False, source_book=None: output_path,
+        raising=False,
+    )
+
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            [
+                "translate",
+                str(epub),
+                "--model",
+                "gpt-5-mini",
+                "--to",
+                "de",
+                "--yes",
+                "--no-glossary",
+                "--cache-db",
+                "cache.db",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "revise_generic_v1" in result.output, "the resolved style must be in the run summary"
+    assert "resolved for 'de'" in result.output
+    assert clients, "a client must have been constructed"
+    for client in clients:
+        for call in client.calls:
+            system = call["system"] or ""
+            assert "native Slovenian editor" not in system
+            assert "SLOVENIAN STYLE CONTRACT" not in system
+
+
+def test_cli_refuses_a_slovenian_style_against_a_german_target(epub_builder) -> None:
+    """The mismatch is loud and actionable, not a silently contradictory paid run."""
+    epub = _write_epub(None, epub_builder)
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(
+            cli,
+            ["translate", str(epub), "--dry-run", "--style", "revise_v1", "--to", "de"],
+        )
+
+    assert result.exit_code != 0
+    assert "revise_v1" in result.output
+    assert "revise_generic_v1" in result.output, "the refusal must name what to use instead"
+    assert "Dry run" not in result.output, "no estimate may be printed for a refused pair"

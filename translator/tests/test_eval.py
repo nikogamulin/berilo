@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from berilo.cache import CallRecord, SegmentTranslation, TranslationCache, book_hash
 from berilo.cli import cli
 from berilo.eval import runner, sampling
 from berilo.eval.judge import Judge, JudgeError, parse_score
@@ -1071,3 +1072,48 @@ def test_cli_eval_dry_run_zero_calls_reports_repeat_multiplier(
     # 10 pairs -> 20 base judge calls, x4 repeats -> 80; no calls actually made.
     assert "80" in result.output
     assert not dump_path.exists()  # dry-run writes no dump either
+
+
+# --------------------------------------------------------------------------
+# T7 actual-cost accounting (review finding 11).
+# --------------------------------------------------------------------------
+
+
+def test_read_cache_facts_charges_only_the_evaluated_model(tmp_path: Path) -> None:
+    """T7's cost must not sum an earlier, more expensive model's spend.
+
+    The glossary query always filtered on ``model``; the cost query on the same
+    rows did not. A book translated first with an expensive model and re-run
+    with ``gpt-5-mini`` therefore charged the mini run with both runs' spend and
+    inflated the per-100k-word figure.
+    """
+    source = _book_with_notes(body_per_chapter=2)
+    bhash = book_hash(source)
+    db = tmp_path / "translations.db"
+
+    expensive = CallRecord(kind="batch", input_tokens=100, output_tokens=100, cost_eur=5.0)
+    cheap = CallRecord(kind="batch", input_tokens=100, output_tokens=100, cost_eur=0.25)
+    rows = [SegmentTranslation(segment_hash="s1", text="prevod", cost_eur=0.0)]
+    with TranslationCache(db) as cache:
+        cache.store_batch(bhash, "gpt-5", "sl", rows, expensive, "baseline_v1")
+        cache.store_batch(bhash, "gpt-5-mini", "sl", rows, cheap, "baseline_v1")
+
+    _, cost = runner.read_cache_facts(db, source, "gpt-5-mini", "sl")
+    assert cost == pytest.approx(0.25)
+
+    _, expensive_cost = runner.read_cache_facts(db, source, "gpt-5", "sl")
+    assert expensive_cost == pytest.approx(5.0)
+
+
+def test_read_cache_facts_returns_the_glossary_for_the_evaluated_model(tmp_path: Path) -> None:
+    """The glossary lookup stays model-scoped after the prompt-version change."""
+    source = _book_with_notes(body_per_chapter=2)
+    bhash = book_hash(source)
+    db = tmp_path / "translations.db"
+    with TranslationCache(db) as cache:
+        cache.store_glossary(bhash, "gpt-5-mini", "sl", {"Kaplan": "Kaplan"})
+
+    glossary, _ = runner.read_cache_facts(db, source, "gpt-5-mini", "sl")
+    assert glossary == {"Kaplan": "Kaplan"}
+    other, _ = runner.read_cache_facts(db, source, "gpt-5", "sl")
+    assert other is None

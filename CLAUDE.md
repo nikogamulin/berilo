@@ -1,73 +1,155 @@
-# CLAUDE.md — Berilo
+# CLAUDE.md — berilo
 
 > Context for Claude Code in this repository. **Keep this file updated** after
-> major changes, milestones, or new constraints. Details live in `docs/` —
-> link, don't duplicate.
+> major changes, milestones, or new constraints. Details live in `docs/` and
+> `contracts/` — link, don't duplicate.
+
+**This repository is the Python translator and the contracts.** It is public and
+MIT. The reader apps and the cloud service are separate, private repositories.
 
 ---
 
-## 1. Project Goals
+## 0. Before you write anything: is this the right repository?
 
-Berilo lets readers translate books (PDF/EPUB/MOBI) into their own language
-with meaning-preserving LLM translation, and read them in a purpose-built
-Android app with an LLM dictionary, paragraph interpretation, and notes.
-First user: Niko, English → Slovenian, Boox e-ink tablet.
+Berilo is five repositories. Work lands in the **wrong** one easily, because
+they share vocabulary — every one of them has a "reader", a "translate", a
+"sync".
 
-**Three phases, shipped gradually — each verified before the next starts:**
+| If the request is about… | It belongs in | Here? |
+|---|---|---|
+| the Python translator, the `berilo` CLI, prompts, the eval harness | **here** | yes |
+| a contract — sync wire format, the core spec, design guidelines | **here** (`contracts/`) | yes |
+| the Android reader app, Kotlin, Compose, Readium, the Boox | `../berilo-android/` | no |
+| the iOS app, Swift, BeriloKit, Xcode, the App Store | `../berilo-ios/` | no |
+| the web app, berilo.app, sync service, Supabase, Clerk, cloud translation | `../berilo-cloud/` | no |
+| a cross-repo runbook, the workspace manifest, `bin/berilo` | `../` (the workspace repo) | no |
 
-1. **Translator CLI** (`translator/`, Python) — file in, translated EPUB out. Open source. **This repo.**
-2. **Reader apps** — Android (separate **private** repo `berilo-android`, Kotlin/Compose/Readium) and iOS (separate **private** repo `berilo-ios`, Swift). Offline readers with LLM features. Closed source.
-3. **Cloud service** (separate **private** repo `berilo-cloud`) — Vercel/Next.js + Supabase sync and web note review. Closed source; only the API contract lives here.
+If the answer is "no", **stop and say so** rather than writing something
+approximate here. There is no Kotlin, Swift, or TypeScript in this repository,
+and a change made here for an app that lives elsewhere is a change nobody will
+find.
 
-Full spec: [`docs/project_spec.md`](docs/project_spec.md).
+### The path trap
 
-## 2. Architecture Overview
+The four app repos are cloned as **siblings inside the workspace checkout**, and
+that checkout is *also* called `berilo`:
 
 ```
-translator/ (Python CLI)        berilo-android (private)      berilo-cloud (private)
- pdf|epub|mobi → normalize →     Readium reader + Room  ⇄     Next.js/Vercel + Supabase
- translate → verify → EPUB       LLM dictionary/notes          notes/highlights sync
-        │                       berilo-ios (private)
-        │                        Swift port of the same
-        └── user's own LLM API key; cheap models by default; every model user-overridable
-
-This repo is the **reference implementation** of the translation core. The
-apps are ports of it; `berilo-cloud` imports it as a package. See the
-`berilo-project` workspace repo for the full map.
+workspace/berilo/          <- the workspace repo (named berilo-project on GitHub)
+├── berilo/                <- THIS repo
+├── berilo-android/  berilo-ios/  berilo-cloud/
+└── docs/ bin/ repos.toml
 ```
 
-**Key architectural rules:**
-- **BYO API key.** Keys come from `.env` (CLI) or encrypted device storage (app). Never in code, logs, or git.
-- **Cheapest model that does the job** is the default (`gpt-5-mini`); users can select any OpenAI/Anthropic model. One provider interface, no provider lock-in.
-- **Meaning preservation over literalism** — the translation prompt-and-verify design is the product.
-- **Segment integrity:** source↔target mapping is 1:1; nothing is silently dropped; failures are loud and resumable.
-- **Books never leave the device/machine** except as segment batches to the LLM API. Phase 3 syncs only user-created data.
-- **EPUB is the canonical interchange format** (translator output = app input).
+So from here the workspace repo is `..` and its runbooks are `../docs/runbooks/`
+— never `../berilo-project/docs/`, which does not exist. Check a cross-repo path
+resolves before committing it; `[ -e path ] && echo ok` costs nothing.
 
-## 3. Design & UX
+## 1. What this repo is
 
-See [`docs/design_guidelines.md`](docs/design_guidelines.md). The text is the
-hero; chrome recedes. E-ink first (Boox), Literata + Inter, one accent color,
-no engagement mechanics, WCAG AA.
+Berilo translates books (PDF/EPUB/MOBI) into a reader's own language with
+meaning-preserving LLM translation. **This repository is the translation
+engine** — the CLI that does it, and the contracts that everything else
+implements. First user: Niko, English → Slovenian.
 
-## 4. Constraints and Policies
+The honest framing, because the README has to defend it: *the engine is open and
+independently verifiable*, not *Berilo is open source*. Anyone can run the
+translator on their own books with their own API key, read exactly what it sends
+to a provider, and check the output. The reader apps and the cloud service are
+separate private products.
 
-- **No piracy features** — user supplies files they own; no downloading/sharing/DRM stripping.
-- **Secrets:** `.env` is gitignored; before every commit run the secret scan (§7). API keys in the app live in EncryptedSharedPreferences only.
-- **`data/` is gitignored** — copyrighted books; never commit or upload.
-- **Costs are visible:** every translation run reports estimated (dry-run) and actual cost. Never burn API budget silently; full-book runs need explicit go-ahead.
-- **Python:** 3.10+, type hints, Google docstrings, Black, logging not print, named constants. **Kotlin:** Compose, no blocking on main thread. **TS (Phase 3):** functional components, named exports, no bare `any`.
-- **Numbers with uncertainty:** sampled metrics report bootstrap CIs (rubric scoring, cost estimates).
-- **Open/closed boundary:** nothing service-private in this repo; nothing from `berilo-cloud` copied here except the API contract.
-- **Supabase (Phase 3):** always paginate (1000-row default); RLS on every table; test time logic across DST.
+| Milestone | What | Where it is tracked |
+|---|---|---|
+| `m1` | Translator CLI — normalize, translate, assemble, eval | here, complete |
+| `m2`, `m4` | Android reader and on-device translation | `berilo-android` |
+| `m3` | Cloud sync and web review | `berilo-cloud` |
+| `m5` | iOS app | `berilo-ios` |
 
-## 5. Repo / Git Etiquette
+Full spec: [`docs/project_spec.md`](docs/project_spec.md). Cross-repo index:
+`../docs/roadmap.md`.
 
-- Remote: `git@github.com:nikogamulin/berilo.git`, default branch `main`. Feature branches → `main` via PR.
-- [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:` — imperative mood, reference issue numbers.
-- Small, focused PRs. Never force-push shared branches. MIT license, author: Niko Gamulin, PhD.
+## 2. Architecture
 
-## 6. Build Loop & Agentic Workflow
+```
+translator/ (Python CLI)          berilo-android (private)     berilo-cloud (private)
+ pdf|epub|mobi → normalize →       Kotlin port of the core  ⇄   imports this package
+ translate → verify → EPUB         Readium reader + Room        Next.js/Vercel + Supabase
+        │                         berilo-ios (private)
+        │                          Swift port of the core
+        └── the user's own LLM API key; cheap models by default; all overridable
+```
+
+This repo is the **reference implementation** of the translation core. Kotlin
+and Swift are hand-written ports held to it by conformance vectors;
+`berilo-cloud` imports it as a package and so is conformant by construction.
+See [`contracts/core-spec.md`](contracts/core-spec.md).
+
+**Architectural rules:**
+- **BYO API key.** Keys come from `.env`. Never in code, logs, or git.
+- **Cheapest model that does the job** is the default (`gpt-5-mini`); any
+  OpenAI/Anthropic model is selectable. One provider interface, no lock-in.
+- **Meaning preservation over literalism** — the prompt-and-verify design is the
+  product.
+- **Segment integrity:** source↔target mapping is 1:1; nothing is silently
+  dropped; failures are loud and resumable.
+- **Books never leave the machine** except as segment batches to the LLM API.
+- **EPUB is the canonical interchange format** — translator output is app input.
+
+## 3. Contracts: this repo owns them, so they change here
+
+`contracts/` holds what binds the other repositories:
+[`sync_api.md`](contracts/sync_api.md),
+[`core-spec.md`](contracts/core-spec.md),
+[`design_guidelines.md`](contracts/design_guidelines.md), and
+[`conformance.md`](contracts/conformance.md) with the generated
+`contracts/vectors/`.
+
+Three rules, and the third is the one that gets broken:
+
+1. A contract changes **here first**, then in every implementer the workspace
+   manifest lists under `contracts_implemented`.
+2. An implementer that disagrees with a contract has a bug **in the
+   implementer** — until the contract changes here.
+3. **Vectors are generated, never edited.** If a vector and a port disagree, the
+   port is wrong. If a vector and this Python disagree, regenerate the vector.
+   Hand-editing one to make a suite green destroys the only evidence that the
+   platforms still agree.
+
+See [`contracts/README.md`](contracts/README.md).
+
+## 4. Constraints and policies
+
+- **No piracy features** — the user supplies files they own; no downloading,
+  sharing, or DRM stripping.
+- **Open/closed boundary.** This repo is world-readable and permanent. Nothing
+  service-private — API keys, Supabase project refs, Clerk secrets, infra
+  topology, cost or revenue figures — may enter it, in code, docs, tests, or
+  commit messages. Only a contract change flows back here from a private repo,
+  and only as a contract change.
+- **Secrets:** `.env` is gitignored; run the secret scan (§7) before every
+  commit.
+- **`data/` is gitignored** — copyrighted books; never commit or upload. This is
+  also why `contracts/vectors/` may hold only derived values.
+- **Costs are visible:** every run reports estimated (dry-run) and actual cost.
+  Never burn API budget silently; full-book runs need explicit go-ahead.
+- **Python:** 3.10+, type hints, Google docstrings, Black, logging not print,
+  named constants.
+- **Numbers with uncertainty:** sampled metrics report bootstrap CIs.
+
+## 5. Repo / git etiquette
+
+- Remote: `git@github.com:nikogamulin/berilo.git`, default branch `main`.
+  Feature branches → `main` via PR.
+- [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`,
+  `chore:`, `docs:`, `refactor:`, `test:` — imperative mood, reference issue
+  numbers.
+- Small, focused PRs. Never force-push shared branches. MIT, author: Niko
+  Gamulin, PhD.
+- The Android app is still in this repo's **history** under MIT, and stays
+  there. The split made future Android work private; it did not retract what was
+  already published.
+
+## 6. Build loop and agentic workflow
 
 ### 6.1 Knowledge tiers (read before working, promote as you learn)
 
@@ -78,88 +160,93 @@ no engagement mechanics, WCAG AA.
 | **Tier 3** — live research/debugging | in-session | expensive — record results into Tier 2 |
 
 Every iteration: read `docs/findings.md` first → work → record new findings →
-promote recurring/endorsed findings to §9. The loop's purpose is to make
-rediscovery unnecessary.
+promote recurring ones to §9. The loop exists to make rediscovery unnecessary.
 
 ### 6.2 The outer loop — rubric-driven
 
-The process optimizes the rubrics in [`docs/rubric.md`](docs/rubric.md)
-(T = translation quality, R = reader experience, S = sync/cloud,
-D = process health). Per iteration: **one hypothesis → implement (RPIT) →
-score the affected rubric via its defined procedure → keep** (score not
-regressed, tests green) **or discard** (`git reset --hard HEAD~1`) → append a
-row to [`loops/build/ledger.jsonl`](loops/build/ledger.jsonl)
-(`{"date","hypothesis","result","kept","rubric_delta","cost_eur"}`) → record
-findings. Rubric scores go to `loops/build/rubric_scores.jsonl`.
+This repo is scored on **Rubric T** (translation quality),
+[`docs/rubric.md`](docs/rubric.md). R, S and D moved to the repos that can
+actually run them — `berilo-android`, `berilo-cloud`, and the workspace repo.
+
+Per iteration: **one hypothesis → implement (RPIT) → score Rubric T by its
+defined procedure → keep** (score not regressed, tests green) **or discard**
+(`git reset --hard HEAD~1`) → append a row to
+[`loops/build/ledger.jsonl`](loops/build/ledger.jsonl) → record findings. Scores
+go to `loops/build/rubric_scores.jsonl`.
 
 ### 6.3 RPIT inner cycle — Research → Plan → Implement → Test
 
-- **Research** (optional): only when unknowns block confident planning; findings land in the plan issue or `docs/findings.md`.
-- **Plan:** [`docs/project_plan.md`](docs/project_plan.md) is the task list. Every task has a **Verify** line — an executable command or measured threshold. **A task may be checked off only in the session where its Verify line was run and passed.** After S0.3, stories are mirrored to GitHub issues (label `story`, milestone `m0`–`m3`, checkbox bodies); the issue is then the progress source of truth.
-- **Implement:** feature branch + PR linked `Refs #<issue>`; update checkboxes as you go.
-- **Test:** `make test` in the touched component + the story's Verify line. Pass → merge, close. Fail → bug issue (label `bug`, `Refs #<story>`), enter the debug loop: comment each attempt (tried/result/next hypothesis) until fixed.
+- **Research** (optional): only when unknowns block confident planning; findings
+  land in the plan issue or `docs/findings.md`.
+- **Plan:** [`docs/project_plan.md`](docs/project_plan.md) is the task list.
+  Every task has a **Verify** line — an executable command or measured
+  threshold. **A task may be checked off only in the session where its Verify
+  line was run and passed.**
+- **Implement:** feature branch + PR linked `Refs #<issue>`.
+- **Test:** `make test` in `translator/` plus the story's Verify line.
 
-**Debugging protocol:** fresh build first; if root cause not found after 10
-tool calls, stop and list 3–5 alternative hypotheses; after a fix, test actual
-user-facing behavior and check regressions before committing.
+**Debugging protocol:** fresh build first; if the root cause is not found after
+10 tool calls, stop and list 3–5 alternative hypotheses; after a fix, test
+actual user-facing behaviour and check regressions before committing.
 
 ### 6.4 Multi-agent execution
 
-Single-story work runs RPIT directly in the main loop. **Assignments spanning
-more than one story** run supervisor-orchestrated:
-
-Pipeline and agent definitions live in [`.claude/`](.claude/) — invoke the
-**`/orchestrate` skill** (`.claude/skills/orchestrate/SKILL.md`) for multi-story
-work; use **`/verify-implementation`** before claiming any story done.
+Single-story work runs RPIT directly. **Assignments spanning more than one
+story** run supervisor-orchestrated: invoke the **`/orchestrate` skill**
+(`.claude/skills/orchestrate/SKILL.md`); use **`/verify-implementation`** before
+claiming any story done.
 
 | Role | Agent (`.claude/agents/`) | Model | Lane |
 |------|------|-------|------|
-| **Supervisor** (main loop) | — | session model | plan authoring, issue creation, wave scheduling, PR merge, all shared-state writes (`docs/findings.md`, `loops/**`, plan checkboxes, §9), all serialized resources (Boox device installs, full-book paid translation runs, GitHub pushes, Vercel/Supabase), talking to Niko |
+| **Supervisor** (main loop) | — | session model | plan authoring, issue creation, wave scheduling, PR merge, all shared-state writes (`docs/findings.md`, `loops/**`, plan checkboxes, §9), all serialized resources (paid full-book runs, GitHub pushes), talking to Niko |
 | Plan critic | `plan-critic` | opus | attacks a spec/plan before issues: unverifiable Verify lines, contradictions with §9/findings, footprint collisions, cost realism |
-| Task implementer | `task-implementer` | sonnet (opus for pipeline-core/reader-rendering/sync stories) | ONE story per agent, isolated worktree, to the bar: tests written + green (LLM calls mocked), offline part of the Verify line satisfied; structured report with `PROPOSED-FINDINGS` |
+| Task implementer | `task-implementer` | sonnet (opus for pipeline-core stories) | ONE story per agent, isolated worktree, tests written and green (LLM calls mocked); structured report with `PROPOSED-FINDINGS` |
 | Impl reviewer | `impl-reviewer` | opus | adversarial pre-merge diff review: scope, §9 compliance, test honesty, secret/cost-safety scan |
-| Defect investigator | `defect-investigator` | opus | read-only forensics on ONE defect (rubric regression, bad translation batch, app bug): classifies and returns a routing verdict + draft task |
+| Defect investigator | `defect-investigator` | opus | read-only forensics on ONE defect; returns a routing verdict + draft task |
 
 **Invariants:** shared state is single-writer (Supervisor only); parallel
-implementers only on disjoint file footprints, ≤3 concurrent; paid API runs
-and device testing never delegated to subagents; confirmation gates bind the
-Supervisor too. A plan or diff contradicting a recorded finding bounces.
+implementers only on disjoint file footprints, ≤3 concurrent; paid API runs are
+never delegated to subagents; confirmation gates bind the Supervisor too. A plan
+or diff contradicting a recorded finding bounces.
 
-## 7. Frequently Used Commands
+## 7. Frequently used commands
 
 ```bash
-# Environment
-cp .env.example .env                       # then fill keys (already done locally)
+cp .env.example .env                       # then fill keys
 
-# Phase 1 (once S0.2 lands)
 cd translator && pip install -e ".[dev]"
 make test && make lint
-berilo doctor                            # provider smoke test (1 sentence, ~€0)
-berilo inspect data/examples/<file>      # extraction preview, no API cost
+berilo doctor                              # provider smoke test (1 sentence, ~€0)
+berilo inspect data/examples/<file>        # extraction preview, no API cost
 berilo translate <file> --to sl --dry-run  # cost estimate — ALWAYS before a full run
+berilo serve                               # hand a translated book to a tablet over the LAN
 berilo eval <translated.epub> --sample 40 --seed 42   # Rubric T score + CI
 
-# Phase 2 — the Android app lives in the private berilo-android repo now.
-# cd ../berilo-android && ./gradlew assembleDebug test
+# Regenerate the conformance vectors after any change to the core (from the repo root)
+PYTHONPATH=translator python3 -m berilo.identity_fixture
+PYTHONPATH=translator python3 contracts/gen/generate_assemble_vectors.py
 
-# Secret scan — run before EVERY commit (exclusions = docs that describe the scan itself)
-git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!docs/rubric.md' ':!.claude/' && echo LEAK || echo clean
+# Secret scan — run before EVERY commit (exclusions = docs that describe the scan)
+git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!.claude/' && echo LEAK || echo clean
 ```
 
 ## 8. References
 
 | Document | Path | Contents |
 |----------|------|----------|
-| Product spec | [`docs/project_spec.md`](docs/project_spec.md) | Problem, users, all 3 phases, pipeline design, stack decisions, non-goals |
-| Project plan | [`docs/project_plan.md`](docs/project_plan.md) | Task list — phases m0–m3, stories with points and **Verify** lines |
-| Rubrics | [`docs/rubric.md`](docs/rubric.md) | T/R/S scoring procedures + weights + gates; process-health checklist D |
-| Design guidelines | [`docs/design_guidelines.md`](docs/design_guidelines.md) | Principles, typography, e-ink rules, components, anti-patterns |
-| Findings (Tier 2) | [`docs/findings.md`](docs/findings.md) | Session-discovered gotchas and working commands — scan first |
-| Ledger | [`loops/build/ledger.jsonl`](loops/build/ledger.jsonl) | One row per kept/discarded iteration |
-| Rubric scores | [`loops/build/rubric_scores.jsonl`](loops/build/rubric_scores.jsonl) | Score history with commit + dimensions |
-| Orchestration | [`.claude/skills/orchestrate/SKILL.md`](.claude/skills/orchestrate/SKILL.md) | Supervisor pipeline (intake → spec+critic → waves → review → land → score); agents in [`.claude/agents/`](.claude/agents/); verification bar in [`.claude/skills/verify-implementation/SKILL.md`](.claude/skills/verify-implementation/SKILL.md); session reflection hook in [`.claude/hooks/`](.claude/hooks/) |
+| Contracts | [`contracts/README.md`](contracts/README.md) | what binds the other repos, and the rule for changing it |
+| Core spec | [`contracts/core-spec.md`](contracts/core-spec.md) | the seven surfaces the ports must agree on |
+| Conformance | [`contracts/conformance.md`](contracts/conformance.md) | what a port must assert; vector release and vendoring; the current gaps |
+| Sync contract | [`contracts/sync_api.md`](contracts/sync_api.md) | wire format and SQL schema |
+| Design guidelines | [`contracts/design_guidelines.md`](contracts/design_guidelines.md) | principles, typography, e-ink rules, components, anti-patterns |
+| Product spec | [`docs/project_spec.md`](docs/project_spec.md) | problem, users, pipeline design, stack decisions, non-goals |
+| Project plan | [`docs/project_plan.md`](docs/project_plan.md) | this repo's stories with points and **Verify** lines |
+| Rubric T | [`docs/rubric.md`](docs/rubric.md) | translation-quality scoring procedure, weights, gates |
+| Findings (Tier 2) | [`docs/findings.md`](docs/findings.md) | session-discovered gotchas and working commands — scan first |
+| Ledger | [`loops/build/ledger.jsonl`](loops/build/ledger.jsonl) | one row per kept/discarded iteration |
+| Workspace map | `../README.md`, `../docs/` | the five repos, runbooks, contracts index |
 
-## 9. Learned Rules — Tier 1 canonical (add as mistakes happen)
+## 9. Learned rules — Tier 1 canonical (add as mistakes happen)
 
 <!-- When a mistake happens, don't just fix it — add the rule.
      Format: what went wrong → what the rule is now.
@@ -191,3 +278,14 @@ git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!docs/
   artifact CLASS (type/fold/exclude whole categories), never by instance;
   any pool change redraws a seeded sample, so per-instance fixes are
   non-monotonic** (evidence in `docs/findings.md`).
+- A generator that writes into another repository's tree breaks the moment that
+  tree moves, and breaks *silently* in the direction that matters — the vectors
+  simply stop being regenerated. `identity_fixture.py` wrote into
+  `android/app/src/test/`, and `generate_assemble_vectors.py` sat in the Android
+  repo while importing `berilo.assemble`, so after the split neither could run
+  anywhere → **a generator lives in the same repository as the code it executes
+  and writes to `contracts/vectors/`; ports vendor a copy.**
+- The secret scan was once made green by appending an exclusion instead of
+  fixing the content, after which every commit reported clean while a real home
+  path sat in the repo → **when the scan is red, fix the content.** An
+  exclusion is only ever for a file that documents the scan itself.

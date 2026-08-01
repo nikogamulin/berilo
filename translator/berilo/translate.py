@@ -48,10 +48,16 @@ from berilo.cache import (
     book_hash,
     segment_hash,
 )
-from berilo.glossary import Glossary
+from berilo.glossary import Glossary, glossary_identity
 from berilo.models import Book, Segment
-from berilo.prompts import BASELINE, TranslationStyle
-from berilo.providers.base import CompletionResult, ContentPolicyError, LLMClient
+from berilo.prompts import BASELINE, TranslationStyle, ensure_supports
+from berilo.providers.base import (
+    CompletionResult,
+    ContentPolicyError,
+    EmptyCompletionError,
+    LLMClient,
+    TruncatedCompletionError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +75,16 @@ DEFAULT_BATCH_SIZE = 10
 DEFAULT_CONTEXT_PAIRS = 2
 
 #: Marker wrapping each segment's ordinal in the prompt and expected in the
-#: reply, e.g. ``[[1]]``.
-_MARKER_RE = re.compile(r"\[\[(\d+)\]\]")
+#: reply, e.g. ``[[1]]``. Anchored to the start of a line because that is where
+#: :func:`_numbered_source_block` puts it and where both system prompts demand
+#: it back ("each on its own line"); a ``[[2]]`` occurring *inside* a
+#: translation is prose, not a marker (review finding 14).
+_ANCHORED_MARKER_RE = re.compile(r"^[ \t]*\[\[(\d+)\]\]", re.MULTILINE)
+
+#: The pre-anchoring pattern, kept as a second parsing attempt so a reply that
+#: puts several markers on one line still parses exactly as it did before —
+#: anchoring may only remove needless retries, never add one.
+_LOOSE_MARKER_RE = re.compile(r"\[\[(\d+)\]\]")
 
 # --------------------------------------------------------------------------
 # Cost-estimation constants.
@@ -282,21 +296,21 @@ def _build_batch_prompt(
     return "\n\n".join(blocks)
 
 
-def parse_numbered_response(text: str, expected_count: int) -> list[str]:
-    """Parse a ``[[n]] translation`` reply into an ordered list of translations.
+def _split_on_markers(text: str, pattern: re.Pattern[str], expected_count: int) -> list[str]:
+    """Split ``text`` on ``pattern``'s markers into a 1:1 list of translations.
 
     Args:
         text: The model's reply.
+        pattern: Marker pattern to scan with (anchored or loose).
         expected_count: The number of segments that were sent.
 
     Returns:
-        A list of ``expected_count`` non-empty translations, in order 1..n.
+        ``expected_count`` non-empty translations, in order 1..n.
 
     Raises:
-        ValueError: If the reply has missing, extra, duplicate, or empty
-            markers — i.e. it does not map 1:1 onto the sent segments.
+        ValueError: If this pattern does not yield exactly that mapping.
     """
-    matches = list(_MARKER_RE.finditer(text))
+    matches = list(pattern.finditer(text))
     parsed: dict[int, str] = {}
     for i, match in enumerate(matches):
         index = int(match.group(1))
@@ -318,6 +332,41 @@ def parse_numbered_response(text: str, expected_count: int) -> list[str]:
     return out
 
 
+def parse_numbered_response(text: str, expected_count: int) -> list[str]:
+    """Parse a ``[[n]] translation`` reply into an ordered list of translations.
+
+    Markers are looked for at the **start of a line** first, because that is
+    where both the numbered source block and the system prompts put them. A
+    ``[[2]]`` that occurs mid-sentence inside a translation ("element ``[[2]]``
+    of the array") is therefore prose, not a fourth marker in a three-segment
+    batch — before this anchoring it forced a strict retry and possibly a
+    per-segment fallback, pure wasted spend (review finding 14).
+
+    If line-anchored scanning does not produce a 1:1 mapping, the reply is
+    re-scanned with the old unanchored pattern before failing, so a model that
+    packs several markers onto one line parses exactly as it always did.
+    Anchoring can only remove retries, never introduce one.
+
+    Args:
+        text: The model's reply.
+        expected_count: The number of segments that were sent.
+
+    Returns:
+        A list of ``expected_count`` non-empty translations, in order 1..n.
+
+    Raises:
+        ValueError: If the reply has missing, extra, duplicate, or empty
+            markers under both scans — i.e. it does not map 1:1 onto the sent
+            segments.
+    """
+    try:
+        return _split_on_markers(text, _ANCHORED_MARKER_RE, expected_count)
+    except ValueError:
+        # Fall through to the historical unanchored scan, which also owns the
+        # diagnostic message when the reply is genuinely not 1:1.
+        return _split_on_markers(text, _LOOSE_MARKER_RE, expected_count)
+
+
 def _translate_single(
     segment: Segment,
     *,
@@ -334,8 +383,14 @@ def _translate_single(
     batch path, so a batch that degrades to this fallback keeps the style's
     quality contract instead of silently reverting to baseline.
 
+    This is the last rung of the retry ladder — there is no smaller unit to
+    degrade to — so an empty or truncated response (:class:`EmptyCompletionError`
+    / :class:`TruncatedCompletionError`) is a loud failure here, unlike at the
+    batch level where the same conditions trigger a smaller retry instead.
+
     Raises:
-        TranslationError: If the model returns an empty translation.
+        TranslationError: If the model returns an empty translation, or the
+            provider reports the call was empty/truncated.
     """
     blocks: list[str] = [f"Translate into {target_lang}."]
     memo = _book_context_block(book_context)
@@ -344,7 +399,14 @@ def _translate_single(
     if glossary is not None and not glossary.is_empty():
         blocks.append(glossary.to_prompt_block())
     blocks.append(segment.text)
-    result = client.complete(prompt="\n\n".join(blocks), system=style.single_system)
+    try:
+        result = client.complete(prompt="\n\n".join(blocks), system=style.single_system)
+    except (EmptyCompletionError, TruncatedCompletionError) as exc:
+        raise TranslationError(
+            f"Empty translation for segment {segment.id} "
+            f"(chapter {segment.chapter_index} "
+            f"{segment.chapter_title!r}) in book {book_title!r}: {exc}"
+        ) from exc
     text = result.text.strip()
     if not text:
         raise TranslationError(
@@ -454,6 +516,45 @@ def _translate_batch(
     )
 
 
+def _complete_batch_rung(
+    client: LLMClient,
+    *,
+    prompt: str,
+    system: str | None,
+    results: list[CompletionResult],
+    segment_count: int,
+) -> CompletionResult | None:
+    """Call ``client.complete()`` for one batch rung, degrading like a bad mapping.
+
+    An empty or truncated response (:class:`EmptyCompletionError` /
+    :class:`TruncatedCompletionError`) is a batch-level failure of exactly the
+    same shape as a 1:1 mapping mismatch: this rung didn't work, but a
+    stricter retry or a smaller (per-segment) prompt is precisely the
+    remedy — a per-segment prompt is far less likely to hit the same
+    token-budget ceiling. The call was still billed even though its text is
+    unusable, so the (unusable-text) result carried on the exception is
+    recorded here for cost accounting instead of being silently lost.
+
+    Returns:
+        The :class:`CompletionResult`, or ``None`` if this rung failed and
+        the caller should move to the next one.
+    """
+    try:
+        result = client.complete(prompt=prompt, system=system)
+    except (EmptyCompletionError, TruncatedCompletionError) as exc:
+        logger.warning(
+            "Batch of %d segments returned no usable text (%s); "
+            "trying the next rung of the retry ladder.",
+            segment_count,
+            exc,
+        )
+        if exc.result is not None:
+            results.append(exc.result)
+        return None
+    results.append(result)
+    return result
+
+
 def _translate_batch_attempts(
     segments: Sequence[Segment],
     *,
@@ -469,26 +570,38 @@ def _translate_batch_attempts(
     results: list[CompletionResult] = []
     prompt = _build_batch_prompt(segments, glossary, context_pairs, target_lang, book_context)
 
-    first = client.complete(prompt=prompt, system=style.batch_system)
-    results.append(first)
-    try:
-        return parse_numbered_response(first.text, len(segments)), results
-    except ValueError as exc:
-        logger.warning(
-            "Batch of %d segments returned a bad mapping (%s); retrying strictly.",
-            len(segments),
-            exc,
-        )
+    first = _complete_batch_rung(
+        client,
+        prompt=prompt,
+        system=style.batch_system,
+        results=results,
+        segment_count=len(segments),
+    )
+    if first is not None:
+        try:
+            return parse_numbered_response(first.text, len(segments)), results
+        except ValueError as exc:
+            logger.warning(
+                "Batch of %d segments returned a bad mapping (%s); retrying strictly.",
+                len(segments),
+                exc,
+            )
 
-    second = client.complete(prompt=prompt, system=style.strict_system)
-    results.append(second)
-    try:
-        return parse_numbered_response(second.text, len(segments)), results
-    except ValueError as exc:
-        logger.warning(
-            "Strict retry still bad (%s); falling back to per-segment translation.",
-            exc,
-        )
+    second = _complete_batch_rung(
+        client,
+        prompt=prompt,
+        system=style.strict_system,
+        results=results,
+        segment_count=len(segments),
+    )
+    if second is not None:
+        try:
+            return parse_numbered_response(second.text, len(segments)), results
+        except ValueError as exc:
+            logger.warning(
+                "Strict retry still bad (%s); falling back to per-segment translation.",
+                exc,
+            )
 
     translations: list[str] = []
     for segment in segments:
@@ -571,6 +684,15 @@ def _revise_batch(
                 exc,
             )
             return None, results
+        except (EmptyCompletionError, TruncatedCompletionError) as exc:
+            logger.warning(
+                "Revision pass attempt %d returned no usable text (%s).",
+                attempt,
+                exc,
+            )
+            if exc.result is not None:
+                results.append(exc.result)
+            continue
         results.append(result)
         try:
             return parse_numbered_response(result.text, len(segments)), results
@@ -638,10 +760,40 @@ def build_book_context(
         f"Target language: {target_lang}\n\n"
         f"Opening excerpt:\n{excerpt}"
     )
-    result = client.complete(prompt=prompt, system=style.book_context_system)
-    memo = result.text.strip()
+    try:
+        result: CompletionResult | None = client.complete(
+            prompt=prompt, system=style.book_context_system
+        )
+        memo = result.text.strip()
+    except (EmptyCompletionError, TruncatedCompletionError) as exc:
+        # No smaller unit to retry into for a once-per-book memo call — but,
+        # like a genuinely blank reply below, this is a best-effort pass, not
+        # a correctness requirement (unlike a segment translation), so it
+        # degrades to "no memo" rather than aborting the run. `exc.result`
+        # (billed, unusable text) still needs recording below.
+        logger.warning("Book-context call returned no usable text (%s).", exc)
+        result = exc.result
+        memo = ""
+
     if not memo:
         logger.warning("Book-context memo came back empty; translating without it.")
+        # Cache the empty result too (not just non-empty memos below): otherwise a
+        # killed-and-resumed run repeats this derivation call on every resume,
+        # contradicting the "never re-bills the memo call" guarantee (finding 20).
+        if cache is not None and result is not None:
+            cache.store_book_context(
+                bhash,
+                model_name,
+                target_lang,
+                style.version,
+                memo,
+                CallRecord(
+                    kind="book_context",
+                    input_tokens=result.input_tokens,
+                    output_tokens=result.output_tokens,
+                    cost_eur=result.cost_eur,
+                ),
+            )
         return None, result
 
     logger.info("Book-context memo derived (%d chars).", len(memo))
@@ -714,7 +866,10 @@ def translate_book(
         client: LLM client for translation calls (its ``model`` keys the cache).
         target_lang: Target language code (e.g. ``"sl"``).
         cache: Translation cache for resumability and accounting.
-        glossary: Optional glossary injected into every batch prompt.
+        glossary: Optional glossary injected into every batch prompt. Its
+            identity participates in the cache key, so translating the same
+            book under different terms re-translates instead of serving text
+            produced under the old ones.
         batch_size: Maximum consecutive segments per completion.
         context_pairs: Number of previous source/target pairs used as context.
         skip_segment_ids: Segment IDs to pass through untranslated.
@@ -734,11 +889,19 @@ def translate_book(
     Raises:
         TranslationError: If a segment cannot be translated after retry and
             per-segment fallback.
+        StyleLanguageError: If ``style`` is written for a language other than
+            ``target_lang``. This is the gate every entry point passes through
+            — CLI, experiment runner, or app — so a contradictory pair can
+            never reach a billed call (review finding 4).
     """
+    ensure_supports(style, target_lang)
     model = client.model
     bhash = book_hash(book)
     skip = set(skip_segment_ids)
     prompt_version = style.version
+    # The glossary is prompt input like the style is, so it keys the cache too:
+    # a changed glossary must re-translate, never re-serve (CLAUDE.md §9).
+    ghash = glossary_identity(glossary)
     stats = TranslationStats(total_segments=len(book.segments))
 
     book_context, context_result = build_book_context(
@@ -761,8 +924,15 @@ def translate_book(
     index = 0
 
     def _remember(source: str, target: str) -> None:
+        # ``context_pairs <= 0`` means "no rolling context": remember nothing.
+        # Appending and skipping the trim (the pre-A3 behaviour) fed *every*
+        # prior pair of the book into each batch — the exact opposite of the
+        # intent, and a guaranteed blow-through of the per-batch token ceiling
+        # on a full book (review finding 10).
+        if context_pairs <= 0:
+            return
         recent_pairs.append((source, target))
-        if context_pairs > 0 and len(recent_pairs) > context_pairs:
+        if len(recent_pairs) > context_pairs:
             del recent_pairs[:-context_pairs]
 
     while index < len(segments):
@@ -781,7 +951,7 @@ def translate_book(
             continue
 
         shash = segment_hash(segment.text)
-        cached = cache.get_translation(bhash, shash, model, target_lang, prompt_version)
+        cached = cache.get_translation(bhash, shash, model, target_lang, prompt_version, ghash)
         if cached is not None:
             output.append(replace(segment, text=cached))
             _remember(segment.text, cached)
@@ -801,7 +971,7 @@ def translate_book(
                 break
             if (
                 cache.get_translation(
-                    bhash, segment_hash(candidate.text), model, target_lang, prompt_version
+                    bhash, segment_hash(candidate.text), model, target_lang, prompt_version, ghash
                 )
                 is not None
             ):
@@ -839,6 +1009,7 @@ def translate_book(
             ],
             call,
             prompt_version,
+            ghash,
         )
 
         for seg, text in zip(batch, translations):
@@ -977,9 +1148,16 @@ def estimate_cost(
 
     Returns:
         The :class:`CostEstimate`, including a per-chapter breakdown.
+
+    Raises:
+        StyleLanguageError: If ``style`` is written for a language other than
+            ``target_lang``. The dry run refuses for the same reason the paid
+            run does: quoting a price for a contradictory pair invites the user
+            to approve it.
     """
     from berilo.providers.pricing import cost_eur
 
+    ensure_supports(style, target_lang)
     skip = set(skip_segment_ids)
     reasoning = _is_reasoning_model(model)
     revising = style.revise_system is not None

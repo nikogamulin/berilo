@@ -66,6 +66,11 @@ def read_cache_facts(
 ) -> tuple[dict[str, str] | None, float | None]:
     """Read the per-book glossary and total actual cost from the cache (read-only).
 
+    Both queries filter on ``model``. The cost query used to drop it, so a book
+    translated first with an expensive model and then re-run with ``gpt-5-mini``
+    charged the mini run with both runs' spend and inflated T7's per-100k
+    figure.
+
     Args:
         db_path: Path to the translation cache database.
         source: The source book (its hash keys the cache rows).
@@ -89,8 +94,12 @@ def read_cache_facts(
     try:
         conn.row_factory = sqlite3.Row
         glossary: dict[str, str] | None = None
+        # ``glossaries`` is keyed by glossary-prompt version too, so several
+        # rows can exist per book/model/lang; the most recent is the one the
+        # book would be translated against today.
         row = conn.execute(
-            "SELECT terms_json FROM glossaries WHERE book_hash = ? AND model = ? AND lang = ?",
+            "SELECT terms_json FROM glossaries WHERE book_hash = ? AND model = ? AND lang = ? "
+            "ORDER BY created_at DESC LIMIT 1",
             (bhash, model, lang),
         ).fetchone()
         if row is not None:
@@ -99,8 +108,8 @@ def read_cache_facts(
 
         cost_row = conn.execute(
             "SELECT SUM(cost_eur) AS total, COUNT(*) AS n FROM calls "
-            "WHERE book_hash = ? AND lang = ?",
-            (bhash, lang),
+            "WHERE book_hash = ? AND model = ? AND lang = ?",
+            (bhash, model, lang),
         ).fetchone()
         cost = float(cost_row["total"]) if cost_row and cost_row["n"] else None
     except sqlite3.Error as exc:  # pragma: no cover - defensive
