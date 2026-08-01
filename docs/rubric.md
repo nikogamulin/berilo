@@ -19,6 +19,15 @@ is a rubric that will disagree with itself.
 
 Scoring procedure: `python -m berilo.eval <book> --sample 40 --seed 42` runs
 the full procedure below and prints the weighted score with a bootstrap 95% CI.
+
+**Scoring a change, not a milestone:** a full book costs €0.60–€1.45 and tens of
+minutes, which is why it does not happen inside a build loop. The fixed sample
+books in [`../corpus/`](../corpus/README.md) run the same procedure for €0.036
+(smoke, ~1 min) or €0.125 (standard, ~3 min) per language. Use `smoke` to check
+you broke nothing and `standard` for any number you intend to quote — 40
+paragraphs give a CI wide enough to swallow most real deltas. `corpus/README.md`
+§5 lists what those samples do *not* cover, which belongs in any claim made from
+them.
 Judge model defaults to `BERILO_JUDGE_MODEL`; judge prompts live in
 `translator/berilo/eval/prompts/` and are versioned — score rows record the
 prompt version.

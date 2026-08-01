@@ -1,0 +1,146 @@
+{
+  "manifest_version": 1,
+  "tier": "smoke",
+  "seed": 42,
+  "target_languages": [
+    "sl",
+    "de",
+    "es",
+    "it",
+    "pt"
+  ],
+  "sample": {
+    "paragraphs": 40,
+    "source_words": 2733,
+    "chapters": 6,
+    "book_hash": "497282b5eacea0a7820a50999544e6e81b2b55f5",
+    "epub_sha256": "3792f01d59b3ffbc7377d6b46105757ff3879c664d06349acb7c04546a252f94"
+  },
+  "books": [
+    {
+      "slug": "active-measures",
+      "title": "Active Measures",
+      "authors": [
+        "Thomas Rid"
+      ],
+      "source_format": "pdf",
+      "book_hash": "66f6def4652820c761d430ae88b8776ab9b54d7b",
+      "eligible_paragraphs": 1817,
+      "selected": 10
+    },
+    {
+      "slug": "complex-adaptive-systems-john-h-miller",
+      "title": "Complex Adaptive Systems - John H Miller",
+      "authors": [],
+      "source_format": "pdf",
+      "book_hash": "9e7d67a2169e32d0199d5d210f2b3e3042980b5d",
+      "eligible_paragraphs": 1029,
+      "selected": 6
+    },
+    {
+      "slug": "generative-ai-in-cybersecurity-leslie-f-sikos",
+      "title": "Generative AI in Cybersecurity (Leslie F. Sikos)",
+      "authors": [],
+      "source_format": "pdf",
+      "book_hash": "afc7259ea8e96afd094f2db6cc0fe5b38ea5a0e2",
+      "eligible_paragraphs": 361,
+      "selected": 4
+    },
+    {
+      "slug": "the-art-of-cyberwarfare",
+      "title": "The Art of Cyberwarfare",
+      "authors": [
+        "Jon DiMaggio"
+      ],
+      "source_format": "pdf",
+      "book_hash": "810e23af35eadb12f341c31d93cb30e030650c90",
+      "eligible_paragraphs": 878,
+      "selected": 5
+    },
+    {
+      "slug": "the-book-of-why",
+      "title": "The Book of Why",
+      "authors": [
+        "Judea Pearl"
+      ],
+      "source_format": "pdf",
+      "book_hash": "d15d17b4541da28c95af108de6259841a75d08a6",
+      "eligible_paragraphs": 1376,
+      "selected": 9
+    },
+    {
+      "slug": "thinking-in-systems",
+      "title": "Thinking in Systems",
+      "authors": [
+        "Donella H. Meadows"
+      ],
+      "source_format": "epub",
+      "book_hash": "73f1d583bfcb72487f22fb9d51fee7fd90ba8b5b",
+      "eligible_paragraphs": 953,
+      "selected": 6
+    }
+  ],
+  "coverage": {
+    "bands": {
+      "short": 7,
+      "medium": 18,
+      "long": 15
+    },
+    "strata": {
+      "acronym": 14,
+      "citation": 4,
+      "colon_lead": 4,
+      "dash": 5,
+      "digits": 23,
+      "hyphen_break": 2,
+      "non_ascii": 33,
+      "parenthetical": 13,
+      "quotes": 18,
+      "year": 13
+    },
+    "stratum_floor": 2,
+    "unmet_strata": []
+  },
+  "segments": [
+    {"book": "active-measures", "chapter_index": 1, "position": 27, "segment_hash": "d7493e79a423ba371dcf5c1cad790bcc8140535f", "words": 24, "band": "short", "strata": ["acronym", "digits", "non_ascii"]},
+    {"book": "active-measures", "chapter_index": 7, "position": 310, "segment_hash": "c96066fa9483c5b0ca2f2c3b73412ffe0dc44383", "words": 93, "band": "long", "strata": ["acronym", "dash", "digits", "non_ascii", "parenthetical", "year"]},
+    {"book": "active-measures", "chapter_index": 17, "position": 875, "segment_hash": "7af783611b8e49279d4bcc9e2eecb5850141dc14", "words": 38, "band": "medium", "strata": ["acronym", "digits", "non_ascii", "quotes"]},
+    {"book": "active-measures", "chapter_index": 25, "position": 1436, "segment_hash": "b6b1ab6f24d4bfec48c21c86baf4ff162f167fa2", "words": 53, "band": "medium", "strata": ["acronym", "digits", "non_ascii", "quotes"]},
+    {"book": "active-measures", "chapter_index": 26, "position": 1474, "segment_hash": "c275cd65047493127440b55715c676d42537909a", "words": 84, "band": "long", "strata": ["digits", "non_ascii", "quotes", "year"]},
+    {"book": "active-measures", "chapter_index": 27, "position": 1507, "segment_hash": "13eb1a4b851770dcca6641569926130a1da3584a", "words": 67, "band": "medium", "strata": ["acronym", "non_ascii", "quotes"]},
+    {"book": "active-measures", "chapter_index": 28, "position": 1627, "segment_hash": "dcd8cac1724f49c10e68e0fdbb96511369782ace", "words": 88, "band": "long", "strata": ["digits", "hyphen_break", "non_ascii", "quotes", "year"]},
+    {"book": "active-measures", "chapter_index": 33, "position": 1845, "segment_hash": "fff542f0ec147685f99cb073a0c42ccf67a0bf21", "words": 49, "band": "medium", "strata": ["acronym", "digits", "non_ascii", "quotes"]},
+    {"book": "active-measures", "chapter_index": 33, "position": 1888, "segment_hash": "95d1551ca21f88cd6d536b23975e745ba542e55e", "words": 56, "band": "medium", "strata": ["colon_lead", "digits", "non_ascii", "quotes", "year"]},
+    {"book": "active-measures", "chapter_index": 35, "position": 1916, "segment_hash": "51d103bef60fae66c57354b6ea98b40a5ad9e6ff", "words": 15, "band": "short", "strata": ["colon_lead", "non_ascii", "quotes"]},
+    {"book": "complex-adaptive-systems-john-h-miller", "chapter_index": 7, "position": 872, "segment_hash": "e8b90f8eda88e656668e4b996bc72c9dfe170364", "words": 117, "band": "long", "strata": ["citation", "digits", "non_ascii", "parenthetical", "year"]},
+    {"book": "complex-adaptive-systems-john-h-miller", "chapter_index": 7, "position": 1089, "segment_hash": "c8ceffe61373c44b86862ee437ceedd418c0b815", "words": 163, "band": "long", "strata": ["citation", "dash", "digits", "non_ascii", "parenthetical", "year"]},
+    {"book": "complex-adaptive-systems-john-h-miller", "chapter_index": 7, "position": 1487, "segment_hash": "2f794bd6ec8b03b32a802dc68e8f5a6689590f3e", "words": 70, "band": "medium", "strata": ["hyphen_break", "non_ascii", "quotes"]},
+    {"book": "complex-adaptive-systems-john-h-miller", "chapter_index": 7, "position": 1494, "segment_hash": "8e866eccbc0c6d4f5397322a295842b9f0ddfae6", "words": 57, "band": "medium", "strata": ["non_ascii"]},
+    {"book": "complex-adaptive-systems-john-h-miller", "chapter_index": 7, "position": 1635, "segment_hash": "5d193b8bdc97e6561e034c47143a314c7a8ab959", "words": 19, "band": "short", "strata": []},
+    {"book": "complex-adaptive-systems-john-h-miller", "chapter_index": 9, "position": 1918, "segment_hash": "5f2ab4229a5305c422936b62e67c3a6491ebf6ba", "words": 110, "band": "long", "strata": ["non_ascii", "quotes"]},
+    {"book": "generative-ai-in-cybersecurity-leslie-f-sikos", "chapter_index": 3, "position": 150, "segment_hash": "d1cc62c0a3895daeda773ab2eb7072af98f2e493", "words": 108, "band": "long", "strata": ["acronym", "colon_lead", "non_ascii", "quotes"]},
+    {"book": "generative-ai-in-cybersecurity-leslie-f-sikos", "chapter_index": 10, "position": 298, "segment_hash": "95d85b93079ed54bc3b805d59ae49be19a14471f", "words": 61, "band": "medium", "strata": ["acronym", "digits", "non_ascii", "parenthetical"]},
+    {"book": "generative-ai-in-cybersecurity-leslie-f-sikos", "chapter_index": 14, "position": 398, "segment_hash": "1d7bb310872f59781661b6fa0d493229ac9d1057", "words": 27, "band": "short", "strata": ["acronym", "citation", "digits", "non_ascii", "parenthetical", "year"]},
+    {"book": "generative-ai-in-cybersecurity-leslie-f-sikos", "chapter_index": 14, "position": 419, "segment_hash": "0dbe3914aac379ebdaa138a3a604e7135f4376c9", "words": 48, "band": "medium", "strata": ["acronym", "citation", "dash", "digits", "non_ascii", "parenthetical", "year"]},
+    {"book": "the-art-of-cyberwarfare", "chapter_index": 47, "position": 455, "segment_hash": "0c66f89a5bf317f183d41ff01420c53e141dad27", "words": 65, "band": "medium", "strata": ["digits", "non_ascii", "quotes", "year"]},
+    {"book": "the-art-of-cyberwarfare", "chapter_index": 58, "position": 551, "segment_hash": "96d11e35cbbb1e8f44ee3a5abf9cb5c9fd7da2cf", "words": 82, "band": "long", "strata": ["acronym", "digits", "non_ascii", "parenthetical", "year"]},
+    {"book": "the-art-of-cyberwarfare", "chapter_index": 78, "position": 738, "segment_hash": "3717e6f198247cec00d54ca9016f0d3e01f170cf", "words": 67, "band": "medium", "strata": ["acronym", "digits", "non_ascii", "year"]},
+    {"book": "the-art-of-cyberwarfare", "chapter_index": 84, "position": 771, "segment_hash": "ccf6c7b5369cdec82f8bd1b9b51398c45eb2eba1", "words": 93, "band": "long", "strata": ["digits", "non_ascii"]},
+    {"book": "the-art-of-cyberwarfare", "chapter_index": 88, "position": 841, "segment_hash": "5a1ad86b50ce52b40eac0bf0a666d2d863ca90f5", "words": 24, "band": "short", "strata": ["colon_lead"]},
+    {"book": "the-book-of-why", "chapter_index": 3, "position": 184, "segment_hash": "bb3dcb4324e49511faeff0ba74045bfe89d66451", "words": 45, "band": "medium", "strata": ["non_ascii", "parenthetical", "quotes"]},
+    {"book": "the-book-of-why", "chapter_index": 4, "position": 395, "segment_hash": "d5adf8a06774fc8cc2903f73d2dd6a900e147578", "words": 89, "band": "long", "strata": []},
+    {"book": "the-book-of-why", "chapter_index": 5, "position": 585, "segment_hash": "a2aaf73d6783b69814d71ca71a2d67a285ea87b0", "words": 62, "band": "medium", "strata": ["non_ascii", "quotes"]},
+    {"book": "the-book-of-why", "chapter_index": 5, "position": 615, "segment_hash": "8f56d2ec4f50e2e6a3e096dba1d5a8f70595c99a", "words": 111, "band": "long", "strata": ["acronym", "non_ascii", "parenthetical", "quotes"]},
+    {"book": "the-book-of-why", "chapter_index": 7, "position": 882, "segment_hash": "839df3a230da84a39da06bc3d98ae094a08eb908", "words": 68, "band": "medium", "strata": ["acronym", "digits", "parenthetical"]},
+    {"book": "the-book-of-why", "chapter_index": 7, "position": 958, "segment_hash": "5b20558c635ac011700b78340c456e15da77d522", "words": 135, "band": "long", "strata": ["dash", "digits", "non_ascii", "quotes", "year"]},
+    {"book": "the-book-of-why", "chapter_index": 10, "position": 1374, "segment_hash": "b20b9b15ebedf7b8cb866ceef6003fcbd53eeef5", "words": 43, "band": "medium", "strata": ["digits", "non_ascii", "parenthetical", "quotes"]},
+    {"book": "the-book-of-why", "chapter_index": 10, "position": 1389, "segment_hash": "ea65e7d181502218d5bc9f3dfcb429178c6ddc6f", "words": 18, "band": "short", "strata": ["digits", "non_ascii", "parenthetical"]},
+    {"book": "the-book-of-why", "chapter_index": 12, "position": 1811, "segment_hash": "d70c77d6a5fb0822d0b644dae2f0f786483434f7", "words": 93, "band": "long", "strata": ["non_ascii", "quotes"]},
+    {"book": "thinking-in-systems", "chapter_index": 6, "position": 72, "segment_hash": "d1c4f384f0c8035df8fc35dabb27bfced8025508", "words": 94, "band": "long", "strata": ["non_ascii"]},
+    {"book": "thinking-in-systems", "chapter_index": 12, "position": 447, "segment_hash": "7c0a6008ceef0b6b59ac2d7bffe0bba0b3cff952", "words": 61, "band": "medium", "strata": ["non_ascii", "parenthetical"]},
+    {"book": "thinking-in-systems", "chapter_index": 18, "position": 1002, "segment_hash": "aadab752726eeb80c5e80ce2bb00e249b61ebd94", "words": 76, "band": "medium", "strata": ["dash", "digits", "non_ascii", "year"]},
+    {"book": "thinking-in-systems", "chapter_index": 19, "position": 1198, "segment_hash": "698ff12929d754fe7f7f48f7fed948b48a631873", "words": 106, "band": "long", "strata": ["digits"]},
+    {"book": "thinking-in-systems", "chapter_index": 20, "position": 1225, "segment_hash": "36d9bdce04ed6e3465d54c8a4765b598eac3fcea", "words": 16, "band": "short", "strata": []},
+    {"book": "thinking-in-systems", "chapter_index": 20, "position": 1294, "segment_hash": "3c654d419acc9ba77ddff14d98711f18dfd59317", "words": 38, "band": "medium", "strata": []}
+  ]
+}

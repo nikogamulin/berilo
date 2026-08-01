@@ -90,6 +90,9 @@ See [`contracts/core-spec.md`](contracts/core-spec.md).
   OpenAI/Anthropic model is selectable. One provider interface, no lock-in.
 - **Meaning preservation over literalism** — the prompt-and-verify design is the
   product.
+- **A quality claim needs a score.** "This should translate better" is a
+  hypothesis; `corpus/` makes measuring it cost cents, so measure it. Quote the
+  tier and the language, and never quote a `smoke` score as a quality result.
 - **Segment integrity:** source↔target mapping is 1:1; nothing is silently
   dropped; failures are loud and resumable.
 - **Books never leave the machine** except as segment batches to the LLM API.
@@ -222,6 +225,13 @@ berilo translate <file> --to sl --dry-run  # cost estimate — ALWAYS before a f
 berilo serve                               # hand a translated book to a tablet over the LAN
 berilo eval <translated.epub> --sample 40 --seed 42   # Rubric T score + CI
 
+# The evaluation corpus — score a change without translating a whole book.
+# smoke: 40 paras, ~EUR0.036/lang, ~1 min.  standard: 150 paras, ~EUR0.125/lang.
+PYTHONPATH=translator python3 -m berilo.eval.corpus build    # rebuild the samples
+PYTHONPATH=translator python3 -m berilo.eval.corpus verify   # after ANY normalize change
+berilo translate corpus/build/berilo-sample-smoke.epub --to sl -y
+berilo eval corpus/build/berilo-sample-smoke.sl.epub
+
 # Regenerate the conformance vectors after any change to the core (from the repo root)
 PYTHONPATH=translator python3 -m berilo.identity_fixture
 PYTHONPATH=translator python3 contracts/gen/generate_assemble_vectors.py
@@ -242,6 +252,7 @@ git grep --cached -iE 'sk-(proj|ant)|api03|/home/niko' -- ':!CLAUDE.md' ':!.clau
 | Product spec | [`docs/project_spec.md`](docs/project_spec.md) | problem, users, pipeline design, stack decisions, non-goals |
 | Project plan | [`docs/project_plan.md`](docs/project_plan.md) | this repo's stories with points and **Verify** lines |
 | Rubric T | [`docs/rubric.md`](docs/rubric.md) | translation-quality scoring procedure, weights, gates |
+| Evaluation corpus | [`corpus/README.md`](corpus/README.md) | the fixed sample books: which tier to run when, what they cost, and what they do not cover |
 | Findings (Tier 2) | [`docs/findings.md`](docs/findings.md) | session-discovered gotchas and working commands — scan first |
 | Ledger | [`loops/build/ledger.jsonl`](loops/build/ledger.jsonl) | one row per kept/discarded iteration |
 | Workspace map | `../README.md`, `../docs/` | the five repos, runbooks, contracts index |

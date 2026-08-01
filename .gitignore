@@ -51,3 +51,7 @@ out/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
 /.codebase-memory/
+
+# Evaluation corpus — built sample books and their translations. Derived from
+# copyrighted sources; only corpus/manifest-*.json is committed.
+/corpus/build/
