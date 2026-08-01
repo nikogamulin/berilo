@@ -12,11 +12,20 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 
 import pytest
 from click.testing import CliRunner
 
-from berilo.cache import CallRecord, SegmentTranslation, TranslationCache, book_hash, segment_hash
+from berilo.cache import (
+    EMPTY_GLOSSARY_HASH,
+    CallRecord,
+    SegmentTranslation,
+    TranslationCache,
+    book_hash,
+    segment_hash,
+)
 from berilo.cli import cli
 from berilo.glossary import Glossary, build_glossary
 from berilo.models import Book, ImageResource, Segment, SegmentType, make_segment_id
@@ -1512,12 +1521,44 @@ def test_context_pairs_two_still_trims_to_two() -> None:
         cache=_memory_cache(),
         batch_size=1,
         context_pairs=2,
+        # The *immediately* preceding pairs are the SEQUENTIAL contract. Under
+        # concurrency the snapshot is taken once per wave, so the context is
+        # deliberately staler — bounded to `concurrency * batch_size` segments
+        # (core-spec Surface 3). That case is pinned separately below.
+        concurrency=1,
     )
 
     last = client.batch_prompts[-1]
     assert last.count("SOURCE: ") == 2, "exactly two pairs, never the whole book"
     assert "Paragraph 4." in last and "Paragraph 3." in last
     assert "Paragraph 0." not in last
+
+
+def test_wave_context_is_stale_by_at_most_one_wave() -> None:
+    """Concurrency trades context freshness for throughput, boundedly.
+
+    Six segments at batch 1 and four lanes: wave 1 is batches 0-3 and runs with
+    no context, so wave 2 sees the last two pairs of wave 1 — segments 2 and 3,
+    not 4. Staleness is therefore bounded by `concurrency * batch_size`, and is
+    the only continuity the wave loop gives up.
+    """
+    book = _paragraph_book(6)
+    client = FakeLLMClient()
+
+    translate_book(
+        book,
+        client=client,
+        target_lang="sl",
+        cache=_memory_cache(),
+        batch_size=1,
+        context_pairs=2,
+        concurrency=4,
+    )
+
+    last = client.batch_prompts[-1]
+    assert last.count("SOURCE: ") == 2
+    assert "Paragraph 2." in last and "Paragraph 3." in last
+    assert "Paragraph 4." not in last, "a wave cannot see its own siblings' output"
 
 
 def test_translate_book_refuses_a_style_bound_to_another_language() -> None:
@@ -1660,9 +1701,7 @@ def _lettered_book(count: int, *, chapters: int = 1) -> Book:
     segments = []
     for position in range(count):
         chapter = position * chapters // count
-        segments.append(
-            _segment(f"Sentence {position}.", chapter, position, f"Chapter {chapter}")
-        )
+        segments.append(_segment(f"Sentence {position}.", chapter, position, f"Chapter {chapter}"))
     return _book(segments)
 
 
@@ -1688,3 +1727,136 @@ def test_plan_backed_translation_matches_the_sequential_baseline() -> None:
         "SL::Gamma.",
         "SL::Delta.",
     ]
+
+
+class _OverlapRecordingClient(FakeLLMClient):
+    """Sleeps inside every call and records peak concurrency."""
+
+    def __init__(self, *, delay: float = 0.05, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.delay = delay
+        self._in_flight = 0
+        self.max_in_flight = 0
+        self._guard = threading.Lock()
+
+    def complete(self, *args, **kwargs):
+        with self._guard:
+            self._in_flight += 1
+            self.max_in_flight = max(self.max_in_flight, self._in_flight)
+        try:
+            time.sleep(self.delay)
+            return super().complete(*args, **kwargs)
+        finally:
+            with self._guard:
+                self._in_flight -= 1
+
+
+def test_four_lanes_actually_overlap() -> None:
+    """Without this, `concurrency` is a parameter that changes nothing."""
+    book = _paragraph_book(8)
+    client = _OverlapRecordingClient()
+    with _memory_cache() as cache:
+        translate_book(
+            book,
+            client=client,
+            target_lang="sl",
+            cache=cache,
+            batch_size=1,
+            concurrency=4,
+        )
+    assert client.max_in_flight > 1, "lanes never overlapped"
+    assert client.max_in_flight <= 4, "more requests in flight than lanes"
+
+
+def test_concurrency_does_not_change_the_output() -> None:
+    """Four lanes and one lane must agree segment for segment."""
+    book = _paragraph_book(9)
+
+    with _memory_cache() as cache:
+        serial = translate_book(
+            book,
+            client=FakeLLMClient(),
+            target_lang="sl",
+            cache=cache,
+            batch_size=2,
+            concurrency=1,
+        )
+    with _memory_cache() as cache:
+        parallel = translate_book(
+            book,
+            client=FakeLLMClient(),
+            target_lang="sl",
+            cache=cache,
+            batch_size=2,
+            concurrency=4,
+        )
+
+    assert [s.text for s in serial.segments] == [s.text for s in parallel.segments]
+
+
+def test_a_wave_shares_one_context_snapshot() -> None:
+    """Every batch in a wave sees the same context, taken before the wave ran.
+
+    Without this a batch's prompt depends on which sibling lane returned first,
+    and the run stops being reproducible.
+    """
+    book = _paragraph_book(4)
+    client = FakeLLMClient()
+    with _memory_cache() as cache:
+        translate_book(
+            book,
+            client=client,
+            target_lang="sl",
+            cache=cache,
+            batch_size=1,
+            concurrency=4,
+        )
+
+    batch_prompts = [c["prompt"] for c in client.calls if c["kind"] == "batch"]
+    assert len(batch_prompts) == 4
+    assert all(
+        "CONTEXT (already translated" not in prompt for prompt in batch_prompts
+    ), "all four batches formed one wave, so none may quote a context block"
+
+
+def test_a_failing_lane_keeps_its_siblings_committed_work() -> None:
+    """A lane that raises must not discard spend other lanes already billed."""
+
+    class _OneBadBatch(FakeLLMClient):
+        def _batch_response(self, prompt: str) -> CompletionResult:
+            if "Paragraph 3." in prompt:
+                return self._result("")
+            return super()._batch_response(prompt)
+
+        def _single_response(self, prompt: str) -> CompletionResult:
+            if "Paragraph 3." in prompt:
+                return self._result("")
+            return super()._single_response(prompt)
+
+    book = _paragraph_book(4)
+    with _memory_cache() as cache:
+        with pytest.raises(TranslationError):
+            translate_book(
+                book,
+                client=_OneBadBatch(),
+                target_lang="sl",
+                cache=cache,
+                batch_size=1,
+                concurrency=4,
+            )
+
+        # The three healthy lanes committed inside themselves, so a resumed run
+        # re-bills only the lane that failed.
+        stored = sum(
+            cache.get_translation(
+                book_hash(book),
+                segment_hash(f"Paragraph {i}."),
+                "gpt-5-mini",
+                "sl",
+                BASELINE.version,
+                EMPTY_GLOSSARY_HASH,
+            )
+            is not None
+            for i in range(4)
+        )
+    assert stored == 3

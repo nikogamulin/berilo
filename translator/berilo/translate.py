@@ -39,6 +39,7 @@ import dataclasses
 import logging
 import re
 from collections.abc import Callable, Collection, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 
 from berilo.cache import (
@@ -52,6 +53,7 @@ from berilo.glossary import Glossary, glossary_identity
 from berilo.models import Book, Segment
 from berilo.plan import (
     DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
     DEFAULT_CONTEXT_PAIRS,
     PositionedBatch,
     build_translation_plan,
@@ -846,7 +848,7 @@ def translate_book(
     glossary: Glossary | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
     context_pairs: int = DEFAULT_CONTEXT_PAIRS,
-    concurrency: int = 1,
+    concurrency: int = DEFAULT_CONCURRENCY,
     skip_segment_ids: Collection[str] = (),
     on_progress: ProgressCallback | None = None,
     fallback_client: LLMClient | None = None,
@@ -1017,7 +1019,15 @@ def translate_book(
         # wave's prompts do not depend on which lane happens to finish first.
         snapshot = list(recent_pairs)
 
-        finished = [_run_batch(batch, snapshot) for batch in wave.batches]
+        if len(wave.batches) == 1:
+            finished = [_run_batch(wave.batches[0], snapshot)]
+        else:
+            with ThreadPoolExecutor(max_workers=len(wave.batches)) as pool:
+                futures = [pool.submit(_run_batch, batch, snapshot) for batch in wave.batches]
+                # ``result()`` in submission order: the first lane to raise is
+                # the one that propagates, and lanes that already committed
+                # keep their spend. Nothing folds back before the wave is whole.
+                finished = [future.result() for future in futures]
 
         # Folded in batch order, never completion order. ``resolved`` is keyed
         # by position and so is order-independent, but ``recent_pairs``, the
