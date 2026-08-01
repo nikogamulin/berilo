@@ -447,3 +447,35 @@ def test_book_context_memo_round_trips_per_prompt_version() -> None:
         assert cache.get_book_context(_BOOK, _MODEL, _LANG, "some_other_v1") is None
         kinds = [row["kind"] for row in cache._conn.execute("SELECT kind FROM calls ORDER BY id")]
         assert kinds == ["book_context"]
+
+
+def test_cache_is_usable_from_several_threads(tmp_path):
+    """Lanes share one cache object, so every public method must cross threads.
+
+    ``sqlite3`` defaults to ``check_same_thread=True`` and raises
+    ``ProgrammingError`` rather than corrupting anything, so this fails loudly
+    rather than subtly before the lock lands.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    with TranslationCache(tmp_path / "c.sqlite") as cache:
+
+        def store(n: int) -> None:
+            cache.store_batch(
+                "book",
+                "gpt-5-mini",
+                "sl",
+                [SegmentTranslation(segment_hash=f"h{n}", text=f"t{n}", cost_eur=0.0)],
+                CallRecord(kind="batch", input_tokens=1, output_tokens=1, cost_eur=0.0),
+                "baseline_v1",
+                "ghash",
+            )
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(store, range(20)))
+
+        for n in range(20):
+            assert (
+                cache.get_translation("book", f"h{n}", "gpt-5-mini", "sl", "baseline_v1", "ghash")
+                == f"t{n}"
+            )
