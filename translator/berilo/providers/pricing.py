@@ -24,6 +24,44 @@ _PRICING_USD_PER_MILLION_TOKENS: dict[str, tuple[float, float]] = {
 }
 
 
+def is_known_model(model: str) -> bool:
+    """Return whether ``model`` has a pricing entry.
+
+    Args:
+        model: Model identifier to check.
+
+    Returns:
+        ``True`` if ``model`` is a key in the pricing table.
+    """
+    return model in _PRICING_USD_PER_MILLION_TOKENS
+
+
+def known_models() -> str:
+    """Return a sorted, comma-joined list of every priced model (for error messages)."""
+    return ", ".join(sorted(_PRICING_USD_PER_MILLION_TOKENS))
+
+
+def require_known_model(model: str) -> None:
+    """Raise if ``model`` has no pricing entry.
+
+    Intended as a pre-flight check called *before* any API call is made
+    (see :func:`berilo.providers.create_client`), so an unpriced model fails
+    fast and for free — never after the call has already been billed.
+
+    Args:
+        model: Model identifier to check.
+
+    Raises:
+        ValueError: If ``model`` has no known pricing entry. The message
+            lists all known models so the caller can pick a supported one.
+    """
+    if not is_known_model(model):
+        raise ValueError(
+            f"No pricing entry for model '{model}'. Known models: {known_models()}. "
+            "Add it to berilo/providers/pricing.py if it's a new, supported model."
+        )
+
+
 def cost_eur(model: str, input_tokens: int, output_tokens: int) -> float:
     """Compute the EUR cost of a completion call.
 
@@ -40,12 +78,7 @@ def cost_eur(model: str, input_tokens: int, output_tokens: int) -> float:
         ValueError: If ``model`` has no known pricing entry. The message
             lists all known models so the caller can pick a supported one.
     """
-    if model not in _PRICING_USD_PER_MILLION_TOKENS:
-        known_models = ", ".join(sorted(_PRICING_USD_PER_MILLION_TOKENS))
-        raise ValueError(
-            f"No pricing entry for model '{model}'. Known models: {known_models}. "
-            "Add it to berilo/providers/pricing.py if it's a new, supported model."
-        )
+    require_known_model(model)
     input_usd_per_million, output_usd_per_million = _PRICING_USD_PER_MILLION_TOKENS[model]
     usd_cost = (input_tokens / _TOKENS_PER_PRICING_UNIT) * input_usd_per_million + (
         output_tokens / _TOKENS_PER_PRICING_UNIT

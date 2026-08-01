@@ -20,6 +20,7 @@ import zipfile
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
+from html.entities import html5 as _HTML5_ENTITIES
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -96,6 +97,194 @@ _RETYPED_HEADING_LEVEL = 2
 # prose sampling) is silently inert.
 _TITLE_COLLAPSE_WARN_SHARE = 0.5
 
+# The same source image referenced at least this many times across the book is
+# furniture (a logo, a chapter ornament, a scene-break glyph) and is carried
+# once; anything referenced fewer times is a figure and is carried at EVERY
+# placement. Mirrors the PDF path's RECURRING_IMAGE_MIN_PAGES, which uses the
+# same cut — before this the EPUB path dropped every repeat from the second
+# occurrence on, so a figure legitimately reused in two chapters lost its
+# second placement silently (review finding 16).
+RECURRING_IMAGE_MIN_REFERENCES = 3
+
+# --- The leniency rule (review finding 2) ------------------------------------
+#
+# NORMATIVE, and deliberately written out in full: the Kotlin EPUB reader
+# (plan 2026-07-26-ondevice-translation §3.2/B2) must reproduce this step for
+# step. A document one implementation recovers and the other drops shifts every
+# later ``position``, hence every segment id, hence ``book_hash`` — and the two
+# sides would no longer be the same algorithm.
+#
+#   Step 1. Parse the document bytes STRICTLY. On success that tree is used and
+#           nothing below runs. Every well-formed document therefore behaves
+#           exactly as it did before leniency existed, which is what keeps
+#           ``book_hash`` stable on already-translated books.
+#   Step 2. On a parse error, decode and repair the document (R0-R3 below, in
+#           this order, each applied over the whole document), then parse the
+#           result strictly.
+#   Step 3. If step 2 also fails, raise :class:`EpubParseError` naming the
+#           document. A document is never skipped: silent loss is the defect.
+#
+#   R0  Decode + drop the XML declaration.
+#       Decode as UTF-8; if that raises, decode as ISO-8859-1 (never lossy,
+#       never raises). Then remove a leading ``<?xml ... ?>`` declaration, so
+#       the repaired text can be re-encoded as UTF-8 without contradicting a
+#       declared encoding. A DOCTYPE, if present, is left untouched.
+#   R1  Undeclared named entity -> numeric character reference.
+#       ``&NAME;`` where NAME is a known HTML5 entity other than the five XML
+#       built-ins (amp, lt, gt, quot, apos) becomes ``&#CODEPOINT;``. This is
+#       the bare ``&nbsp;`` case: legal in HTML, undeclared in XML.
+#   R2  Bare ampersand -> ``&amp;``.
+#       An ``&`` that does not begin a syntactically valid reference
+#       (``&NAME;``, ``&#DIGITS;``, ``&#xHEX;``) becomes ``&amp;``. Runs after
+#       R1, so every entity R1 recognized is already numeric and is preserved.
+#   R3  Unclosed void element -> self-closing.
+#       ``<TAG ...>`` where TAG is an HTML void element and the tag does not
+#       already end in ``/>`` becomes ``<TAG .../>``. This is the ``<br>`` and
+#       unclosed-``<img>`` case. The attribute scan is quote-aware, so a
+#       literal ``>`` inside an attribute value (``alt="3 > 2"``, legal XML)
+#       does not terminate the tag early.
+#
+# Nothing else is repaired. Mis-nested or unbalanced non-void elements, a stray
+# ``<``, a truncated document or a wrong root all reach step 3 and fail loudly:
+# a lenient parser that still fails QUIETLY has not fixed anything.
+#
+# The repairs are textual by design (regex over the whole document, no parse
+# state), because that is the part reimplementable in any language without
+# depending on a specific tolerant-HTML library.
+
+_XML_DECLARATION_RE = re.compile(r"^\s*<\?xml[^>]*\?>")
+_NAMED_ENTITY_RE = re.compile(r"&([A-Za-z][A-Za-z0-9]*);")
+_XML_BUILTIN_ENTITIES = frozenset({"amp", "lt", "gt", "quot", "apos"})
+_BARE_AMPERSAND_RE = re.compile(r"&(?!(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*);)")
+
+# HTML void elements (plus SVG ``<image>``, the cover wrapper this normalizer
+# already reads): they have no closing tag, so XHTML that writes them unclosed
+# (``<br>``) is not well-formed XML. Longest names first so the alternation
+# reads naturally; the name is anchored by the negative lookahead below, so
+# ``<imgfoo>`` is not mistaken for ``<img>``.
+_VOID_ELEMENTS = (
+    "source",
+    "image",
+    "embed",
+    "input",
+    "param",
+    "track",
+    "area",
+    "base",
+    "link",
+    "meta",
+    "col",
+    "img",
+    "wbr",
+    "br",
+    "hr",
+)
+_UNCLOSED_VOID_RE = re.compile(
+    r"<(" + "|".join(_VOID_ELEMENTS) + r")(?![^\s/>])"
+    r"((?:\"[^\"]*\"|'[^']*'|[^<>\"'])*?)(?<!/)>",
+    re.IGNORECASE,
+)
+
+
+class EpubParseError(ValueError):
+    """An EPUB document could not be parsed, even after lenient recovery.
+
+    Raised in place of skipping the document. A dropped spine document takes
+    every paragraph, heading and image in it with it, and CLAUDE.md §2 makes
+    that loss loud and resumable rather than a warning in a log nobody reads.
+
+    Attributes:
+        document: Zip-internal path of the document that failed.
+        reason: Why it failed, including the strict and post-recovery errors.
+    """
+
+    def __init__(self, document: str, reason: str) -> None:
+        super().__init__(f"EPUB document {document!r} could not be parsed: {reason}")
+        self.document = document
+        self.reason = reason
+
+
+def _repair_xhtml(data: bytes) -> tuple[bytes, list[str]]:
+    """Apply repairs R0-R3 of the leniency rule to one document's bytes.
+
+    Args:
+        data: The raw document bytes, as stored in the archive.
+
+    Returns:
+        ``(repaired UTF-8 bytes, names of the repairs that changed something)``.
+        The names are for the recovery log line, not for control flow.
+    """
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = data.decode("iso-8859-1")
+    applied: list[str] = []
+
+    stripped = _XML_DECLARATION_RE.sub("", text, count=1)
+    if stripped != text:
+        applied.append("R0 dropped the XML declaration")
+    text = stripped
+
+    def to_numeric(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name in _XML_BUILTIN_ENTITIES:
+            return match.group(0)
+        character = _HTML5_ENTITIES.get(f"{name};")
+        if character is None:
+            return match.group(0)
+        return "".join(f"&#{ord(char)};" for char in character)
+
+    replaced = _NAMED_ENTITY_RE.sub(to_numeric, text)
+    if replaced != text:
+        applied.append("R1 numericized undeclared named entities")
+    text = replaced
+
+    escaped = _BARE_AMPERSAND_RE.sub("&amp;", text)
+    if escaped != text:
+        applied.append("R2 escaped bare ampersands")
+    text = escaped
+
+    closed = _UNCLOSED_VOID_RE.sub(lambda m: f"<{m.group(1)}{m.group(2) or ''}/>", text)
+    if closed != text:
+        applied.append("R3 self-closed void elements")
+    text = closed
+
+    return text.encode("utf-8"), applied
+
+
+def _parse_xml(data: bytes, *, document: str) -> ET.Element:
+    """Parse one EPUB document under the leniency rule documented above.
+
+    Args:
+        data: The raw document bytes.
+        document: Zip-internal path, used in the log line and the exception.
+
+    Returns:
+        The parsed document root.
+
+    Raises:
+        EpubParseError: If the document is not well-formed and the repairs do
+            not make it so.
+    """
+    try:
+        return ET.fromstring(data)
+    except ET.ParseError as strict_error:
+        repaired, applied = _repair_xhtml(data)
+        try:
+            root = ET.fromstring(repaired)
+        except ET.ParseError as lenient_error:
+            raise EpubParseError(
+                document,
+                f"strict parse failed ({strict_error}) and recovery failed ({lenient_error})",
+            ) from lenient_error
+        logger.warning(
+            "Recovered malformed document %s (%s) — repairs: %s",
+            document,
+            strict_error,
+            "; ".join(applied) or "none",
+        )
+        return root
+
 
 def _local(tag: str) -> str:
     """Strip an XML namespace prefix, returning the bare lowercase tag name."""
@@ -123,8 +312,9 @@ def _find_opf_path(archive: zipfile.ZipFile) -> str:
 
     Raises:
         ValueError: If the container declares no OPF rootfile.
+        EpubParseError: If ``container.xml`` cannot be parsed or recovered.
     """
-    container_root = ET.fromstring(archive.read(_CONTAINER_PATH))
+    container_root = _parse_xml(archive.read(_CONTAINER_PATH), document=_CONTAINER_PATH)
     for element in container_root.iter():
         if _local(element.tag) == "rootfile":
             full_path = element.get("full-path")
@@ -148,6 +338,48 @@ def _read_metadata(opf_root: ET.Element) -> tuple[str, list[str], str]:
         elif tag == "language" and not language:
             language = text
     return title, authors, language
+
+
+@dataclass(frozen=True)
+class EpubMetadata:
+    """Package-level metadata of an EPUB, without parsing its content.
+
+    Attributes:
+        title: ``dc:title``, or an empty string when the package declares none.
+        authors: Every ``dc:creator``, in declaration order.
+        language: ``dc:language`` (e.g. ``sl``), or an empty string.
+    """
+
+    title: str
+    authors: list[str]
+    language: str
+
+
+def read_epub_metadata(path: Path) -> EpubMetadata:
+    """Read an EPUB's title, authors, and language without parsing its content.
+
+    The full :func:`normalize_epub` walk is far too expensive for callers that
+    only need to label a file (the LAN catalog, a library listing). This reads
+    the container and the OPF package document and stops there.
+
+    Args:
+        path: Path to the ``.epub`` file.
+
+    Returns:
+        The package metadata; fields the package omits are empty.
+
+    Raises:
+        ValueError: If the EPUB container declares no OPF rootfile.
+        KeyError: If ``META-INF/container.xml`` is missing from the archive.
+        zipfile.BadZipFile: If *path* is not a valid zip archive.
+        EpubParseError: If the container or OPF XML is malformed beyond
+            recovery (:class:`EpubParseError` is a :class:`ValueError`).
+    """
+    with zipfile.ZipFile(path) as archive:
+        opf_path = _find_opf_path(archive)
+        opf_root = _parse_xml(archive.read(opf_path), document=opf_path)
+    title, authors, language = _read_metadata(opf_root)
+    return EpubMetadata(title=title, authors=authors, language=language)
 
 
 def _read_manifest(opf_root: ET.Element, opf_dir: str) -> dict[str, str]:
@@ -205,9 +437,9 @@ def _read_spine(opf_root: ET.Element, manifest: dict[str, str]) -> list[str]:
     return hrefs
 
 
-def _parse_ncx_titles(data: bytes, ncx_dir: str) -> dict[str, str]:
+def _parse_ncx_titles(data: bytes, ncx_dir: str, document: str) -> dict[str, str]:
     """Extract ``{document path: chapter title}`` from a ``toc.ncx`` document."""
-    root = ET.fromstring(data)
+    root = _parse_xml(data, document=document)
     titles: dict[str, str] = {}
     for nav_point in root.iter():
         if _local(nav_point.tag) != "navpoint":
@@ -227,9 +459,9 @@ def _parse_ncx_titles(data: bytes, ncx_dir: str) -> dict[str, str]:
     return titles
 
 
-def _parse_nav_titles(data: bytes, nav_dir: str) -> dict[str, str]:
+def _parse_nav_titles(data: bytes, nav_dir: str, document: str) -> dict[str, str]:
     """Extract ``{document path: chapter title}`` from an EPUB3 nav document's toc."""
-    root = ET.fromstring(data)
+    root = _parse_xml(data, document=document)
     toc_nav = None
     for element in root.iter():
         if _local(element.tag) != "nav":
@@ -289,17 +521,25 @@ def _locate_archive_member(
 def _titles_from_member(
     archive: zipfile.ZipFile,
     href: str,
-    parse: Callable[[bytes, str], dict[str, str]],
+    parse: Callable[[bytes, str, str], dict[str, str]],
     *,
     label: str,
     suffix: str | None = None,
 ) -> dict[str, str]:
     """Parse chapter titles out of one TOC document, tolerating a renamed file.
 
+    A TOC document that cannot be parsed even leniently is a *degradation*,
+    not data loss — no segment, heading or image lives in it, and chapter
+    titles fall back to the ladder in :func:`normalize_epub`. It is therefore
+    the one place that still warns and continues rather than raising, and its
+    downstream consequence is reported at ERROR level by
+    :func:`_warn_on_title_collapse`. A spine document, which *does* carry
+    content, is never treated this way.
+
     Args:
         archive: The open EPUB zip archive.
         href: Zip-internal path as declared by the OPF manifest.
-        parse: ``(data, base_dir) -> {document path: title}`` parser.
+        parse: ``(data, base_dir, document) -> {document path: title}`` parser.
         label: Human label for log messages (``"toc.ncx"`` / ``"nav document"``).
         suffix: Passed through to :func:`_locate_archive_member`.
 
@@ -313,8 +553,8 @@ def _titles_from_member(
     if located != href:
         logger.warning("%s declared at %s resolved to %s in the archive", label, href, located)
     try:
-        return parse(archive.read(located), posixpath.dirname(located))
-    except (KeyError, ET.ParseError) as exc:
+        return parse(archive.read(located), posixpath.dirname(located), located)
+    except (KeyError, EpubParseError) as exc:
         logger.warning("Could not parse %s at %s: %s", label, located, exc)
         return {}
 
@@ -587,6 +827,80 @@ def _load_image(
     )
 
 
+@dataclass(frozen=True)
+class _ParsedDocument:
+    """One spine document after parsing, before chapters are assigned.
+
+    Attributes:
+        href: Zip-internal path of the document.
+        doc_root: The parsed document root, kept for the ``<title>`` fallback.
+        block_texts: ``(type, heading level, text)`` per non-empty block, in
+            document order.
+        image_refs: ``(index of the block the image follows, resolved archive
+            path, alt text)`` per image reference, in document order.
+            :data:`_LEADING_ANCHOR` means nothing precedes it in this document.
+    """
+
+    href: str
+    doc_root: ET.Element
+    block_texts: list[tuple[SegmentType, int | None, str]]
+    image_refs: list[tuple[int, str, str | None]]
+
+
+def _parse_spine_documents(
+    archive: zipfile.ZipFile, spine_hrefs: list[str]
+) -> list[_ParsedDocument]:
+    """Parse every spine document, losing none of them silently.
+
+    Args:
+        archive: The open EPUB zip archive.
+        spine_hrefs: Spine document paths, in document order.
+
+    Returns:
+        One :class:`_ParsedDocument` per spine document that has a ``<body>``.
+
+    Raises:
+        EpubParseError: If a spine document is absent from the archive or
+            cannot be parsed even under the leniency rule. Both were silent
+            ``continue``s before (review finding 2): a lost spine document
+            takes every paragraph, heading and image in it with it.
+    """
+    parsed: list[_ParsedDocument] = []
+    for href in spine_hrefs:
+        try:
+            doc_bytes = archive.read(href)
+        except KeyError as exc:
+            raise EpubParseError(href, "declared in the spine but absent from the archive") from exc
+        doc_root = _parse_xml(doc_bytes, document=href)
+
+        body = _find_body(doc_root)
+        if body is None:
+            logger.warning("Spine document %s has no <body> element; it contributes nothing", href)
+            continue
+
+        doc_dir = posixpath.dirname(href)
+        block_texts: list[tuple[SegmentType, int | None, str]] = []
+        image_refs: list[tuple[int, str, str | None]] = []
+        for node in _iter_blocks(body):
+            if node.block_type is None:
+                image_href = _image_href(node.element)
+                if not image_href or image_href.startswith("data:"):
+                    continue
+                resolved = _locate_archive_member(
+                    archive, _resolve(doc_dir, _strip_fragment(image_href))
+                )
+                if resolved is None:
+                    logger.warning("Image %s referenced by %s not found", image_href, href)
+                    continue
+                image_refs.append((len(block_texts) - 1, resolved, node.element.get("alt") or None))
+                continue
+            text = _block_text(node.element)
+            if text:
+                block_texts.append((node.block_type, node.heading_level, text))
+        parsed.append(_ParsedDocument(href, doc_root, block_texts, image_refs))
+    return parsed
+
+
 def normalize_epub(path: Path) -> Book:
     """Parse an EPUB file into a :class:`~berilo.models.Book`.
 
@@ -597,9 +911,12 @@ def normalize_epub(path: Path) -> Book:
     nav/TOC document itself) is skipped and consumes no chapter slot.
 
     Images referenced by ``<img>`` (or an SVG ``<image>`` cover wrapper) are
-    carried as book-level :class:`~berilo.models.ImageResource` entries, one
-    per unique source file, each anchored to the segment it follows — never
-    as segments, which would shift every later segment id.
+    carried as book-level :class:`~berilo.models.ImageResource` entries, each
+    anchored to the segment it follows — never as segments, which would shift
+    every later segment id. A source file referenced at least
+    :data:`RECURRING_IMAGE_MIN_REFERENCES` times is furniture (a logo, a
+    chapter ornament) and is carried once; anything referenced fewer times is
+    a figure and is carried at every placement.
 
     Chapter titles resolve in this order: the document's own TOC entry; the
     title of the preceding document (TOC entries mark chapter starts, so an
@@ -615,15 +932,14 @@ def normalize_epub(path: Path) -> Book:
 
     Raises:
         ValueError: If the EPUB container declares no OPF rootfile.
-        KeyError: If the OPF references a spine document missing from the
-            archive.
+        EpubParseError: If the container, the OPF, or any spine document is
+            missing or malformed beyond recovery. Spine documents are never
+            skipped — see :func:`_parse_spine_documents`.
         zipfile.BadZipFile: If *path* is not a valid zip archive.
-        xml.etree.ElementTree.ParseError: If the OPF or container XML is
-            malformed.
     """
     with zipfile.ZipFile(path) as archive:
         opf_path = _find_opf_path(archive)
-        opf_root = ET.fromstring(archive.read(opf_path))
+        opf_root = _parse_xml(archive.read(opf_path), document=opf_path)
         opf_dir = posixpath.dirname(opf_path)
 
         title, authors, language = _read_metadata(opf_root)
@@ -632,61 +948,39 @@ def normalize_epub(path: Path) -> Book:
         spine_hrefs = _read_spine(opf_root, manifest)
         chapter_titles = _read_toc_titles(archive, opf_root, opf_dir)
 
+        parsed_documents = _parse_spine_documents(archive, spine_hrefs)
+        # A source file referenced this many times is furniture and is carried
+        # once; a figure reused two or three times keeps every placement.
+        reference_counts = Counter(
+            resolved for document in parsed_documents for _, resolved, _ in document.image_refs
+        )
+
         segments: list[Segment] = []
         images: list[ImageResource] = []
         # Images referenced by a document that yields no segments (a cover
         # page) have no chapter of their own; they lead the next chapter that
         # does get one.
         pending_images: list[tuple[str, str | None]] = []
-        seen_image_paths: set[str] = set()
+        carried_furniture: set[str] = set()
         chapter_index = 0
         position = 0
         toc_resolved = bool(chapter_titles)
         previous_title: str | None = None
-        for href in spine_hrefs:
-            try:
-                doc_bytes = archive.read(href)
-            except KeyError:
-                logger.warning("Spine document %s missing from archive; skipping", href)
-                continue
-            try:
-                doc_root = ET.fromstring(doc_bytes)
-            except ET.ParseError as exc:
-                logger.warning("Spine document %s is not well-formed XML: %s", href, exc)
-                continue
+        for document in parsed_documents:
+            href = document.href
+            doc_root = document.doc_root
+            block_texts = document.block_texts
 
-            body = _find_body(doc_root)
-            if body is None:
-                continue
-
-            doc_dir = posixpath.dirname(href)
-            block_texts: list[tuple[SegmentType, int | None, str]] = []
-            # (index of the block this image follows, resolved path, alt text);
-            # _LEADING_ANCHOR means nothing precedes it in this document.
             doc_images: list[tuple[int, str, str | None]] = []
-            for node in _iter_blocks(body):
-                if node.block_type is None:
-                    image_href = _image_href(node.element)
-                    if not image_href or image_href.startswith("data:"):
+            for anchor_index, resolved, alt in document.image_refs:
+                if reference_counts[resolved] >= RECURRING_IMAGE_MIN_REFERENCES:
+                    # Furniture: one resource per source file, so a logo
+                    # repeated on every chapter is not packaged N times.
+                    if resolved in carried_furniture:
                         continue
-                    resolved = _locate_archive_member(
-                        archive, _resolve(doc_dir, _strip_fragment(image_href))
-                    )
-                    if resolved is None:
-                        logger.warning("Image %s referenced by %s not found", image_href, href)
-                        continue
-                    if resolved in seen_image_paths:
-                        # One resource per source file: a logo repeated on
-                        # every chapter must not be packaged N times.
-                        continue
-                    seen_image_paths.add(resolved)
-                    doc_images.append(
-                        (len(block_texts) - 1, resolved, node.element.get("alt") or None)
-                    )
-                    continue
-                text = _block_text(node.element)
-                if text:
-                    block_texts.append((node.block_type, node.heading_level, text))
+                    carried_furniture.add(resolved)
+                doc_images.append((anchor_index, resolved, alt))
+
             if not block_texts:
                 pending_images.extend((resolved, alt) for _, resolved, alt in doc_images)
                 continue

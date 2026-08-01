@@ -13,7 +13,13 @@ import logging
 import openai as openai_sdk
 
 from berilo.providers import retry_with_backoff
-from berilo.providers.base import CompletionResult, ContentPolicyError, LLMClient
+from berilo.providers.base import (
+    CompletionResult,
+    ContentPolicyError,
+    EmptyCompletionError,
+    LLMClient,
+    TruncatedCompletionError,
+)
 from berilo.providers.pricing import cost_eur
 
 logger = logging.getLogger(__name__)
@@ -93,6 +99,13 @@ class OpenAIClient(LLMClient):
                 given.
             openai.OpenAIError: Propagated from the SDK after retries are
                 exhausted (or immediately for non-retryable errors).
+            ContentPolicyError: If OpenAI refuses the request on
+                content-policy grounds.
+            TruncatedCompletionError: If the response was cut off before it
+                finished (``finish_reason="length"``) — e.g. a reasoning
+                model exhausting ``max_tokens`` on hidden reasoning.
+            EmptyCompletionError: If the response carries no completion text
+                for any other reason, despite being billed.
         """
         if (prompt is None) == (messages is None):
             raise ValueError("complete() requires exactly one of `prompt` or `messages`.")
@@ -124,13 +137,33 @@ class OpenAIClient(LLMClient):
                 ) from exc
             raise
 
-        text = response.choices[0].message.content or ""
+        choice = response.choices[0]
+        text = choice.message.content or ""
         input_tokens = response.usage.prompt_tokens
         output_tokens = response.usage.completion_tokens
-        return CompletionResult(
+        # Computed before the truncation/emptiness checks below so a caller
+        # that degrades instead of propagating (see EmptyCompletionError /
+        # TruncatedCompletionError) can still fold this call's real, billed
+        # cost into its accounting via the exception's `result` attribute.
+        billed_result = CompletionResult(
             text=text,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_eur=cost_eur(self.model, input_tokens, output_tokens),
             model=self.model,
         )
+        if choice.finish_reason == "length":
+            raise TruncatedCompletionError(
+                f"OpenAI truncated the completion for model {self.model} "
+                f"(finish_reason='length', {output_tokens} output tokens billed); "
+                "the response is incomplete. Increase max_tokens or reduce the batch size.",
+                result=billed_result,
+            )
+        if not text:
+            raise EmptyCompletionError(
+                f"OpenAI returned no completion text for model {self.model} "
+                f"(finish_reason={choice.finish_reason!r}, {output_tokens} output "
+                "tokens billed).",
+                result=billed_result,
+            )
+        return billed_result

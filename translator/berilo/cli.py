@@ -2,11 +2,13 @@
 
 Subcommands (all implemented): ``translate`` (S1.5), ``inspect`` (S1.1, with
 ``--screen`` from S1.2), ``eval`` (S1.7, Rubric T; ``--dump``/``--judge-repeats``
-from S1.9), ``ab`` (S1.11, paired prompt-variant experiments), ``doctor`` (S1.4).
+from S1.9), ``ab`` (S1.11, paired prompt-variant experiments), ``doctor`` (S1.4),
+``serve`` (S1.15, LAN book handoff to the tablet).
 """
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import zipfile
@@ -14,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
+from click.core import ParameterSource
 
 from berilo import prompts
 from berilo.cache import BASELINE_PROMPT_VERSION
@@ -64,9 +67,10 @@ def cli() -> None:
     "style_name",
     default=None,
     help=(
-        "Translation prompt style from berilo.prompts "
-        f"(default: {prompts.DEFAULT_STYLE_NAME}, which adds a native-editor "
-        "revision pass; use baseline_v1 for the cheaper single-pass prompt)."
+        "Translation prompt style from berilo.prompts (default: resolved from "
+        "--to — a two-pass native-editor style, revise_v1 for Slovenian and "
+        "revise_generic_v1 otherwise; use baseline_v1 for the cheaper "
+        "single-pass prompt). A style bound to another language is refused."
     ),
 )
 @click.option(
@@ -103,8 +107,10 @@ def translate(
     is enforced socially — the estimate and a "proceeding" line print first).
     Use ``--dry-run`` to see the estimate without spending anything.
 
-    The prompt style defaults to :data:`berilo.prompts.DEFAULT`; pass
-    ``--style baseline_v1`` for the cheaper single-pass prompt.
+    The prompt style is resolved from the target language (see
+    :func:`berilo.prompts.resolve_style`); pass ``--style baseline_v1`` for the
+    cheaper single-pass prompt. Naming a style bound to another language is a
+    refusal, not a silent contradiction.
     """
     from dotenv import find_dotenv
 
@@ -112,7 +118,7 @@ def translate(
     from berilo.translate import back_matter_segment_ids, estimate_cost
 
     try:
-        style = prompts.get_style(style_name or prompts.DEFAULT_STYLE_NAME)
+        requested_style = prompts.get_style(style_name) if style_name else None
     except KeyError as exc:
         click.echo(f"translate: {exc}", err=True)
         ctx.exit(INPUT_ERROR_EXIT_CODE)
@@ -129,6 +135,14 @@ def translate(
     config = load_config(env_file=env_file, translation_model=model, target_lang=target_language)
     model_name = config.translation_model
     lang = config.target_lang
+
+    try:
+        style = prompts.resolve_style(lang, requested=requested_style)
+    except prompts.StyleLanguageError as exc:
+        click.echo(f"translate: {exc}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+        return
+
     skip_ids = back_matter_segment_ids(book) if skip_back_matter else set()
 
     if dry_run:
@@ -193,6 +207,10 @@ def translate(
 
     cache = TranslationCache(cache_db or DEFAULT_CACHE_PATH)
     tracked_client = _CostTrackingClient(client)
+    # Wrap the fallback client too: a content-policy-refused batch is real spend
+    # against a second provider, and the printed total must include it (review
+    # finding 5) rather than silently under-reporting the run's actual cost.
+    tracked_fallback = _CostTrackingClient(fallback_client) if fallback_client is not None else None
     try:
         glossary = None
         if not no_glossary:
@@ -207,14 +225,18 @@ def translate(
             glossary=glossary,
             skip_segment_ids=skip_ids,
             on_progress=_on_progress,
-            fallback_client=fallback_client,
+            fallback_client=tracked_fallback,
             style=style,
+        )
+        total_cost_eur = tracked_client.total_cost_eur + (
+            tracked_fallback.total_cost_eur if tracked_fallback is not None else 0.0
         )
         _print_summary(
             latest.get("stats"),
             skip_back_matter=skip_back_matter,
-            total_cost_eur=tracked_client.total_cost_eur,
+            total_cost_eur=total_cost_eur,
             style=style,
+            target_lang=lang,
         )
 
         out_path = Path(output) if output else _default_output_path(source_file, lang)
@@ -306,6 +328,7 @@ def _print_summary(
     skip_back_matter: bool,
     total_cost_eur: float | None = None,
     style: prompts.TranslationStyle | None = None,
+    target_lang: str | None = None,
 ) -> None:
     """Print the end-of-run summary line.
 
@@ -316,11 +339,17 @@ def _print_summary(
         style: Prompt style used. When it carries a revision pass, any batch
             whose revision could not be applied is surfaced loudly — those
             segments silently hold only single-pass quality.
+        target_lang: Target language the style was resolved for, named beside
+            it so the resolution is visible in the run summary (plan §3.3)
+            rather than inferred from the default.
     """
     if stats is None:
         return
     total = stats.cost_eur if total_cost_eur is None else total_cost_eur
-    style_note = f" Style: {style.name}." if style is not None else ""
+    style_note = ""
+    if style is not None:
+        resolved_for = f" (resolved for '{target_lang}')" if target_lang else ""
+        style_note = f" Style: {style.name}{resolved_for}."
     click.echo(
         f"Done: {stats.total_segments} segments "
         f"({stats.translated_segments} translated, {stats.cached_segments} from cache, "
@@ -713,7 +742,7 @@ def ab(
     from berilo.eval.judge import Judge, JudgeError
     from berilo.eval.rubric_t import AlignmentError
     from berilo.glossary import Glossary
-    from berilo.prompts import get_style
+    from berilo.prompts import StyleLanguageError, ensure_supports, get_style
     from berilo.translate import TranslationError
 
     env_file = find_dotenv(usecwd=True) or None
@@ -727,7 +756,8 @@ def ab(
 
     try:
         style = get_style(variant)
-    except KeyError as exc:
+        ensure_supports(style, lang)
+    except (KeyError, StyleLanguageError) as exc:
         click.echo(f"ab: {exc}", err=True)
         ctx.exit(INPUT_ERROR_EXIT_CODE)
         return
@@ -832,6 +862,102 @@ def ab(
         click.echo(json.dumps(experiment.result_to_dict(result), ensure_ascii=False, indent=2))
     else:
         click.echo(experiment.format_result(result))
+
+
+@cli.command()
+@click.option(
+    "--dir",
+    "directory",
+    default="data/examples",
+    show_default=True,
+    type=click.Path(file_okay=False),
+    help="Directory of EPUBs to publish.",
+)
+@click.option(
+    "--port",
+    default=8577,
+    show_default=True,
+    help="TCP port to listen on; falls back to a free port if this one is busy.",
+)
+@click.option(
+    "--host",
+    default="0.0.0.0",  # noqa: S104 - the tablet has to be able to reach it
+    show_default=True,
+    help="Interface to bind; 127.0.0.1 keeps the server on this machine.",
+)
+@click.option("--no-qr", is_flag=True, help="Print the URL without a QR code.")
+@click.pass_context
+def serve(ctx: click.Context, directory: str, port: int, host: str, no_qr: bool) -> None:
+    """Publish translated EPUBs on the LAN so a tablet can download them.
+
+    Prints a tokenized URL (and a QR code for it) and serves until Ctrl-C.
+    Scan the code with the tablet, tap a book to download it, then import the
+    file in the reader app. Books are served from this machine only — nothing
+    is uploaded anywhere.
+    """
+    from berilo.serve.server import BookServer, lan_address_candidates
+
+    source_dir = Path(directory)
+    if not source_dir.is_dir():
+        click.echo(f"Not a directory: {source_dir}", err=True)
+        ctx.exit(INPUT_ERROR_EXIT_CODE)
+
+    explicit_port = ctx.get_parameter_source("port") is not ParameterSource.DEFAULT
+    try:
+        server = BookServer(source_dir, host=host, port=port)
+    except OSError as error:
+        if explicit_port:
+            click.echo(f"Could not bind {host}:{port} — {error}", err=True)
+            ctx.exit(INPUT_ERROR_EXIT_CODE)
+            return
+        # The default port is a popular one; rather than fail, take any free
+        # port — the URL is printed and QR-encoded anyway, so it costs nothing.
+        click.echo(f"Port {port} is busy ({error.strerror}); using a free port.", err=True)
+        try:
+            server = BookServer(source_dir, host=host, port=0)
+        except OSError as fallback_error:
+            click.echo(f"Could not bind {host} — {fallback_error}", err=True)
+            ctx.exit(INPUT_ERROR_EXIT_CODE)
+            return
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    books = server.catalog()
+    bound_host = host if host not in ("0.0.0.0", "") else None  # noqa: S104
+    url = server.url(bound_host)
+
+    click.echo(f"Berilo — {len(books)} EPUB(s) from {source_dir}")
+    click.echo(url)
+    if not no_qr:
+        click.echo(_qr_block(url))
+
+    # Address detection is a guess: a box with a VPN or Docker bridges has
+    # many addresses and the routing table cannot know which one the tablet
+    # shares a network with. Show the alternatives so a wrong guess is a
+    # visible second option, not a silent timeout.
+    if bound_host is None:
+        alternatives = [address for address in lan_address_candidates() if address not in url]
+        if alternatives:
+            click.echo("\nIf that address does not load, try:")
+            for address in alternatives:
+                click.echo(f"  http://{address}:{server.port}/?t={server.token}")
+    click.echo("\nCtrl-C to stop.\n")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("\nStopped.")
+
+
+def _qr_block(url: str) -> str:
+    """Render *url* as a QR code for the terminal, or a hint if segno is missing."""
+    try:
+        import segno
+    except ImportError:  # pragma: no cover - depends on the install
+        return "(install `segno` for a scannable QR code)"
+
+    buffer = io.StringIO()
+    segno.make(url, error="m").terminal(buffer, compact=True)
+    return buffer.getvalue()
 
 
 @cli.command()

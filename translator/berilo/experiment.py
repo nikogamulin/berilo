@@ -61,7 +61,7 @@ from berilo.eval.rubric_t import (
     excluded_chapter_indices,
     restrict_to_body,
 )
-from berilo.glossary import Glossary
+from berilo.glossary import Glossary, glossary_identity
 from berilo.models import Book, Segment, SegmentType
 from berilo.prompts import TranslationStyle
 from berilo.providers.base import LLMClient
@@ -245,8 +245,12 @@ def _lead_in_for(
 
     A predecessor qualifies only if it is in the same chapter, has text, already
     has a translation to seed, and does not share a source-text hash with any
-    judged segment — a shared hash would make the seeded context row satisfy a
-    judged segment's cache lookup and silently leave it un-translated.
+    judged segment *anywhere in the candidate pool* — not just this run's own
+    segments. ``forbidden_hashes`` must be pool-wide: ``segment_hash`` keys on
+    text alone, so a paragraph repeated verbatim elsewhere in the book would
+    otherwise let one run's lead-in seed a cache row that a completely
+    different run's judged segment then hits, serving it the control
+    translation at €0 instead of translating it (review finding 12).
     """
     collected: list[tuple[Segment, str]] = []
     chapter = source.segments[start].chapter_index
@@ -272,9 +276,14 @@ def candidate_runs(
 
     Within each maximal block of eligible segments the runs are laid out with a
     ``context_pairs``-wide gap between them, so no segment is ever both a judged
-    segment of one run and the rolling-context lead-in of another. That gap is
-    also what keeps the clusters independent: two runs never share a batch, a
-    prompt, or a context window.
+    segment of one run and the rolling-context lead-in of *the same run's own
+    tiling*. That gap is also what keeps the clusters independent: two runs
+    never share a batch, a prompt, or a context window. It does not, by itself,
+    protect against a paragraph that recurs verbatim elsewhere in the book —
+    same ``segment_hash``, different run — so the forbidden-hash set used to
+    build every run's lead-in is computed once, pool-wide, from every run's
+    judged segments before any lead-in is built (review finding 12: a per-run
+    set missed exactly this cross-run collision).
 
     Args:
         source: The normalized source book.
@@ -292,22 +301,31 @@ def candidate_runs(
     controls = _control_map(source, translated)
     stride = run_length + max(context_pairs, 0)
 
+    tilings: list[list[int]] = [
+        block[offset : offset + run_length]
+        for block in _eligible_blocks(source, controls)
+        for offset in range(0, len(block) - run_length + 1, stride)
+    ]
+    # Pool-wide, not per-run: a judged segment of ANY candidate run must never
+    # be servable as another run's lead-in, however the caller later selects
+    # among them (review finding 12).
+    forbidden_hashes = {
+        segment_hash(source.segments[i].text) for indices in tilings for i in indices
+    }
+
     runs: list[ProseRun] = []
-    for block in _eligible_blocks(source, controls):
-        for offset in range(0, len(block) - run_length + 1, stride):
-            indices = block[offset : offset + run_length]
-            segments = tuple(source.segments[i] for i in indices)
-            hashes = {segment_hash(seg.text) for seg in segments}
-            runs.append(
-                ProseRun(
-                    chapter_index=segments[0].chapter_index,
-                    chapter_title=segments[0].chapter_title,
-                    start_position=indices[0],
-                    segments=segments,
-                    control_texts=tuple(controls[seg.id] for seg in segments),
-                    lead_in=_lead_in_for(source, indices[0], controls, context_pairs, hashes),
-                )
+    for indices in tilings:
+        segments = tuple(source.segments[i] for i in indices)
+        runs.append(
+            ProseRun(
+                chapter_index=segments[0].chapter_index,
+                chapter_title=segments[0].chapter_title,
+                start_position=indices[0],
+                segments=segments,
+                control_texts=tuple(controls[seg.id] for seg in segments),
+                lead_in=_lead_in_for(source, indices[0], controls, context_pairs, forbidden_hashes),
             )
+        )
     return runs
 
 
@@ -528,7 +546,16 @@ class ExperimentResult:
         plan: The plan that was executed.
         pairs: Every judged segment, in run order.
         deltas: Per-dimension paired deltas with cluster-bootstrap CIs.
-        translation_cost_eur: EUR actually spent producing the variant.
+        translation_cost_eur: EUR actually spent producing the variant,
+            including the one-time book-context style-memo derivation (see
+            :attr:`memo_cost_eur`) when the variant style needs one.
+        memo_cost_eur: The share of :attr:`translation_cost_eur` spent
+            deriving the book-context style memo (``0.0`` for a memo-less
+            style or a cached memo). Excluded from :attr:`eur_per_1k_words` /
+            :attr:`eur_per_100k_words`, whose docstrings promise a *marginal*
+            per-word rate with per-book fixed costs excluded —
+            :attr:`total_cost_eur` still includes it, since that figure is
+            actual total spend (review finding 8).
         judge_cost_eur: EUR actually spent judging both arms.
         translation_api_calls: Translation API calls actually made.
         revision_failures: Batches whose revision pass could not be applied
@@ -539,6 +566,7 @@ class ExperimentResult:
     pairs: tuple[JudgedPair, ...]
     deltas: tuple[DimensionDelta, ...]
     translation_cost_eur: float
+    memo_cost_eur: float
     judge_cost_eur: float
     translation_api_calls: int
     revision_failures: int
@@ -555,12 +583,16 @@ class ExperimentResult:
         Only the *translation* arm counts: judging is a measurement expense, not
         something a reader's translation would pay. Per-book fixed costs
         (glossary, style memo) are amortized over the whole book in production
-        and are excluded here, so this figure tracks the marginal per-word rate.
+        and are excluded here, so this figure tracks the marginal per-word rate —
+        :attr:`memo_cost_eur` is subtracted out rather than folded in, so an
+        uncached book-context memo cannot inflate this rate against Rubric T7
+        (review finding 8).
         """
         words = self.plan.source_words
         if words <= 0:
             return 0.0
-        return self.translation_cost_eur / (words / WORDS_PER_COST_UNIT)
+        marginal_cost_eur = self.translation_cost_eur - self.memo_cost_eur
+        return marginal_cost_eur / (words / WORDS_PER_COST_UNIT)
 
     @property
     def eur_per_100k_words(self) -> float:
@@ -767,6 +799,7 @@ def seed_control_translations(
     target_lang: str,
     control_version: str,
     variant_version: str,
+    glossary_hash_: str,
 ) -> None:
     """Write the existing translations into the scratch cache.
 
@@ -788,6 +821,9 @@ def seed_control_translations(
         target_lang: Target language code.
         control_version: Prompt version of the existing translation.
         variant_version: Prompt version the variant will be written under.
+        glossary_hash_: Identity of the glossary the variant run will inject.
+            The seeded rows must carry it or the variant's lookup misses and
+            the lead-ins are re-translated at real cost.
     """
     no_cost = CallRecord(kind="ab_seed", input_tokens=0, output_tokens=0, cost_eur=0.0)
 
@@ -802,10 +838,16 @@ def seed_control_translations(
         for segment, control in run.lead_in
     ]
     if judged:
-        cache.store_batch(scratch_hash, model, target_lang, judged, no_cost, control_version)
+        cache.store_batch(
+            scratch_hash, model, target_lang, judged, no_cost, control_version, glossary_hash_
+        )
     if lead_in:
-        cache.store_batch(scratch_hash, model, target_lang, lead_in, no_cost, control_version)
-        cache.store_batch(scratch_hash, model, target_lang, lead_in, no_cost, variant_version)
+        cache.store_batch(
+            scratch_hash, model, target_lang, lead_in, no_cost, control_version, glossary_hash_
+        )
+        cache.store_batch(
+            scratch_hash, model, target_lang, lead_in, no_cost, variant_version, glossary_hash_
+        )
 
 
 def _prime_book_context(
@@ -960,6 +1002,7 @@ def run_experiment(
         target_lang=plan.target_lang,
         control_version=plan.control_version,
         variant_version=plan.variant_version,
+        glossary_hash_=glossary_identity(glossary),
     )
     memo_cost = _prime_book_context(
         source,
@@ -1018,6 +1061,7 @@ def run_experiment(
         pairs=pairs,
         deltas=deltas,
         translation_cost_eur=(stats.cost_eur if stats is not None else 0.0) + memo_cost,
+        memo_cost_eur=memo_cost,
         judge_cost_eur=judge.total_cost_eur,
         translation_api_calls=(stats.api_calls if stats is not None else 0)
         + (1 if memo_cost > 0 else 0),

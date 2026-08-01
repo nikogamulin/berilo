@@ -11,6 +11,7 @@ re-translation of the whole library.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 import zipfile
@@ -24,7 +25,7 @@ from berilo.assemble import build_epub
 from berilo.cache import book_hash
 from berilo.eval.rubric_t import align
 from berilo.models import Book, ImageResource, Segment, SegmentType
-from berilo.normalize.epub import normalize_epub
+from berilo.normalize.epub import RECURRING_IMAGE_MIN_REFERENCES, normalize_epub
 from berilo.normalize.pdf import (
     FULL_PAGE_IMAGE_AREA_RATIO,
     MIN_IMAGE_DIMENSION_PX,
@@ -321,8 +322,13 @@ def test_epub_image_count_survives_normalize_then_assemble(
     output = build_epub(book, tmp_path / "out.epub")
 
     assert len(source_images) == 3
-    assert len(book.images) == 3
-    assert len(_image_entries(output)) == len(source_images)
+    # Four PLACEMENTS of three files: figure2.png is referenced twice, and a
+    # figure referenced twice keeps both placements (review finding 16).
+    assert len(book.images) == 4
+    assert {Path(image.source_href).name for image in book.images} == {
+        Path(name).name for name in source_images
+    }
+    assert len(_image_entries(output)) == len(book.images)
 
 
 def test_epub_image_bytes_are_carried_through_unmodified(
@@ -339,11 +345,53 @@ def test_epub_image_bytes_are_carried_through_unmodified(
     assert built_bytes == source_bytes
 
 
-def test_repeated_reference_to_one_file_packages_one_resource(epub_builder, png_image) -> None:
+def test_figure_reused_twice_keeps_both_placements(epub_builder, png_image) -> None:
+    """Review finding 16: book-scoped dedup silently lost the second placement.
+
+    ``figure2.png`` is referenced twice in chapter two. Before the fix only the
+    first reference was carried, so the second figure vanished from the output
+    with no error. Two references is a reused figure, not furniture.
+    """
     book = normalize_epub(_source_epub_with_images(epub_builder, png_image))
 
-    hrefs = [image.source_href for image in book.images]
-    assert len(hrefs) == len(set(hrefs))
+    figure2 = [image for image in book.images if image.source_href.endswith("figure2.png")]
+
+    assert len(figure2) == 2
+    assert {image.id for image in figure2} == {image.id for image in figure2}
+    assert len({image.id for image in figure2}) == 2
+    assert {image.data for image in figure2} == {figure2[0].data}
+
+
+def test_recurring_furniture_image_is_carried_once(epub_builder, png_image) -> None:
+    """A file referenced RECURRING_IMAGE_MIN_REFERENCES times is furniture.
+
+    Mirrors the PDF path's ``RECURRING_IMAGE_MIN_PAGES`` cut: a chapter
+    ornament repeated on every chapter must not be packaged N times.
+    """
+    ornament = '<div><img src="img/orn.png" alt="ornament"/></div>'
+    path = epub_builder(
+        items=[
+            {
+                "id": f"c{index}",
+                "href": f"c{index}.xhtml",
+                "nav_title": f"Chapter {index}",
+                "body": f"<h1>Chapter {index}</h1>{ornament}<p>Body of chapter {index}.</p>",
+            }
+            for index in range(1, RECURRING_IMAGE_MIN_REFERENCES + 1)
+        ],
+        image_items=[
+            {
+                "id": "orn",
+                "href": "img/orn.png",
+                "media_type": "image/png",
+                "data": png_image(120, 120, (7, 7, 7)),
+            }
+        ],
+    )
+
+    book = normalize_epub(path)
+
+    assert [image.source_href for image in book.images] == ["img/orn.png"]
 
 
 def test_epub_image_anchors_to_the_segment_it_follows(epub_builder, png_image) -> None:
@@ -717,3 +765,40 @@ def test_pdf_images_reach_the_assembled_epub(tmp_path: Path, png_image) -> None:
     output = build_epub(book, tmp_path / "out.epub")
 
     assert len(_image_entries(output)) == len(book.images) == 1
+
+
+def test_image_with_a_cross_chapter_anchor_is_emitted_not_dropped(
+    tmp_path: Path, png_image, caplog
+) -> None:
+    """Review finding 15: an anchor pointing outside its own chapter.
+
+    ``_group_images`` buckets a chapter's images by anchor id, and the renderer
+    only emitted a bucket when a segment with that id was rendered in this
+    chapter — so an image assigned to chapter 1 but anchored to a chapter-0
+    segment was emitted nowhere and vanished with no error. It is now placed at
+    the end of its own chapter and the inconsistency is reported.
+    """
+    data = png_image(80, 80)
+    book = Book(
+        title="Sample Book",
+        authors=["Jane Doe"],
+        language="sl",
+        source_path="/tmp/sample.epub",
+        source_format="epub",
+        segments=[
+            _segment("Chapter one paragraph.", 0, chapter_index=0),
+            _segment("Chapter two paragraph.", 1, chapter_index=1),
+        ],
+        # chapter_index=1, but anchored to seg0, which lives in chapter 0.
+        images=[_image("dangling", data, anchor="seg0", chapter_index=1)],
+    )
+
+    with caplog.at_level(logging.WARNING, logger="berilo.assemble"):
+        output = build_epub(book, tmp_path / "out.epub")
+
+    assert len(_image_entries(output)) == 1
+    chapter_two = next(
+        body for name, body in _chapter_bodies(output).items() if "chap_0002" in name
+    )
+    assert "<img" in chapter_two
+    assert any("anchored to segments absent" in record.message for record in caplog.records)
