@@ -1175,6 +1175,8 @@ class CostEstimate:
     chapters: list[ChapterEstimate] = field(default_factory=list)
     revision_calls: int = 0
     book_context_calls: int = 0
+    mt_characters: int = 0
+    mt_cost_eur: float = 0.0
 
 
 def _batches_for(segment_count: int, batch_size: int) -> int:
@@ -1193,6 +1195,7 @@ def estimate_cost(
     skip_segment_ids: Collection[str] = (),
     glossary: bool = True,
     style: TranslationStyle = BASELINE,
+    mt_draft: bool = False,
 ) -> CostEstimate:
     """Estimate the cost of translating ``book`` without making any API calls.
 
@@ -1231,6 +1234,11 @@ def estimate_cost(
     skip = set(skip_segment_ids)
     reasoning = _is_reasoning_model(model)
     revising = style.revise_system is not None
+    # With a machine-translation draft the LLM never drafts: the editor pass is
+    # the only LLM call per batch. Pricing it as two would quote a cost the run
+    # does not incur, which is the same class of lie as an estimator that
+    # disagrees with the engine's batch size (Surface 4).
+    llm_drafts = not mt_draft
 
     # Group translatable segments by chapter, preserving first-seen order.
     chapters: dict[int, dict[str, object]] = {}
@@ -1263,9 +1271,15 @@ def estimate_cost(
 
         source_tokens = chars // CHARS_PER_TOKEN
         target_tokens = int(source_tokens * TARGET_EXPANSION)
-        input_tokens = source_tokens + batches * PROMPT_OVERHEAD_TOKENS_PER_BATCH
-        output_tokens = target_tokens
-        calls = batches
+        if llm_drafts:
+            input_tokens = source_tokens + batches * PROMPT_OVERHEAD_TOKENS_PER_BATCH
+            output_tokens = target_tokens
+            calls = batches
+        else:
+            # Google drafted; the LLM's only work is the editor pass below.
+            input_tokens = 0
+            output_tokens = 0
+            calls = 0
 
         if revising:
             # The editor pass re-reads the source and the draft, and rewrites
@@ -1313,6 +1327,23 @@ def estimate_cost(
     output_tokens = sum(c.output_tokens for c in chapter_estimates) + extra_output
     total_cost = cost_eur(model, input_tokens, output_tokens)
 
+    # Machine translation bills per SOURCE CHARACTER, not per token, so it is
+    # priced separately and added on. Leaving it out would quote the cheaper
+    # half of a run that is dominated by the other half — MT costs roughly nine
+    # times the whole LLM pipeline it assists.
+    mt_characters = 0
+    mt_cost = 0.0
+    if mt_draft:
+        from berilo.providers.google_translate import cost_eur_for_chars
+
+        mt_characters = sum(
+            len(segment.text.strip())
+            for segment in book.segments
+            if segment.text.strip() and segment.id not in skip
+        )
+        mt_cost = cost_eur_for_chars(mt_characters)
+        total_cost += mt_cost
+
     return CostEstimate(
         model=model,
         target_lang=target_lang,
@@ -1329,4 +1360,6 @@ def estimate_cost(
         chapters=chapter_estimates,
         revision_calls=total_revision_calls,
         book_context_calls=book_context_calls,
+        mt_characters=mt_characters,
+        mt_cost_eur=mt_cost,
     )

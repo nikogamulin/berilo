@@ -161,3 +161,27 @@ def test_the_price_is_the_documented_list_price():
     # 1M characters at USD 20 * 0.92 EUR/USD.
     assert cost_eur_for_chars(1_000_000) == pytest.approx(18.4)
     assert cost_eur_for_chars(0) == 0.0
+
+
+def test_the_estimate_prices_the_mt_path_it_actually_runs():
+    """An estimator that ignores --mt-draft quotes a run that does not happen.
+
+    Two errors in opposite directions, and both matter: it prices the LLM's
+    drafting call that MT replaces, and it omits Google's per-character bill
+    entirely — which is the dominant term.
+    """
+    from berilo.translate import estimate_cost
+
+    book = _paragraphs(40)
+    style = get_style("revise_v1")
+
+    plain = estimate_cost(book, model="gpt-5-mini", target_lang="sl", style=style)
+    mt = estimate_cost(book, model="gpt-5-mini", target_lang="sl", style=style, mt_draft=True)
+
+    assert plain.mt_characters == 0 and plain.mt_cost_eur == 0.0
+    assert mt.mt_characters > 0, "the source characters Google would bill"
+    assert mt.mt_cost_eur > 0, "and their price"
+    # The LLM does strictly less work: no drafting pass.
+    assert mt.output_tokens < plain.output_tokens
+    # And the quoted total must include Google, not just the cheaper LLM half.
+    assert mt.cost_eur > mt.mt_cost_eur

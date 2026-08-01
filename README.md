@@ -235,14 +235,21 @@ a different task from translating cold. Whether that shows up as a Rubric T
 gain is a measurement, not an opinion:
 
 ```bash
-berilo translate corpus/build/berilo-sample-standard.epub --to sl --style revise_v1
-berilo eval corpus/build/berilo-sample-standard.sl.epub --sample 40 --seed 42
-# then the same two commands with --mt-draft, and compare the scores and CIs
+# price both arms, make zero calls
+python3 -m berilo.eval.verify --what mt --dry-run
+
+# run both arms, each with its own cache, and score both with Rubric T
+python3 -m berilo.eval.verify --what mt
 ```
 
-Run that on the sample corpus (~€0.13 of LLM plus ~€1 of Google) before
-spending €13 on a book you care about. Costs are reported separately —
-character-billed MT spend never hides inside the token arithmetic.
+Each arm gets its **own cache**. That is not tidiness: a shared cache would
+serve the second arm from the first arm's rows at €0 and measure nothing, which
+has happened in this project before. The same command compares the batching
+change — `--what speed`.
+
+On the sample corpus the dry run prints ~€0.11 for the LLM-only arm against
+~€1.37 with Google. Run it before spending €13 on a book you care about. MT
+spend is reported separately and never hides inside the token arithmetic.
 
 ## Reader app (Phase 2, Android / Boox)
 

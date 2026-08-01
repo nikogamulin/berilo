@@ -231,6 +231,7 @@ def translate(
             skip_segment_ids=skip_ids,
             glossary=not no_glossary,
             style=style,
+            mt_draft=mt_draft,
             **_batching_kwargs(None, batch_size),
         )
         _print_estimate(estimate, skip_back_matter=skip_back_matter, style=style)
@@ -263,6 +264,7 @@ def translate(
         skip_segment_ids=skip_ids,
         glossary=not no_glossary,
         style=style,
+        mt_draft=mt_draft,
         **_batching_kwargs(None, batch_size),
     )
     click.echo(
