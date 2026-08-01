@@ -126,12 +126,29 @@ def run_arm(
     return ArmResult(label, elapsed, output)
 
 
-def score_arm(result: ArmResult, sample: int, seed: int) -> str:
-    """Score one arm with Rubric T and return the printed report."""
+def score_arm(result: ArmResult, source: Path, sample: int, seed: int) -> str:
+    """Score one arm with Rubric T and return the printed report.
+
+    ``--source`` is passed explicitly. ``berilo eval`` otherwise auto-discovers
+    the source next to the translated file, and every arm's output lives in a
+    scratch directory precisely so the arms cannot share a cache — so the
+    discovery would look in the wrong place and the whole comparison would
+    produce timings and no scores.
+    """
     if result.output is None:
         return "(not scored — the translate step failed)"
     code, out = _run(
-        ["eval", str(result.output), "--sample", str(sample), "--seed", str(seed), "--no-write"]
+        [
+            "eval",
+            str(result.output),
+            "--source",
+            str(source),
+            "--sample",
+            str(sample),
+            "--seed",
+            str(seed),
+            "--no-write",
+        ]
     )
     return out.strip() if code == 0 else f"(eval failed) {out.strip()}"
 
@@ -198,7 +215,7 @@ def compare(
         print("inside the CIs is not a difference.\n")
         for result in results:
             print(f"--- {result.label} ---")
-            print(score_arm(result, sample, seed))
+            print(score_arm(result, source, sample, seed))
             print()
         return 0
     finally:
