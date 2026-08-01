@@ -45,10 +45,12 @@ nor silently switches to a differently-worded memo mid-book).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
 import sqlite3
+import threading
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
@@ -201,6 +203,31 @@ class CallRecord:
     cost_eur: float
 
 
+def _synchronized(method):
+    """Run ``method`` holding the cache's lock.
+
+    Applied to every public method of :class:`TranslationCache`. The lanes of a
+    translation wave share one cache object, and ``sqlite3`` refuses calls from
+    a thread other than the connection's creator, so the lock is what makes a
+    shared cache legal rather than merely lucky. Marking each method is
+    deliberate: it puts the invariant where a reader of that method will see
+    it, instead of in a comment on the connection.
+
+    Args:
+        method: The unbound method to guard.
+
+    Returns:
+        The guarded method.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
 class TranslationCache:
     """SQLite-backed store for segment translations, call accounting, glossaries.
 
@@ -220,10 +247,18 @@ class TranslationCache:
         self.db_path = db_path
         if str(db_path) != _IN_MEMORY:
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path))
+        # The lanes of a translation wave share one cache object, so its
+        # connection is reached from several threads. ``sqlite3`` defaults to
+        # ``check_same_thread=True`` and refuses those calls outright — a hard
+        # error, not a race — so serializing every public method under this
+        # lock is what makes sharing legal. ``RLock`` rather than ``Lock``
+        # because a guarded method may call another one.
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
-        self._migrate_schema()
-        self._init_schema()
+        with self._lock:
+            self._migrate_schema()
+            self._init_schema()
 
     def _columns(self, table: str) -> set[str]:
         """Return the column names of ``table``, empty when it does not exist."""
@@ -358,6 +393,7 @@ class TranslationCache:
                 """
             )
 
+    @_synchronized
     def get_translation(
         self,
         book_hash_: str,
@@ -392,6 +428,7 @@ class TranslationCache:
         ).fetchone()
         return row["text"] if row is not None else None
 
+    @_synchronized
     def cached_hashes(
         self,
         book_hash_: str,
@@ -420,6 +457,7 @@ class TranslationCache:
         ).fetchall()
         return {row["segment_hash"] for row in rows}
 
+    @_synchronized
     def store_batch(
         self,
         book_hash_: str,
@@ -485,6 +523,7 @@ class TranslationCache:
                 ),
             )
 
+    @_synchronized
     def get_glossary(
         self,
         book_hash_: str,
@@ -514,6 +553,7 @@ class TranslationCache:
         loaded = json.loads(row["terms_json"])
         return {str(key): str(value) for key, value in loaded.items()}
 
+    @_synchronized
     def store_glossary(
         self,
         book_hash_: str,
@@ -566,6 +606,7 @@ class TranslationCache:
                     ),
                 )
 
+    @_synchronized
     def get_book_context(
         self, book_hash_: str, model: str, lang: str, prompt_version: str
     ) -> str | None:
@@ -587,6 +628,7 @@ class TranslationCache:
         ).fetchone()
         return row["memo"] if row is not None else None
 
+    @_synchronized
     def store_book_context(
         self,
         book_hash_: str,
@@ -635,6 +677,7 @@ class TranslationCache:
                     ),
                 )
 
+    @_synchronized
     def close(self) -> None:
         """Close the underlying SQLite connection."""
         self._conn.close()

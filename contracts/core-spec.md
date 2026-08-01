@@ -70,15 +70,54 @@ prose is just worse on one platform than the other, and no test says so.
 
 ### Surface 3 — Markers and batching
 
-**Reference:** `translator/berilo/translate.py`.
+**Reference:** `translator/berilo/plan.py`, `translator/berilo/translate.py`.
 
-The marker format that delimits segments inside one LLM request, the parser that
-reads them back, and the recovery path when a response is truncated, empty, or
-malformed. Degrade — never abort, never silently drop.
+Two things, both normative.
 
-**Cost of divergence:** segments are dropped or misaligned, so the translated
-book carries the wrong text under the wrong heading. This is the failure that
-survives review, because the output is fluent.
+**Markers.** The format that delimits segments inside one LLM request, the
+parser that reads them back, and the recovery path when a response is
+truncated, empty, or malformed. Degrade — never abort, never silently drop.
+
+**Batching.** Which segments share a call, and which calls share a wave. This is
+a pure function of `(segments, cache state, skip list, batch_size, concurrency,
+context_pairs)` — `berilo.plan` — and is gated by `vectors/v2/batch_plan/`.
+
+A batch ends at the first of: a chapter boundary, a skip-list member, an empty
+segment, a cache hit, or `batch_size`.
+
+A cache hit emits a **pair** step, which feeds the rolling context without
+costing a call. This equality is load-bearing: it is what makes a resumed run's
+prompts identical to an uninterrupted run's, and dropping it silently removes
+the context block from every prompt after a resume.
+
+Consecutive batch steps group into a wave up to `concurrency` wide. A pair step
+ends the wave it meets, so the context that cache hit contributes reaches the
+next wave's snapshot in the right order.
+
+Three rules inside a wave, each learned by paying for it:
+
+1. **One context snapshot per wave, taken before the wave runs**, shared by
+   every lane. Otherwise a batch's prompt depends on which sibling returned
+   first, and the run stops being reproducible.
+2. **Each lane commits its own batch to the cache inside the lane.** Committing
+   after the barrier discards batches the provider has already billed whenever
+   any sibling fails.
+3. **Fold results back in batch order, never completion order.** Position-keyed
+   output is order-independent, but the rolling context, the reported chapter
+   and the revision-failure count are sequential state; folding those by
+   completion makes progress depend on network latency.
+
+Defaults: `batch_size = 20`, `concurrency = 4`, `context_pairs = 2`. Context
+staleness is therefore bounded to `concurrency * batch_size = 80` segments —
+the only continuity a wave gives up, and less than a chapter. `concurrency = 1`
+must reproduce strictly sequential translation exactly.
+
+**Cost of divergence:** for markers, segments are dropped or misaligned, so the
+translated book carries the wrong text under the wrong heading — the failure
+that survives review, because the output is fluent. Batching divergence is
+quieter: it costs only latency and money, which is why it went unnoticed until
+the Python reference, the Kotlin port and the Swift port sat at 10/1, 10/1 and
+20/4 simultaneously, a 10x spread, with nothing red anywhere.
 
 ### Surface 4 — Models and pricing
 
@@ -145,6 +184,46 @@ on the workstation bills twice.
 Decided 2026-07-27. Revisit only if the MuPDF licence is bought. Until then, do
 not "fix" the iOS PDF hash to match Python: it cannot be done with PDFKit, and
 an attempt that looked close would be worse than a difference that is declared.
+
+### Batch composition on iOS
+
+`berilo-ios` cuts batches from a **flat, document-ordered list of segments still
+needing a call**. The reference cuts them from the document itself, ending a
+batch at a chapter boundary, an empty segment, a skip-list member, or a cache
+hit. Measured against `vectors/v2/batch_plan/` on 2026-08-01, the `default`
+case yields `[20, 14]` on iOS against `[7, 4, 20, 3]` here.
+
+**Exactly what is excepted, and what is not.** This exception covers *batch
+composition only* — which segments end up in which batch. Everything else in
+Surface 3 still binds iOS, and iOS already implements it:
+
+- the marker format, the parser, and the retry ladder;
+- one context snapshot per wave, taken before the wave runs;
+- each lane committing its own batch inside the lane;
+- results folded in batch order, never completion order.
+
+So iOS asserts against every `batch_plan` field except `waves[].batches`. A port
+may not widen this exception to skip the wave rules; those are what make a run
+reproducible, and iOS satisfies them today.
+
+Bounded because: batch composition changes **cost, not correctness**. Segment
+identity, cache keys, and the 1:1 mapping are Surfaces 1 and 7 and are
+untouched — a segment translated on an iPhone still shares a cache row with one
+translated on the workstation, because the key is content-derived and carries no
+batch. What differs is how many calls a book takes and how much context a batch
+carries, both bounded and both already declared elsewhere: staleness by
+`concurrency * batch_size`, cost by the estimate the user approves.
+
+The divergence is also the cheaper direction. Flat batching produces fewer,
+fuller calls; conforming would cost iOS roughly 25% more calls on a book with
+20–40 chapters, and calls are what a reader pays for.
+
+Decided 2026-08-01. **Revisit if either becomes true:** a measured Rubric T
+difference is attributed to batches straddling chapters, or the reference itself
+moves to flat batching — at which point this exception disappears rather than
+inverting. Until then, do not "fix" iOS to match: the difference is declared,
+and a partial fix that made some vectors pass would be worse than a divergence
+that is written down.
 
 ## 4. Changing this document
 

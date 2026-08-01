@@ -37,7 +37,7 @@ diverges.
 |---|---|---|---|---|
 | 1 | Identity | by construction | **gated** — `IdentityFixtureTest`, `SegmentIdentityTest` | **gated** — `IdentityFixtureTests` |
 | 2 | Prompts | by construction | **gated** — `PromptTextTest` *(see §5)* | port present, not gated |
-| 3 | Markers & batching | by construction | not gated | not gated |
+| 3 | Markers & batching | by construction | vectors published (`v2`), port not yet asserting | vectors published (`v2`), port not yet asserting; **batch composition is a declared exception** (`core-spec.md` §3) |
 | 4 | Models & pricing | by construction | not gated | not gated |
 | 5 | Normalization | by construction | not gated | not gated |
 | 6 | EPUB writer determinism | by construction | **gated** — `EpubWriterByteIdentityTest` | in progress |
@@ -58,6 +58,9 @@ release tag.
   deliberately.
 - A release is a git tag on this repository, `contracts-v<N>`, where `<N>` is
   the directory integer.
+- `v2` is the first release to carry Surface 3 (`batch_plan/`). It does **not**
+  supersede `v1`: the identity and assemble vectors still live there, and a port
+  vendoring `v1` keeps working. Moving to `v2` is what buys the batching gate.
 - Each port **vendors** its own copy under its test resources, so its suite runs
   offline. That copy going stale is the failure mode this numbering exists to
   make visible.
@@ -78,6 +81,7 @@ repository can only reach a checkout that has already gone stale.
 |---|---|---|
 | `gen/generate_assemble_vectors.py` | `vectors/v1/assemble/` | 6 |
 | `berilo.identity_fixture` (a package module, since its output is also tested here) | `vectors/v1/identity/` | 1 |
+| `gen/generate_batch_plan_vectors.py` | `vectors/v2/batch_plan/` | 3 |
 
 **Still outside this directory,** and to be moved when the repository holding
 them has committed its in-flight work: `berilo-ios/tools/gen_identity_fixtures.py`,
@@ -95,10 +99,18 @@ committing work in progress that is not this reorganization's to commit.
   rule 1 of §1: the gate is real, but it cannot be refreshed when
   `translator/berilo/prompts.py` changes, so it will silently pin a prompt that
   the reference has moved past. Writing `gen/gen_prompt_vectors.py` is the fix.
-- **Surfaces 3, 4, 5 and 7 have no vectors at all** in any port. They are
-  specified in `core-spec.md` and enforced by nothing. Surface 4 is the one to
-  do first: it is the only surface whose divergence spends the user's money
-  without asking.
+- **Surfaces 4, 5 and 7 have no vectors at all** in any port. They are specified
+  in `core-spec.md` and enforced by nothing. Surface 4 is the one to do first:
+  it is the only surface whose divergence spends the user's money without
+  asking. Surface 3 gained `vectors/v2/batch_plan/` on 2026-08-01, which is what
+  turned a suspected divergence into a measured one — the ports still have to
+  vendor them and assert.
+- **`vectors/v2/batch_plan/` records `waves[].batches`, which iOS is excepted
+  from** (`core-spec.md` §3). A port skipping that one field must still assert
+  every other field in the file. The risk this creates is specific and worth
+  naming: an iOS suite that skipped the whole vector, rather than the one field,
+  would silently stop gating the wave rules iOS *does* satisfy — which is how an
+  exception turns into a hole.
 - **The regenerate-and-diff CI gate does not exist here.** This repo should
   regenerate every vector on CI and fail if the tree differs, which is what
   makes it impossible for a vector to drift from the Python that produced it.

@@ -47,6 +47,30 @@ def cli() -> None:
     """Berilo translator CLI: translate books with meaning-preserving LLM translation."""
 
 
+def _batching_kwargs(concurrency: int | None, batch_size: int | None) -> dict[str, int]:
+    """Return only the batching overrides the user actually set.
+
+    Omitting an unset flag rather than defaulting it here keeps exactly one
+    definition of each default — the engine's. Repeating the numbers in the CLI
+    would give them a second place to drift, and because the dry-run estimate is
+    priced from the same values, a disagreement would quote a cost the run does
+    not go on to incur.
+
+    Args:
+        concurrency: ``--concurrency``, or ``None`` when unset.
+        batch_size: ``--batch-size``, or ``None`` when unset.
+
+    Returns:
+        Keyword arguments to splat into ``translate_book`` / ``estimate_cost``.
+    """
+    kwargs: dict[str, int] = {}
+    if concurrency is not None:
+        kwargs["concurrency"] = concurrency
+    if batch_size is not None:
+        kwargs["batch_size"] = batch_size
+    return kwargs
+
+
 @cli.command()
 @click.argument("source_file", type=click.Path())
 @click.option(
@@ -74,6 +98,18 @@ def cli() -> None:
     ),
 )
 @click.option(
+    "--concurrency",
+    default=None,
+    type=int,
+    help=("Batches translated at once (default: 4). Use 1 for strictly " "sequential translation."),
+)
+@click.option(
+    "--batch-size",
+    default=None,
+    type=int,
+    help="Segments per API call (default: 20).",
+)
+@click.option(
     "--cache-db",
     default=None,
     type=click.Path(),
@@ -98,6 +134,8 @@ def translate(
     no_glossary: bool,
     assume_yes: bool,
     style_name: str | None,
+    concurrency: int | None,
+    batch_size: int | None,
     cache_db: str | None,
     output: str | None,
 ) -> None:
@@ -153,6 +191,7 @@ def translate(
             skip_segment_ids=skip_ids,
             glossary=not no_glossary,
             style=style,
+            **_batching_kwargs(None, batch_size),
         )
         _print_estimate(estimate, skip_back_matter=skip_back_matter, style=style)
         ctx.exit(0)
@@ -184,6 +223,7 @@ def translate(
         skip_segment_ids=skip_ids,
         glossary=not no_glossary,
         style=style,
+        **_batching_kwargs(None, batch_size),
     )
     click.echo(
         f"Estimated cost: €{estimate.cost_eur:.4f} "
@@ -227,6 +267,7 @@ def translate(
             on_progress=_on_progress,
             fallback_client=tracked_fallback,
             style=style,
+            **_batching_kwargs(concurrency, batch_size),
         )
         total_cost_eur = tracked_client.total_cost_eur + (
             tracked_fallback.total_cost_eur if tracked_fallback is not None else 0.0

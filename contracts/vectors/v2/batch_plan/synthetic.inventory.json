@@ -1,0 +1,215 @@
+{
+  "book": "Synthetic Batching Book",
+  "segments": [
+    {
+      "chapter_index": 0,
+      "empty": false,
+      "id": "c0-p0",
+      "position": 0
+    },
+    {
+      "chapter_index": 0,
+      "empty": false,
+      "id": "c0-p1",
+      "position": 1
+    },
+    {
+      "chapter_index": 0,
+      "empty": false,
+      "id": "c0-p2",
+      "position": 2
+    },
+    {
+      "chapter_index": 0,
+      "empty": false,
+      "id": "c0-p3",
+      "position": 3
+    },
+    {
+      "chapter_index": 0,
+      "empty": false,
+      "id": "c0-p4",
+      "position": 4
+    },
+    {
+      "chapter_index": 0,
+      "empty": false,
+      "id": "c0-p5",
+      "position": 5
+    },
+    {
+      "chapter_index": 0,
+      "empty": false,
+      "id": "c0-p6",
+      "position": 6
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p0",
+      "position": 7
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p1",
+      "position": 8
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p2",
+      "position": 9
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p3",
+      "position": 10
+    },
+    {
+      "chapter_index": 1,
+      "empty": true,
+      "id": "c1-p4",
+      "position": 11
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p5",
+      "position": 12
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p6",
+      "position": 13
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p7",
+      "position": 14
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p8",
+      "position": 15
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p9",
+      "position": 16
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p10",
+      "position": 17
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p11",
+      "position": 18
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p12",
+      "position": 19
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p13",
+      "position": 20
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p14",
+      "position": 21
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p15",
+      "position": 22
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p16",
+      "position": 23
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p17",
+      "position": 24
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p18",
+      "position": 25
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p19",
+      "position": 26
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p20",
+      "position": 27
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p21",
+      "position": 28
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p22",
+      "position": 29
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p23",
+      "position": 30
+    },
+    {
+      "chapter_index": 1,
+      "empty": false,
+      "id": "c1-p24",
+      "position": 31
+    },
+    {
+      "chapter_index": 2,
+      "empty": false,
+      "id": "c2-p0",
+      "position": 32
+    },
+    {
+      "chapter_index": 2,
+      "empty": false,
+      "id": "c2-p1",
+      "position": 33
+    },
+    {
+      "chapter_index": 2,
+      "empty": false,
+      "id": "c2-p2",
+      "position": 34
+    }
+  ]
+}

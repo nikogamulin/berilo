@@ -1,0 +1,7 @@
+{
+  "generator": "contracts/gen/generate_batch_plan_vectors.py",
+  "surfaces": [
+    "batch_plan"
+  ],
+  "vectors_version": 2
+}

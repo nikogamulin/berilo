@@ -39,6 +39,7 @@ import dataclasses
 import logging
 import re
 from collections.abc import Callable, Collection, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 
 from berilo.cache import (
@@ -50,6 +51,14 @@ from berilo.cache import (
 )
 from berilo.glossary import Glossary, glossary_identity
 from berilo.models import Book, Segment
+from berilo.plan import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_CONTEXT_PAIRS,
+    PositionedBatch,
+    build_translation_plan,
+    plan_waves,
+)
 from berilo.prompts import BASELINE, TranslationStyle, ensure_supports
 from berilo.providers.base import (
     CompletionResult,
@@ -64,15 +73,6 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 # Tunables (named constants — no magic numbers).
 # --------------------------------------------------------------------------
-
-#: Number of consecutive paragraphs grouped into one completion. Kept in the
-#: 8–15 range so a batch is large enough to amortize prompt overhead but small
-#: enough that a single mismatch retries cheaply.
-DEFAULT_BATCH_SIZE = 10
-
-#: Number of previous source/target paragraph pairs prepended to each batch as
-#: rolling context (marked "do not retranslate").
-DEFAULT_CONTEXT_PAIRS = 2
 
 #: Marker wrapping each segment's ordinal in the prompt and expected in the
 #: reply, e.g. ``[[1]]``. Anchored to the start of a line because that is where
@@ -848,10 +848,12 @@ def translate_book(
     glossary: Glossary | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
     context_pairs: int = DEFAULT_CONTEXT_PAIRS,
+    concurrency: int = DEFAULT_CONCURRENCY,
     skip_segment_ids: Collection[str] = (),
     on_progress: ProgressCallback | None = None,
     fallback_client: LLMClient | None = None,
     style: TranslationStyle = BASELINE,
+    book_context: str | None = None,
 ) -> Book:
     """Translate every eligible segment of ``book`` into ``target_lang``.
 
@@ -872,6 +874,10 @@ def translate_book(
             produced under the old ones.
         batch_size: Maximum consecutive segments per completion.
         context_pairs: Number of previous source/target pairs used as context.
+        concurrency: Batches translated at once. ``1`` reproduces strictly
+            sequential translation exactly, which is what
+            ``test_plan_backed_translation_matches_the_sequential_baseline``
+            asserts against.
         skip_segment_ids: Segment IDs to pass through untranslated.
         on_progress: Optional callback invoked with the running
             :class:`TranslationStats` after each batch and once at the end.
@@ -881,6 +887,11 @@ def translate_book(
             ``version`` participates in the cache key, so switching styles
             re-translates instead of serving text produced by another prompt.
             Defaults to :data:`~berilo.prompts.BASELINE`.
+        book_context: Pre-derived per-book style memo. When given, the
+            derivation is skipped entirely. A caller translating a book in
+            *slices* — which is what the cloud worker does — would otherwise
+            re-derive and re-bill the once-per-book memo on every slice. When
+            ``None`` the memo is derived (and cached) exactly as before.
 
     Returns:
         A new :class:`~berilo.models.Book` with the same segments (count, order,
@@ -904,24 +915,24 @@ def translate_book(
     ghash = glossary_identity(glossary)
     stats = TranslationStats(total_segments=len(book.segments))
 
-    book_context, context_result = build_book_context(
-        book,
-        client=client,
-        style=style,
-        target_lang=target_lang,
-        model=model,
-        cache=cache,
-    )
-    if context_result is not None:
-        stats.api_calls += 1
-        stats.input_tokens += context_result.input_tokens
-        stats.output_tokens += context_result.output_tokens
-        stats.cost_eur += context_result.cost_eur
+    if book_context is None:
+        book_context, context_result = build_book_context(
+            book,
+            client=client,
+            style=style,
+            target_lang=target_lang,
+            model=model,
+            cache=cache,
+        )
+        if context_result is not None:
+            stats.api_calls += 1
+            stats.input_tokens += context_result.input_tokens
+            stats.output_tokens += context_result.output_tokens
+            stats.cost_eur += context_result.cost_eur
 
-    output: list[Segment] = []
+    resolved: dict[int, str] = {}
     recent_pairs: list[tuple[str, str]] = []
     segments = book.segments
-    index = 0
 
     def _remember(source: str, target: str) -> None:
         # ``context_pairs <= 0`` means "no rolling context": remember nothing.
@@ -935,105 +946,114 @@ def translate_book(
         if len(recent_pairs) > context_pairs:
             del recent_pairs[:-context_pairs]
 
-    while index < len(segments):
-        segment = segments[index]
+    # Every batch boundary is decided here, before a single call is made. The
+    # planner is the reference for core-spec Surface 3 and is gated by
+    # ``contracts/vectors/v2/batch_plan/``.
+    plan = build_translation_plan(
+        segments,
+        lookup=lambda segment: cache.get_translation(
+            bhash, segment_hash(segment.text), model, target_lang, prompt_version, ghash
+        ),
+        skip_segment_ids=skip,
+        batch_size=batch_size,
+    )
+    resolved.update(plan.resolved)
+    stats.empty_segments = plan.empty_segments
+    stats.skipped_segments = plan.skipped_segments
+    stats.cached_segments = plan.cached_segments
 
-        if not segment.text.strip():
-            output.append(replace(segment))
-            stats.empty_segments += 1
-            index += 1
-            continue
-
-        if segment.id in skip:
-            output.append(replace(segment))
-            stats.skipped_segments += 1
-            index += 1
-            continue
-
-        shash = segment_hash(segment.text)
-        cached = cache.get_translation(bhash, shash, model, target_lang, prompt_version, ghash)
-        if cached is not None:
-            output.append(replace(segment, text=cached))
-            _remember(segment.text, cached)
-            stats.cached_segments += 1
-            index += 1
-            continue
-
-        # Gather a batch of consecutive, same-chapter, uncached, translatable
-        # segments starting at the current one.
-        batch: list[Segment] = [segment]
-        cursor = index + 1
-        while cursor < len(segments) and len(batch) < batch_size:
-            candidate = segments[cursor]
-            if candidate.chapter_index != segment.chapter_index:
-                break
-            if candidate.id in skip or not candidate.text.strip():
-                break
-            if (
-                cache.get_translation(
-                    bhash, segment_hash(candidate.text), model, target_lang, prompt_version, ghash
-                )
-                is not None
-            ):
-                break
-            batch.append(candidate)
-            cursor += 1
-
+    def _run_batch(
+        batch: PositionedBatch, snapshot: list[tuple[str, str]]
+    ) -> tuple[_BatchOutcome, CallRecord]:
+        """Translate one batch and commit it. Runs in its own lane."""
+        batch_segments = [segment for _position, segment in batch]
         outcome = _translate_batch(
-            batch,
+            batch_segments,
             client=client,
             glossary=glossary,
-            context_pairs=list(recent_pairs),
+            context_pairs=snapshot,
             target_lang=target_lang,
             book_title=book.title,
             style=style,
             book_context=book_context,
             fallback_client=fallback_client,
         )
-        translations, results = outcome.translations, outcome.results
-
-        # Persist immediately (kill-safety) — one transaction per batch.
-        call = _aggregate_call(results, kind="batch")
+        call = _aggregate_call(outcome.results, kind="batch")
         per_segment_cost = call.cost_eur / len(batch) if batch else 0.0
+        # Committed inside the lane, not after the barrier: committing after
+        # the wave discards batches the provider has already billed whenever
+        # any sibling lane fails.
         cache.store_batch(
             bhash,
             model,
             target_lang,
             [
                 SegmentTranslation(
-                    segment_hash=segment_hash(seg.text),
+                    segment_hash=segment_hash(segment.text),
                     text=text,
                     cost_eur=per_segment_cost,
                 )
-                for seg, text in zip(batch, translations)
+                for (_position, segment), text in zip(batch, outcome.translations)
             ],
             call,
             prompt_version,
             ghash,
         )
+        return outcome, call
 
-        for seg, text in zip(batch, translations):
-            output.append(replace(seg, text=text))
-            _remember(seg.text, text)
-
+    def _fold(batch: PositionedBatch, outcome: _BatchOutcome, call: CallRecord) -> None:
+        """Apply one finished batch to the run's sequential state."""
+        for (position, segment), text in zip(batch, outcome.translations):
+            resolved[position] = text
+            _remember(segment.text, text)
         stats.translated_segments += len(batch)
-        stats.api_calls += len(results)
+        stats.api_calls += len(outcome.results)
         stats.revision_failures += int(outcome.revision_failed)
         stats.input_tokens += call.input_tokens
         stats.output_tokens += call.output_tokens
         stats.cost_eur += call.cost_eur
-        stats.current_chapter_index = segment.chapter_index
-        stats.current_chapter_title = segment.chapter_title
+        stats.current_chapter_index = batch[-1][1].chapter_index
+        stats.current_chapter_title = batch[-1][1].chapter_title
+
+    for wave in plan_waves(plan, concurrency=concurrency, context_pairs=context_pairs):
+        # Cache hits sitting before this wave feed the rolling context exactly
+        # as freshly translated segments do — that equality is what makes a
+        # resumed run's prompts identical to an uninterrupted run's.
+        for cached_source, cached_target in wave.preceding_pairs:
+            _remember(cached_source, cached_target)
+
+        # One snapshot for the whole wave, taken before any of it runs, so the
+        # wave's prompts do not depend on which lane happens to finish first.
+        snapshot = list(recent_pairs)
+
+        if len(wave.batches) == 1:
+            finished = [_run_batch(wave.batches[0], snapshot)]
+        else:
+            with ThreadPoolExecutor(max_workers=len(wave.batches)) as pool:
+                futures = [pool.submit(_run_batch, batch, snapshot) for batch in wave.batches]
+                # ``result()`` in submission order: the first lane to raise is
+                # the one that propagates, and lanes that already committed
+                # keep their spend. Nothing folds back before the wave is whole.
+                finished = [future.result() for future in futures]
+
+        # Folded in batch order, never completion order. ``resolved`` is keyed
+        # by position and so is order-independent, but ``recent_pairs``, the
+        # chapter in the progress line and ``revision_failures`` are sequential
+        # state — folding those by completion would make reported progress
+        # depend on network latency.
+        for batch, (outcome, call) in zip(wave.batches, finished):
+            _fold(batch, outcome, call)
+
         if on_progress is not None:
             on_progress(stats)
 
-        index = cursor
-
-    if len(output) != len(book.segments):  # defensive: integrity invariant
+    if len(resolved) != len(segments):  # defensive: integrity invariant
         raise TranslationError(
             f"Segment count changed during translation: "
-            f"{len(book.segments)} in, {len(output)} out."
+            f"{len(book.segments)} in, {len(resolved)} out."
         )
+
+    output = [replace(segment, text=resolved[i]) for i, segment in enumerate(segments)]
 
     if on_progress is not None:
         on_progress(stats)
