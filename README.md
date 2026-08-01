@@ -170,6 +170,21 @@ because a reasoning model's hidden budget is charged **per call** and a bigger
 batch amortizes it — so the larger batch is both faster and cheaper. Four lanes
 then multiply throughput at an identical call count.
 
+Measured on the standard sample corpus, 150 paragraphs of real book prose, each
+arm with its own cache:
+
+| | wall clock | Rubric T |
+|---|---|---|
+| 1 lane, batch 10 (the old default) | 938 s | 91.9 [90.0, 93.8] |
+| **4 lanes, batch 20** (today's default) | **234 s** | **92.1** [90.3, 93.9] |
+
+**4.01× faster, and the score did not move** — +0.2 with almost entirely
+overlapping confidence intervals. That mattered because the batch-size half was
+*not* safe by construction: it changes how much text shares one prompt and one
+reasoning budget. Concurrency alone is safe by construction (identical prompts,
+identical call count), so had the score dropped, the two would have shipped
+separately. It didn't, so they didn't.
+
 The one thing concurrency trades away is context freshness. Each batch prompt
 carries the previous batches' translations so voice and terminology stay
 continuous, and a wave takes **one snapshot before it runs**, shared by every

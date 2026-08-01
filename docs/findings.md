@@ -1,5 +1,22 @@
 # Findings register (Tier 2)
 
+- [2026-08-01] **Four lanes at batch 20 is 4.01x faster and costs no quality.**
+  Paired A/B on the standard corpus, each arm with its own cache: 938.0s ->
+  234.1s wall clock, Rubric T 91.9 [90.0, 93.8] -> 92.1 [90.3, 93.9]. The +0.2
+  sits well inside overlapping CIs, so batch size did **not** have to separate
+  from concurrency — the contingency the spec had prepared for went unused.
+  T3 fluency 14.9 -> 15.4 and T2 meaning 28.2 -> 27.9, both inside their own
+  CIs. Independently close to the 3.8x measured in `berilo-cloud`, which is
+  weak evidence for both numbers. Total spend EUR 0.345.
+- [2026-08-01] **A paired comparison needs `--source` passed explicitly, and
+  finding that out cost a full paid run.** Arms are written to a scratch
+  directory precisely so they cannot share a cache; `berilo eval`
+  auto-discovers the source *next to the translated file*. Those two correct
+  decisions collide, and the failure lands **after** both translations are
+  paid for — timings, no scores. `berilo.eval.verify` now passes `--source`.
+  Generalization: when a harness isolates its outputs, check every tool it
+  then calls for a path assumption about where those outputs live.
+
 - [2026-08-01] **Google Translate's structural fidelity is not the risk; its
   price is.** Measured over 46 segments of real book prose from the smoke
   corpus, v2 with `format=html` returned 100 % complete drafts (0 empty) and
