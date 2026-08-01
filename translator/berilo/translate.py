@@ -67,6 +67,7 @@ from berilo.providers.base import (
     LLMClient,
     TruncatedCompletionError,
 )
+from berilo.providers.google_translate import GoogleTranslateClient
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,8 @@ class TranslationStats:
     empty_segments: int = 0
     api_calls: int = 0
     revision_failures: int = 0
+    mt_characters: int = 0
+    mt_cost_eur: float = 0.0
     input_tokens: int = 0
     output_tokens: int = 0
     cost_eur: float = 0.0
@@ -430,6 +433,8 @@ class _BatchOutcome:
     translations: list[str]
     results: list[CompletionResult]
     revision_failed: bool = False
+    mt_characters: int = 0
+    mt_cost_eur: float = 0.0
 
 
 def _translate_batch(
@@ -443,6 +448,8 @@ def _translate_batch(
     style: TranslationStyle = BASELINE,
     book_context: str | None = None,
     fallback_client: LLMClient | None = None,
+    mt_client: GoogleTranslateClient | None = None,
+    source_lang: str | None = None,
 ) -> _BatchOutcome:
     """Translate one batch, retrying then falling back on a bad response.
 
@@ -462,6 +469,41 @@ def _translate_batch(
     Returns:
         The :class:`_BatchOutcome` for this batch.
     """
+    if mt_client is not None:
+        # The MT draft REPLACES the LLM's drafting call rather than preceding
+        # it: the editor pass below already takes SOURCE + DRAFT, which is
+        # exactly post-editing. So this path makes one LLM call per batch where
+        # the two-pass style makes two. It requires a revising style — a draft
+        # nobody edits is raw machine translation, and `ensure_supports` would
+        # not catch that because it is a pipeline error, not a language one.
+        if style.revise_system is None:
+            raise TranslationError(
+                f"A machine-translation draft needs a revising style to post-edit it; "
+                f"style {style.name!r} declares no revision pass. Use --style revise_v1 "
+                f"(or another revising style), or drop --mt-draft."
+            )
+        draft = mt_client.draft(
+            [segment.text for segment in segments],
+            source_lang=source_lang,
+            target_lang=target_lang,
+        )
+        revised, revise_results = _revise_batch(
+            segments,
+            draft.texts,
+            client=client,
+            glossary=glossary,
+            target_lang=target_lang,
+            style=style,
+            book_context=book_context,
+        )
+        return _BatchOutcome(
+            translations=revised if revised is not None else draft.texts,
+            results=revise_results,
+            revision_failed=revised is None,
+            mt_characters=draft.characters,
+            mt_cost_eur=draft.cost_eur,
+        )
+
     try:
         translations, results = _translate_batch_attempts(
             segments,
@@ -854,6 +896,8 @@ def translate_book(
     fallback_client: LLMClient | None = None,
     style: TranslationStyle = BASELINE,
     book_context: str | None = None,
+    mt_client: GoogleTranslateClient | None = None,
+    source_lang: str | None = None,
 ) -> Book:
     """Translate every eligible segment of ``book`` into ``target_lang``.
 
@@ -977,6 +1021,8 @@ def translate_book(
             style=style,
             book_context=book_context,
             fallback_client=fallback_client,
+            mt_client=mt_client,
+            source_lang=source_lang,
         )
         call = _aggregate_call(outcome.results, kind="batch")
         per_segment_cost = call.cost_eur / len(batch) if batch else 0.0
@@ -1009,6 +1055,10 @@ def translate_book(
         stats.translated_segments += len(batch)
         stats.api_calls += len(outcome.results)
         stats.revision_failures += int(outcome.revision_failed)
+        stats.mt_characters += outcome.mt_characters
+        # MT is billed by the character, not the token, so it is kept out of
+        # cost_eur's token arithmetic and added alongside it.
+        stats.mt_cost_eur += outcome.mt_cost_eur
         stats.input_tokens += call.input_tokens
         stats.output_tokens += call.output_tokens
         stats.cost_eur += call.cost_eur

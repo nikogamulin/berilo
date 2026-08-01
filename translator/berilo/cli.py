@@ -47,6 +47,36 @@ def cli() -> None:
     """Berilo translator CLI: translate books with meaning-preserving LLM translation."""
 
 
+def _mt_client(enabled: bool):
+    """Build the machine-translation draft client, or return ``None``.
+
+    Reads the key from the environment rather than taking it as a flag: a key on
+    a command line lands in shell history and in any process listing, which is
+    the one place `.env` exists to keep it out of.
+
+    Args:
+        enabled: Whether ``--mt-draft`` was passed.
+
+    Returns:
+        A ``GoogleTranslateClient``, or ``None`` when the flag is absent.
+
+    Raises:
+        click.ClickException: If the flag is set but no key is configured.
+    """
+    if not enabled:
+        return None
+    import os
+
+    from berilo.providers.google_translate import GoogleTranslateClient
+
+    key = os.environ.get("GOOGLE_TRANSLATE_API_KEY", "")
+    if not key:
+        raise click.ClickException(
+            "--mt-draft needs GOOGLE_TRANSLATE_API_KEY in your .env " "(see .env.example)."
+        )
+    return GoogleTranslateClient(key)
+
+
 def _batching_kwargs(concurrency: int | None, batch_size: int | None) -> dict[str, int]:
     """Return only the batching overrides the user actually set.
 
@@ -98,6 +128,15 @@ def _batching_kwargs(concurrency: int | None, batch_size: int | None) -> dict[st
     ),
 )
 @click.option(
+    "--mt-draft",
+    is_flag=True,
+    help=(
+        "Draft with Google Translate, then post-edit with the LLM. Needs "
+        "GOOGLE_TRANSLATE_API_KEY and a revising style. Bills Google per "
+        "character — run --dry-run first."
+    ),
+)
+@click.option(
     "--concurrency",
     default=None,
     type=int,
@@ -134,6 +173,7 @@ def translate(
     no_glossary: bool,
     assume_yes: bool,
     style_name: str | None,
+    mt_draft: bool,
     concurrency: int | None,
     batch_size: int | None,
     cache_db: str | None,
@@ -267,6 +307,8 @@ def translate(
             on_progress=_on_progress,
             fallback_client=tracked_fallback,
             style=style,
+            mt_client=_mt_client(mt_draft),
+            source_lang=book.language,
             **_batching_kwargs(concurrency, batch_size),
         )
         total_cost_eur = tracked_client.total_cost_eur + (

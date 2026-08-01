@@ -145,6 +145,7 @@ Useful flags:
 | `--bilingual` | Emit a source + target EPUB |
 | `--skip-back-matter` | Pass index/notes/bibliography through untranslated |
 | `--concurrency 4` | Batches translated at once. `1` is strictly sequential |
+| `--mt-draft` | Draft with Google Translate, post-edit with the LLM (see below) |
 | `--batch-size 20` | Segments per API call |
 | `-o out.epub` | Output path |
 
@@ -180,6 +181,53 @@ and injected into every prompt.
 If you want the old strictly sequential behaviour — for a reproducible
 comparison, or a provider with a tight rate limit — use `--concurrency 1`. Runs
 are deterministic either way.
+
+### Machine-translation drafts (`--mt-draft`), and why they cost more
+
+With `--mt-draft`, Google Cloud Translation produces a first draft and the LLM
+**post-edits** it instead of translating from scratch. The editor pass already
+takes source plus draft, so this *replaces* the LLM's drafting call rather than
+adding to it: one LLM call per batch where a two-pass style makes two.
+
+```bash
+# add GOOGLE_TRANSLATE_API_KEY to .env first
+berilo translate mybook.epub --to sl --style revise_v1 --mt-draft --dry-run
+```
+
+It requires a revising style. A draft nobody edits is raw machine translation,
+so `--mt-draft` with a single-pass style is refused rather than silently
+producing something else.
+
+**Read the price before enabling it.** Cloud Translation v2 Basic lists at
+**USD 20 per million characters** (verify — vendor pricing moves), with the
+first 500k characters a month free, which is under one book. A ~130k-word book
+is roughly 715k characters:
+
+| | Cost for one book |
+|---|---|
+| Two-pass LLM (`revise_v1`, `gpt-5-mini`) | ~€1.45 |
+| `--mt-draft` — Google | **~€13** |
+| `--mt-draft` — LLM half | ~€0.73 |
+
+So machine translation here is the **expensive** option, roughly nine times the
+cost of the entire LLM pipeline it assists. It halves LLM calls, but Google's
+per-character bill dwarfs the saving.
+
+That means it has to earn its place on **quality**, not price — and the case
+for it is real but unproven: Google's Slovenian is strong, cheap LLMs are
+comparatively weak on low-resource targets, and post-editing a good draft is
+a different task from translating cold. Whether that shows up as a Rubric T
+gain is a measurement, not an opinion:
+
+```bash
+berilo translate corpus/build/berilo-sample-standard.epub --to sl --style revise_v1
+berilo eval corpus/build/berilo-sample-standard.sl.epub --sample 40 --seed 42
+# then the same two commands with --mt-draft, and compare the scores and CIs
+```
+
+Run that on the sample corpus (~€0.13 of LLM plus ~€1 of Google) before
+spending €13 on a book you care about. Costs are reported separately —
+character-billed MT spend never hides inside the token arithmetic.
 
 ## Reader app (Phase 2, Android / Boox)
 
