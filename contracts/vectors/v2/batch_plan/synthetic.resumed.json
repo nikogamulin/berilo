@@ -1,0 +1,90 @@
+{
+  "counts": {
+    "batches": 6,
+    "cached_segments": 4,
+    "empty_segments": 1,
+    "skipped_segments": 0,
+    "waves": 2
+  },
+  "inputs": {
+    "batch_size": 10,
+    "cached_segment_ids": [
+      "c0-p0",
+      "c0-p1",
+      "c1-p10",
+      "c1-p9"
+    ],
+    "concurrency": 4,
+    "context_pairs": 2,
+    "skip_segment_ids": []
+  },
+  "name": "resumed",
+  "waves": [
+    {
+      "batches": [
+        [
+          "c0-p2",
+          "c0-p3",
+          "c0-p4",
+          "c0-p5",
+          "c0-p6"
+        ],
+        [
+          "c1-p0",
+          "c1-p1",
+          "c1-p2",
+          "c1-p3"
+        ],
+        [
+          "c1-p5",
+          "c1-p6",
+          "c1-p7",
+          "c1-p8"
+        ]
+      ],
+      "context_segment_ids": [
+        "c0-p0",
+        "c0-p1"
+      ],
+      "preceding_cache_hit_ids": [
+        "c0-p0",
+        "c0-p1"
+      ]
+    },
+    {
+      "batches": [
+        [
+          "c1-p11",
+          "c1-p12",
+          "c1-p13",
+          "c1-p14",
+          "c1-p15",
+          "c1-p16",
+          "c1-p17",
+          "c1-p18",
+          "c1-p19",
+          "c1-p20"
+        ],
+        [
+          "c1-p21",
+          "c1-p22",
+          "c1-p23",
+          "c1-p24"
+        ],
+        [
+          "c2-p0",
+          "c2-p1",
+          "c2-p2"
+        ]
+      ],
+      "context_segment_ids": [
+        "c1-p9",
+        "c1-p10"
+      ],
+      "preceding_cache_hit_ids": [
+        "c1-p9",
+        "c1-p10"
+      ]
+    }
+  ]
+}

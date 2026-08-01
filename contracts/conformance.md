@@ -37,7 +37,7 @@ diverges.
 |---|---|---|---|---|
 | 1 | Identity | by construction | **gated** — `IdentityFixtureTest`, `SegmentIdentityTest` | **gated** — `IdentityFixtureTests` |
 | 2 | Prompts | by construction | **gated** — `PromptTextTest` *(see §5)* | port present, not gated |
-| 3 | Markers & batching | by construction | not gated | not gated |
+| 3 | Markers & batching | by construction | vectors published (`v2`), port not yet asserting | vectors published (`v2`), port not yet asserting |
 | 4 | Models & pricing | by construction | not gated | not gated |
 | 5 | Normalization | by construction | not gated | not gated |
 | 6 | EPUB writer determinism | by construction | **gated** — `EpubWriterByteIdentityTest` | in progress |
@@ -58,6 +58,9 @@ release tag.
   deliberately.
 - A release is a git tag on this repository, `contracts-v<N>`, where `<N>` is
   the directory integer.
+- `v2` is the first release to carry Surface 3 (`batch_plan/`). It does **not**
+  supersede `v1`: the identity and assemble vectors still live there, and a port
+  vendoring `v1` keeps working. Moving to `v2` is what buys the batching gate.
 - Each port **vendors** its own copy under its test resources, so its suite runs
   offline. That copy going stale is the failure mode this numbering exists to
   make visible.
@@ -78,6 +81,7 @@ repository can only reach a checkout that has already gone stale.
 |---|---|---|
 | `gen/generate_assemble_vectors.py` | `vectors/v1/assemble/` | 6 |
 | `berilo.identity_fixture` (a package module, since its output is also tested here) | `vectors/v1/identity/` | 1 |
+| `gen/generate_batch_plan_vectors.py` | `vectors/v2/batch_plan/` | 3 |
 
 **Still outside this directory,** and to be moved when the repository holding
 them has committed its in-flight work: `berilo-ios/tools/gen_identity_fixtures.py`,
