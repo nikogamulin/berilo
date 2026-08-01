@@ -213,6 +213,21 @@ So machine translation here is the **expensive** option, roughly nine times the
 cost of the entire LLM pipeline it assists. It halves LLM calls, but Google's
 per-character bill dwarfs the saving.
 
+**What is measured so far, on the smoke corpus (46 segments of real book
+prose):** Google's drafts came back **100 % complete** (46/46, none empty) with
+**100 % inline-markup retention** (10/10 `em`/`strong`/`i`/`b` tags, and all 4
+marked-up segments preserved exactly) at **16 ms/segment** — about 44× faster
+than the LLM's drafting call. Measured spend was €0.3173 for 17 242 characters,
+which extrapolates to ≈ €13.15 for a 715k-character book and is where the table
+above comes from.
+
+So the *structural* risk of machine translation — dropped segments, mangled
+italics — did not materialize. What is **not** yet measured is the part that
+matters most: whether post-editing a Google draft scores better or worse on
+Rubric T's meaning (T2) and fluency (T3) dimensions than translating cold. Those
+need a judge model, and until that run happens this feature is a well-built
+hypothesis.
+
 That means it has to earn its place on **quality**, not price — and the case
 for it is real but unproven: Google's Slovenian is strong, cheap LLMs are
 comparatively weak on low-resource targets, and post-editing a good draft is

@@ -1,5 +1,23 @@
 # Findings register (Tier 2)
 
+- [2026-08-01] **Google Translate's structural fidelity is not the risk; its
+  price is.** Measured over 46 segments of real book prose from the smoke
+  corpus, v2 with `format=html` returned 100 % complete drafts (0 empty) and
+  retained 10/10 inline `em`/`strong`/`i`/`b` tags, all 4 marked-up segments
+  exact, at 16 ms/segment against the LLM's ~710. `format=html` is what makes
+  the markup survive — under `format=text` those tags are translated as prose.
+  The cost is the problem: EUR 0.3173 for 17 242 characters extrapolates to
+  ~EUR 13 a book, against ~EUR 1.45 for the entire two-pass LLM pipeline it
+  would assist. **MT is the expensive option here, roughly 9x, so it must be
+  justified on measured T2/T3 quality and never on price.** That measurement
+  still needs a judge model and has not been run.
+- [2026-08-01] **The revise pass was already a post-editor.** `_revise_batch`
+  takes SOURCE + DRAFT and returns revised text, which is exactly
+  machine-translation post-editing. So `--mt-draft` needed no new prompt and no
+  new pass — the MT draft *replaces* the LLM's drafting call, giving one LLM
+  call per batch where a two-pass style makes two. Generalization: before adding
+  a pipeline stage, check whether an existing stage already has its shape.
+
 - [2026-07-25] **Rubric R cannot be scored on this box at all**: no Boox
   attached (`~/Android/Sdk/platform-tools/adb devices` lists none) and no
   emulator installed (`~/Android/Sdk/emulator/` and `~/.android/avd/` do not
