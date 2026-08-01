@@ -37,7 +37,7 @@ diverges.
 |---|---|---|---|---|
 | 1 | Identity | by construction | **gated** — `IdentityFixtureTest`, `SegmentIdentityTest` | **gated** — `IdentityFixtureTests` |
 | 2 | Prompts | by construction | **gated** — `PromptTextTest` *(see §5)* | port present, not gated |
-| 3 | Markers & batching | by construction | vectors published (`v2`), port not yet asserting | vectors published (`v2`), port not yet asserting; **batch composition is a declared exception** (`core-spec.md` §3) |
+| 3 | Markers & batching | by construction | **gated** — `BatchPlanVectorsTest` (batching); markers not gated | vectors published (`v2`), port not yet asserting; **batch composition is a declared exception** (`core-spec.md` §3) |
 | 4 | Models & pricing | by construction | not gated | not gated |
 | 5 | Normalization | by construction | not gated | not gated |
 | 6 | EPUB writer determinism | by construction | **gated** — `EpubWriterByteIdentityTest` | in progress |
