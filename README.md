@@ -121,7 +121,11 @@ Quality rubrics the project optimizes: [`docs/rubric.md`](docs/rubric.md).
 
 ```bash
 cp .env.example .env             # add your OpenAI or Anthropic key
-cd translator && pip install -e .
+
+cd translator
+python3 -m venv .venv            # a venv, not a system install — see below
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -e .
 
 berilo doctor                    # provider smoke test, one sentence, ~€0
 berilo inspect mybook.epub       # extraction preview, no API cost
@@ -140,9 +144,42 @@ Useful flags:
 | `--model gpt-5` | Any model in the pricing table |
 | `--bilingual` | Emit a source + target EPUB |
 | `--skip-back-matter` | Pass index/notes/bibliography through untranslated |
+| `--concurrency 4` | Batches translated at once. `1` is strictly sequential |
+| `--batch-size 20` | Segments per API call |
 | `-o out.epub` | Output path |
 
 Requires Python 3.10+. MOBI input additionally requires Calibre (`ebook-convert`).
+
+**Use a virtualenv rather than a system install.** Recent Homebrew and Linux
+distribution Pythons are "externally managed" and will refuse `pip install -e .`
+outright; worse, if the refusal is worked around, `make test` and the `berilo`
+console script can end up resolving to a *different* interpreter than the one
+the package landed in, so the suite reports import errors that look like bugs in
+the project. The venv above avoids both. Keep it activated for `make test`.
+
+### How long a book takes, and what the two speed flags do
+
+A full-length book is a few thousand segments. The translator sends them in
+**waves**: `--batch-size` segments share one API call, and `--concurrency`
+calls are in flight at once.
+
+Both defaults are measured rather than guessed. On `gpt-5-mini`, twenty segments
+per call bills about a third of the output tokens per segment that ten does,
+because a reasoning model's hidden budget is charged **per call** and a bigger
+batch amortizes it — so the larger batch is both faster and cheaper. Four lanes
+then multiply throughput at an identical call count.
+
+The one thing concurrency trades away is context freshness. Each batch prompt
+carries the previous batches' translations so voice and terminology stay
+continuous, and a wave takes **one snapshot before it runs**, shared by every
+lane — so staleness is bounded to `concurrency × batch-size` segments and never
+depends on which call happens to return first. Terminology does not drift,
+because that is carried by the per-book glossary, which is built once up front
+and injected into every prompt.
+
+If you want the old strictly sequential behaviour — for a reproducible
+comparison, or a provider with a tight rate limit — use `--concurrency 1`. Runs
+are deterministic either way.
 
 ## Reader app (Phase 2, Android / Boox)
 
@@ -176,12 +213,19 @@ went wrong and what they taught — is written up here:
 ## Development
 
 ```bash
-# Translator — 239 tests
-cd translator && pip install -e ".[dev]"
+# Translator
+cd translator
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
 make test && make lint
 
 # The Android app has its own repository and its own dev loop.
 ```
+
+`make test` runs `python3 -m pytest`, so it uses whichever interpreter is on
+your `PATH`. Activate the venv first, or the suite runs against a Python the
+package was never installed into and fails at import — which looks like a broken
+checkout and is not one.
 
 ## Principles
 
