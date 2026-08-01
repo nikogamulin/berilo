@@ -37,6 +37,8 @@ from berilo.providers.base import (
 )
 from berilo.providers.pricing import cost_eur
 from berilo.translate import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
     REASONING_TOKENS_PER_CALL,
     TranslationError,
     TranslationStats,
@@ -1896,3 +1898,29 @@ def test_a_failing_lane_keeps_its_siblings_committed_work() -> None:
             for i in range(4)
         )
     assert stored == 3
+
+
+def test_estimate_uses_the_shared_default_batch_size() -> None:
+    """The estimator and the engine must agree, or Rubric T7's gate lies.
+
+    ``estimate_cost`` is keyed on ``batch_size``, so the dry-run quote a user
+    approves is derived from it. T7 then scores actual spend against that
+    quote — an estimator disagreeing with the engine is Surface 4's stated
+    failure mode, the one bug that spends the user's money without asking.
+    """
+    book = _paragraph_book(40)
+    estimate = estimate_cost(book, model="gpt-5-mini", target_lang="sl")
+
+    assert DEFAULT_BATCH_SIZE == 20
+    assert estimate.batches == 2, "40 segments at batch 20 is 2 calls"
+
+
+def test_batching_constants_are_reachable_from_berilo_translate() -> None:
+    """`berilo-cloud`'s worker imports these from here, not from berilo.plan.
+
+    The constants moved to `berilo.plan`, so this pins the re-export. An import
+    that silently stops resolving is exactly how the cloud worker came to be
+    broken against `main` while nothing went red here.
+    """
+    assert DEFAULT_BATCH_SIZE == 20
+    assert DEFAULT_CONCURRENCY == 4
