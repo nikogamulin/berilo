@@ -86,7 +86,7 @@ See [`contracts/core-spec.md`](contracts/core-spec.md).
 
 **Architectural rules:**
 - **BYO API key.** Keys come from `.env`. Never in code, logs, or git.
-- **Cheapest model that does the job** is the default (`gpt-5-mini`); any
+- **Cheapest model that does the job** is the default (`gpt-6-luna`); any
   OpenAI/Anthropic model is selectable. One provider interface, no lock-in.
 - **Meaning preservation over literalism** — the prompt-and-verify design is the
   product.

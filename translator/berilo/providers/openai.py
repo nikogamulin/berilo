@@ -1,6 +1,6 @@
 """OpenAI :class:`~berilo.providers.base.LLMClient` implementation.
 
-Default model per the product spec is ``gpt-5-mini``; users may override via
+Default model is ``gpt-6-luna``, the cheapest GPT-6 model; users may override via
 ``.env`` / ``--model``. Wraps the official ``openai`` SDK's chat completions
 API, with exponential-backoff retry on transient errors and per-call token +
 EUR cost accounting.
@@ -24,10 +24,10 @@ from berilo.providers.pricing import cost_eur
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-6-luna"
 
 #: Model families that accept the ``reasoning_effort`` parameter.
-_REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_REASONING_PREFIXES = ("gpt-5", "gpt-6", "o1", "o3", "o4")
 
 #: Transient/retryable OpenAI SDK exceptions: rate limits, timeouts,
 #: connection drops, and 5xx server errors. Authentication/bad-request/

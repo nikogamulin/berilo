@@ -180,7 +180,7 @@ def test_load_config_defaults_when_nothing_set(monkeypatch: pytest.MonkeyPatch) 
 
     assert config.openai_api_key is None
     assert config.anthropic_api_key is None
-    assert config.translation_model == "gpt-5-mini"
+    assert config.translation_model == "gpt-6-luna"
     assert config.judge_model == "gpt-5-mini"
     assert config.target_lang == "sl"
 

@@ -15,7 +15,7 @@ from dotenv import dotenv_values
 
 #: Cheapest model that does the job (CLAUDE.md §2) — the default for both
 #: translation and judge calls unless overridden.
-DEFAULT_TRANSLATION_MODEL = "gpt-5-mini"
+DEFAULT_TRANSLATION_MODEL = "gpt-6-luna"
 DEFAULT_JUDGE_MODEL = "gpt-5-mini"
 DEFAULT_TARGET_LANG = "sl"
 
@@ -26,7 +26,7 @@ ENV_JUDGE_MODEL = "BERILO_JUDGE_MODEL"
 ENV_TARGET_LANG = "BERILO_TARGET_LANG"
 ENV_REASONING_EFFORT = "BERILO_REASONING_EFFORT"
 
-#: Default reasoning effort for OpenAI reasoning models (gpt-5*/o*).
+#: Default reasoning effort for OpenAI reasoning models (gpt-5*/gpt-6*/o*).
 #: Translation is not a deep-reasoning task: at the default effort gpt-5-mini
 #: burned ~4× the estimated cost in hidden reasoning tokens (S1.8 run,
 #: 2026-07-24) — "low" keeps quality for translation while cutting cost and

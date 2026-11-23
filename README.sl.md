@@ -67,7 +67,7 @@ Konkretno:
 **Anthropic** (alternativa) — <https://console.anthropic.com/settings/keys>
 → *Create Key* → prilepi v `.env` kot `ANTHROPIC_API_KEY`.
 
-Dovolj je en ponudnik. Privzeti model je `gpt-5-mini`; vsak model lahko zamenjaš
+Dovolj je en ponudnik. Privzeti model je `gpt-6-luna`; vsak model lahko zamenjaš
 z zastavico `--model`.
 
 ## Koliko stane

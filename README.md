@@ -67,7 +67,7 @@ Concretely:
 **Anthropic** (alternative) — <https://console.anthropic.com/settings/keys>
 → *Create Key* → paste into `.env` as `ANTHROPIC_API_KEY`.
 
-One provider is enough. Default model is `gpt-5-mini`; every model is
+One provider is enough. Default model is `gpt-6-luna`; every model is
 user-selectable with `--model`.
 
 ## What it costs
